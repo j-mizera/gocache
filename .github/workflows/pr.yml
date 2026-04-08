@@ -43,7 +43,7 @@ jobs:
         run: go build ./...
 
   test:
-    name: Test
+    name: Unit + Integration Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +52,20 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Run tests
-        run: go test -race -coverprofile=coverage.out ./...
+      - name: Unit tests
+        run: go test -race -count=1 ./pkg/cache/... ./pkg/evaluator/... ./pkg/resp/... ./pkg/plugin/... ./pkg/blocking/... ./pkg/clientctx/... ./pkg/config/... ./pkg/engine/... ./pkg/persistence/... ./pkg/transaction/... ./pkg/watch/... ./pkg/workers/...
 
-      - name: Coverage summary
-        run: go tool cover -func=coverage.out | tail -1
+      - name: Integration tests
+        run: go test -race -count=1 -v -run 'TestIT_' ./pkg/server/...
+
+      - name: Full coverage
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          echo "### Coverage by package" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | grep -E 'total:|^gocache/pkg/[^/]+\s' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tail -1
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
