@@ -1,0 +1,102 @@
+@startuml sequence_transaction
+!include ../../../design/theme.iuml
+
+mainframe **sd** MULTI/EXEC/DISCARD Transaction Flow
+
+actor Client
+    participant "Evaluator" as Evaluator
+    participant "Transaction\nManager" as TxMgr
+    participant "ClientContext" as ClientCtx
+    participant "Engine" as Engine
+    participant "Cache" as Cache
+
+    == MULTI: Begin Transaction ==
+
+    Client -> Evaluator : MULTI
+    Evaluator -> TxMgr : Multi(ctx)
+
+    alt Already in transaction
+        TxMgr --> Evaluator : ErrNestedMulti
+        Evaluator --> Client : -ERR MULTI calls can not be nested
+
+    else Not in transaction
+        TxMgr -> ClientCtx : StartTransaction()
+        hnote over ClientCtx
+          InTransaction = true
+          CommandQueue = []
+        end note
+        TxMgr --> Evaluator : "OK"
+        Evaluator --> Client : +OK
+    end
+
+    == Queuing Phase ==
+
+    loop Each command while InTransaction
+        Client -> Evaluator : SET key value (or any command)
+        Evaluator -> Evaluator : Check: ctx.InTransaction\n&& op != MULTI/EXEC/DISCARD
+
+        alt Command is QUIT
+            Evaluator --> Client : +OK (close connection)
+
+        else Any other command
+            Evaluator -> ClientCtx : EnqueueCommand([op, args...])
+            hnote over ClientCtx : CommandQueue = append(queue, parts)
+            Evaluator --> Client : +QUEUED
+        end
+    end
+
+    == EXEC: Atomic Execution ==
+
+    Client -> Evaluator : EXEC
+
+    alt Not in transaction
+        Evaluator --> Client : -ERR EXEC without MULTI
+
+    else In transaction
+        Evaluator -> ClientCtx : InTransaction = false
+        Evaluator -> ClientCtx : Drain CommandQueue
+
+        Evaluator -> Engine : DispatchWithResult(batchFn)
+
+        hnote over Engine
+          Single command on cmdChan
+          holds cache lock for entire batch
+        end note
+
+        Engine -> Cache : cache.Lock()
+        activate Cache
+
+        loop For each queued command
+            Engine -> Evaluator : evaluateInternal(op, args, inBatch=true)
+            Evaluator -> Cache : Execute handler (e.g. SET, GET)
+            Cache --> Evaluator : individual result
+        end
+
+        Engine -> Cache : cache.Unlock()
+        deactivate Cache
+
+        Engine --> Evaluator : []results via ResChan
+        Evaluator --> Client : *N (RESP Array of results)
+    end
+
+    == DISCARD: Abort Transaction ==
+
+    Client -> Evaluator : DISCARD
+
+    alt Not in transaction
+        Evaluator -> TxMgr : Discard(ctx)
+        TxMgr --> Evaluator : ErrDiscardWithoutMulti
+        Evaluator --> Client : -ERR DISCARD without MULTI
+
+    else In transaction
+        Evaluator -> TxMgr : Discard(ctx)
+        TxMgr -> ClientCtx : ResetTransaction()
+        hnote over ClientCtx
+          InTransaction = false
+          CommandQueue = nil
+        end note
+        TxMgr --> Evaluator : "OK"
+        Evaluator --> Client : +OK
+    end
+
+@enduml

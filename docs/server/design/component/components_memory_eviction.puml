@@ -1,0 +1,72 @@
+@startuml components_memory_eviction
+!include ../../../design/theme.iuml
+
+mainframe **cmp** Memory Management & LRU Eviction
+
+package "Cache Internals" {
+    component "items\nmap[string]*Entry" as Items
+    component "ttl\nmap[string]int64" as TTL
+    component "sizes\nmap[string]int64" as Sizes
+    component "lruList\ncontainer/list.List" as LRU
+    component "lruMap\nmap[string]*Element" as LRUMap
+}
+
+rectangle "Memory Tracking" {
+    component "usedBytes int64" as Used
+    component "maxBytes int64\n(0 = unlimited)" as Max
+}
+
+rectangle "Eviction Policy" {
+    component "EvictionLRU\nallkeys-lru" as LRUPolicy
+    component "EvictionNone\nnoeviction" as NoEviction
+}
+
+rectangle "RawSet Flow" as SetFlow {
+    component "1. estimateSize(key, value)" as EstSize
+    component "2. Check usedBytes + delta > maxBytes" as Check
+    component "3a. evictLRU(delta)" as Evict
+    component "3b. return ErrOutOfMemory" as OOM
+    component "4. setInternal(key, value, exp)" as Store
+}
+
+EstSize -down-> Check
+Check -down-> Evict : policy = LRU
+Check -down-> OOM : policy = noeviction
+Evict -down-> Store
+Check -down-> Store : within limit
+
+rectangle "evictLRU Loop" as EvictLoop {
+    component "lruList.Back()" as Back
+    component "delete(evictKey)" as Del
+}
+
+Evict --> Back : while over limit
+Back --> Del : remove oldest entry
+
+rectangle "estimateSize" as SizeCalc {
+    component "entryOverhead = 128 bytes" as Overhead
+    component "+ len(key)" as KeyLen
+    component "+ type-specific value size" as ValSize
+}
+
+note bottom of SizeCalc
+  string: len(s)
+  list: sum(len(s) + 16) per element
+  hash: sum(len(k) + len(v) + 32) per pair
+  set: sum(len(k) + 16) per member
+  zset: EstimateSize() method
+end note
+
+LRU -[hidden]down- LRUMap
+Items -[hidden]right- TTL
+TTL -[hidden]right- Sizes
+
+note as N1
+  **LRU Ordering:**
+  Front = most recently used
+  Back = least recently used
+  Every RawGet/setInternal
+  moves key to front
+end note
+
+@enduml

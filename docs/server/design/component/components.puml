@@ -1,0 +1,88 @@
+@startuml components
+!include ../../../design/theme.iuml
+
+frame "GoCache HLD System Diagram" as F {
+
+    rectangle "Server Process Boundary" as server_proc {
+
+        rectangle "Session Boundary" as session {
+            component [TCP Listener] as ServiceEntry <<Transport>>
+            component [RESP Handler] as ProtocolHandler <<Protocol>>
+        }
+
+        rectangle "Evaluator Boundary" as eval {
+            component [Evaluator] as Evaluator <<Dispatch>>
+            component [Hook Executor] as HookExec <<Pre/Post Hooks>>
+            component [Command Router] as CmdRouter <<Plugin Commands>>
+        }
+
+        rectangle "Engine Boundary" as eng {
+            component [Engine\n(serial dispatch)] as Engine <<Serialization>>
+            component [Transaction\nManager] as TransactionMgr <<Engine>>
+            component [Watch Manager] as WatchMgr <<Optimistic Locking>>
+        }
+
+        rectangle "Storage Boundary" as storage {
+            component [Persistence\nManager] as PersistenceMgr <<Snapshots>>
+            component [Cache\n(in-memory)] as InMemCache <<In-Memory>>
+        }
+
+        rectangle "Plugin Management" as plugin_boundary {
+            component [Plugin Manager] as PluginMgr <<Lifecycle>>
+            component [Hook Registry] as HookReg <<Pattern Match>>
+            component [PluginConn\n(multiplexed)] as PluginConn <<IPC>>
+        }
+
+        rectangle "Configuration Boundary" as config_boundary {
+            component [Configuration\nLoader] as ConfigurationLoader <<Config>>
+            component [Service\nConfiguration] as ServiceConfiguration <<Config>>
+        }
+
+        rectangle "Background Workers" as workers {
+            component [Snapshot Worker] as SnapshotWorker <<Periodic>>
+            component [TTL Cleanup] as TTLWorker <<Expiry>>
+        }
+    }
+
+    rectangle "Server-Plugin Communication" as comm {
+        component [GCPC v1\nProtocol] as ProtoProtocol <<Protobuf>>
+        component [Unix Socket] as UnixSock <<Transport>>
+    }
+
+    rectangle "Plugin Process Boundary" as plugin_proc {
+        component [Plugin SDK\n(Run loop)] as PluginSDK <<Client Library>>
+        component [Plugin\nImplementation] as PluginImpl <<User Code>>
+    }
+
+    ' -- Session -> Evaluator --
+    ServiceEntry --> ProtocolHandler : Passes raw bytes
+    ProtocolHandler --> Evaluator : Parsed command + args
+
+    ' -- Evaluator dispatches --
+    Evaluator --> HookExec : Pre/Post hooks
+    Evaluator --> CmdRouter : Plugin commands\n(fallback if not core)
+    Evaluator --> Engine : Core commands
+
+    ' -- Engine -> Cache --
+    Engine --> InMemCache : Lock -> Execute -> Unlock
+    Engine --> TransactionMgr : MULTI/EXEC
+    Engine --> WatchMgr : WATCH/UNWATCH
+
+    ' -- Plugin management --
+    HookExec --> PluginConn : Hook IPC
+    CmdRouter --> PluginConn : Command IPC
+    PluginMgr --> PluginConn : Lifecycle messages
+    HookExec --> HookReg : Pattern match
+
+    ' -- Workers --
+    SnapshotWorker --> PersistenceMgr
+    TTLWorker --> InMemCache
+
+    ' -- IPC --
+    PluginConn --> ProtoProtocol : Length-prefixed framing
+    ProtoProtocol --> UnixSock
+    PluginSDK --> ProtoProtocol : Uses
+    PluginImpl --> PluginSDK : Implements interfaces
+}
+
+@enduml

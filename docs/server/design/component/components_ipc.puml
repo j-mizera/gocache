@@ -1,0 +1,57 @@
+@startuml components_ipc
+!include ../../../design/theme.iuml
+
+frame "GoCache Server-Plugin IPC" as F {
+
+    rectangle "Server Process" as server {
+
+        rectangle "Evaluator" as eval {
+            component [Command Router] as CmdRouter <<Main + REX>>
+            component [Hook Executor] as HookExec <<Pre/Post>>
+        }
+
+        rectangle "Plugin Management" as mgmt {
+            component [Plugin Manager] as PluginMgr <<Lifecycle>>
+            component [Hook Registry] as HookReg <<Pattern + Priority>>
+        }
+
+        rectangle "Shared Connection" as shared {
+            component [PluginConn] as PluginConn <<Multiplexed>>
+            note right of PluginConn
+              Single connection per plugin.
+              Multiplexed by request_id.
+              Shared by Router, Hooks, and Manager.
+              Async write + readLoop dispatch.
+            end note
+        }
+    }
+
+    rectangle "GCPC v1 Protocol" as proto {
+        component [Length-Prefixed\nFraming] as Framing <<4-byte BE + Protobuf>>
+        component [Unix Domain\nSocket] as UDS <<Transport>>
+    }
+
+    rectangle "Plugin Process" as plugin_proc {
+        component [Plugin SDK\n(message loop)] as PluginSDK <<pluginsdk.Run()>>
+        component [Plugin Impl] as PluginImpl <<User Code>>
+    }
+
+    ' -- Server side --
+    CmdRouter --> PluginConn : CommandRequestV1
+    HookExec --> PluginConn : HookRequestV1
+    PluginMgr --> PluginConn : Health/Shutdown
+    HookExec --> HookReg : MatchPre / MatchPost
+
+    ' -- Wire --
+    PluginConn --> Framing : Send/Recv EnvelopeV1
+    Framing --> UDS
+
+    ' -- Plugin side --
+    PluginSDK --> Framing : Send/Recv EnvelopeV1
+    PluginSDK --> PluginImpl : HandleCommand()\nHandleHook()
+
+    ' -- Response flow --
+    PluginSDK ..> PluginConn : CommandResponseV1\nHookResponseV1
+}
+
+@enduml

@@ -1,0 +1,41 @@
+@startuml components_core_plugins
+!include ../../../design/theme.iuml
+
+frame "GoCache - Core + Plugin System Architecture" as F {
+
+    actor "Client" as client <<Redis CLI / App>>
+    cloud "Kafka" as kafka <<Message Queue>>
+
+    rectangle "GoCache Server" as server {
+
+        component [RESP Protocol] as resp <<Parser>>
+
+        rectangle "Core Engine" as core {
+            component [In-Memory\nCache] as cache <<Storage>>
+            component [Command\nDispatcher] as cmd <<Engine>>
+            component [Background\nWorkers] as workers <<TTL / Snapshots>>
+        }
+
+        rectangle "Plugin System" as plugin_sys {
+            component [IPC Transport] as ipc <<Unix Socket / Proto>>
+            component [Permission\nLayer] as perm <<Scope & Hooks>>
+            component [Lifecycle Mgr] as lifecycle <<Registry & Health>>
+        }
+    }
+
+    rectangle "Plugin Process (Separate)" as plugin_proc {
+        component [Plugin SDK] as plugin_sdk <<Client Library>>
+        component [Hook Handler] as hooks <<Pre/Post Handlers>>
+    }
+
+    ' -- Relations --
+    client --> resp : RESP commands\n//TCP//
+    resp --> cmd : Dispatch
+    cmd --> cache : Read/Write
+    cmd --> ipc : Plugin commands/hooks
+    ipc --> plugin_sdk : Unix socket + Protobuf
+    plugin_sdk --> hooks : Deliver hooks
+    plugin_sdk ..> kafka : Optional events\n//Async//
+}
+
+@enduml

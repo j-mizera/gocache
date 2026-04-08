@@ -1,0 +1,94 @@
+@startuml sequence_plugin_registration
+!include ../../../design/theme.iuml
+
+mainframe **sd** Plugin Registration Handshake
+
+participant "Plugin Manager" as Mgr
+    participant "OS" as OS
+    participant "Plugin Process\n(fork/exec)" as Proc
+    participant "Plugin SDK\n(pluginsdk.Run)" as SDK
+    participant "UDS Listener" as Listener
+    participant "Transport\nConn" as Conn
+    participant "Command Router" as Router
+    participant "Hook Registry" as HookReg
+    participant "Plugin Registry" as PluginReg
+
+    == Discovery ==
+
+    Mgr -> Mgr : Discover(cfg)\nScan plugin dir for executables\nApply YAML overrides
+    Mgr -> PluginReg : Add(PluginInstance)\nState = Loaded
+
+    == Launch ==
+
+    Mgr -> OS : exec.CommandContext(binPath)\nenv: GOCACHE_PLUGIN_SOCK=<path>
+    OS -> Proc : Fork/Exec
+    Mgr -> PluginReg : SetState(Starting)
+
+    == Connect ==
+
+    Proc -> SDK : pluginsdk.Run(ctx, plugin)
+    SDK -> SDK : os.Getenv("GOCACHE_PLUGIN_SOCK")
+    SDK -> Listener : net.Dial("unix", sockPath)
+    Listener -> Conn : Accept -> transport.NewConn()
+
+    == Registration ==
+
+    SDK -> SDK : Detect interfaces:\nCommandPlugin? HookPlugin?
+
+    SDK -> Conn : Send RegisterV1
+    note right
+      RegisterV1 {
+        name: "pubsub"
+        version: "1.0.0"
+        critical: false
+        commands: [
+          {name: "PUBLISH", namespaced: false, min_args: 2, max_args: 2},
+          {name: "SUBSCRIBE", namespaced: false, min_args: 1, max_args: -1}
+        ]
+        hooks: [
+          {pattern: "*", phase: POST}
+        ]
+        priority: 5
+      }
+    end note
+
+    Conn -> Mgr : Recv RegisterV1
+
+    alt Plugin name not in registry
+        Mgr -> Conn : RegisterAckV1{accepted: false, reason: "unknown plugin"}
+        Conn -> SDK : Rejected
+        SDK -> Proc : Exit(1)
+    else Known plugin
+        Mgr -> Mgr : Apply YAML overrides\n(critical, priority)
+
+        alt Has commands
+            Mgr -> Router : RegisterPlugin(name, conn, commands)
+
+            alt Shadows core command
+                Router --> Mgr : Error: "cannot shadow core command: GET"
+                Mgr -> Conn : RegisterAckV1{accepted: false}
+                Conn -> SDK : Rejected
+            else
+                Router --> Mgr : OK
+                Router -> Router : Create PluginConn\n(start readLoop)
+            end
+        end
+
+        alt Has hooks
+            Mgr -> HookReg : Register(name, priority, critical, conn, hooks)
+            HookReg -> HookReg : Sort pre/post slices\nby priority
+        end
+
+        Mgr -> PluginReg : SetState(Registered)
+        Mgr -> Conn : RegisterAckV1{accepted: true}
+        Mgr -> PluginReg : SetState(Running)
+
+        Conn -> SDK : Accepted
+
+        == Message Loop ==
+
+        hnote over SDK : Enter message loop:\nHealthCheck, Shutdown,\nCommandRequest, HookRequest
+        hnote over Mgr : Start healthLoop()\nStart readLoop()
+    end
+
+@enduml

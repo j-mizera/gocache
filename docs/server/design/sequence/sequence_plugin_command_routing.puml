@@ -1,0 +1,80 @@
+@startuml sequence_plugin_command_routing
+!include ../../../design/theme.iuml
+
+mainframe **sd** Plugin Command Routing (Main + REX Namespace)
+
+actor "Redis Client" as Client
+    participant "Server\nhandleConnection" as Server
+    participant "Evaluator" as Eval
+    participant "Command Router" as Router
+    participant "PluginConn\n(multiplexed)" as PC
+    participant "Plugin Process\n(pubsub)" as Plugin
+
+    == Main Namespace: PUBLISH (transparent to client) ==
+
+    Client -> Server : *3\r\n$7\r\nPUBLISH\r\n$7\r\nmychan\r\n$5\r\nhello
+
+    Server -> Eval : Evaluate(ctx, "PUBLISH", ["mychan", "hello"])
+
+    Eval -> Eval : handlers["PUBLISH"] -> nil\n(not a core command)
+
+    Eval -> Router : HasCommand("PUBLISH")
+    Router -> Router : lookup("PUBLISH")\nroutes["PUBLISH"] -> PluginRoute{pubsub}
+    Router --> Eval : true
+
+    Eval -> Router : Route(ctx, "PUBLISH", ["mychan", "hello"])
+
+    Router -> Router : Validate arg count\nmin=2, max=2 -> OK
+
+    Router -> Router : requestID = "req-42"
+    Router -> PC : Send(CommandRequestV1{\n  command: "PUBLISH",\n  args: ["mychan", "hello"],\n  request_id: "req-42"\n})
+
+    PC -> Plugin : EnvelopeV1 over Unix socket
+    activate Plugin
+
+    Plugin -> Plugin : HandleCommand(ctx, "PUBLISH", args)\n(goroutine)
+
+    Plugin --> PC : CommandResponseV1{\n  request_id: "req-42",\n  result: Integer(2)\n}
+    deactivate Plugin
+
+    PC -> PC : readLoop dispatches\nby request_id "req-42"
+
+    PC --> Router : EnvelopeV1 via response channel
+
+    Router -> Router : GetCommandResponse()\nInterfaceFromResult -> int(2)
+
+    Router --> Eval : interface{}(2), nil
+
+    Eval --> Server : Result{Value: 2}
+
+    Server -> Server : mapToResp -> :2
+
+    Server --> Client : :2\r\n
+
+    == REX Namespace: KAFKA:PRODUCE ==
+
+    Client -> Server : KAFKA:PRODUCE mytopic "data"
+
+    Server -> Eval : Evaluate(ctx, "KAFKA:PRODUCE", ["mytopic", "data"])
+
+    Eval -> Eval : handlers["KAFKA:PRODUCE"] -> nil
+
+    Eval -> Router : HasCommand("KAFKA:PRODUCE")
+    Router -> Router : lookup("KAFKA:PRODUCE")\nDirect match in routes map
+    Router --> Eval : true
+
+    Eval -> Router : Route(ctx, "KAFKA:PRODUCE", args)
+    note right
+      REX commands are stored with
+      full key "KAFKA:PRODUCE" in
+      the routes map during registration.
+      No runtime parsing needed if
+      direct lookup succeeds.
+    end note
+
+    Router --> Eval : Result from kafka plugin
+
+    Eval --> Server : Result{Value}
+    Server --> Client : RESP response
+
+@enduml

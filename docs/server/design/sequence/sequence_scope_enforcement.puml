@@ -1,0 +1,62 @@
+@startuml sequence_scope_enforcement
+!include ../../../design/theme.iuml
+
+title Runtime Scope Enforcement
+
+participant "Client" as Client
+participant "Evaluator" as Eval
+participant "Hook Executor" as Hooks
+participant "Scope Enforcer" as Enforcer
+participant "Scope Registry" as Reg
+participant "Command Router" as Router
+participant "Plugin (kafka)" as Plugin
+
+== Case 1: Plugin command — scope OK ==
+
+Client -> Eval : KAFKA:PRODUCE mykey value
+Eval -> Eval : No core handler found
+Eval -> Router : Route("KAFKA:PRODUCE", ["mykey", "value"])
+Router -> Enforcer : Check("kafka", op="write", key="mykey")
+Enforcer -> Reg : GetScopes("kafka")
+Reg --> Enforcer : ["write", "keys:kafka:*"]
+Enforcer -> Enforcer : "write" scope? YES\n"mykey" matches "kafka:*"? NO
+Enforcer --> Router : DENIED (key "mykey"\noutside "keys:kafka:*")
+Router --> Eval : Error
+Eval --> Client : -ERR NOPERM plugin 'kafka'\ncannot access key 'mykey'\n(scope: keys:kafka:*)
+
+== Case 2: Plugin command — scope OK ==
+
+Client -> Eval : KAFKA:PRODUCE kafka:events value
+Eval -> Router : Route("KAFKA:PRODUCE", ["kafka:events", "value"])
+Router -> Enforcer : Check("kafka", op="write", key="kafka:events")
+Enforcer -> Reg : GetScopes("kafka")
+Reg --> Enforcer : ["write", "keys:kafka:*"]
+Enforcer -> Enforcer : "write" scope? YES\n"kafka:events" matches "kafka:*"? YES
+Enforcer --> Router : ALLOWED
+Router -> Plugin : CommandRequestV1
+Plugin --> Router : CommandResponseV1
+Router --> Eval : Result
+Eval --> Client : +OK
+
+== Case 3: Hook plugin without hook scope ==
+
+note over Hooks
+  During registration, if a plugin declares hooks
+  but does not have "hook:pre" or "hook:post" scope,
+  the hooks are **silently dropped** (not registered
+  in the hook registry). The plugin still registers
+  its commands normally.
+end note
+
+== Case 4: Plugin tries admin op via internal request ==
+
+note over Enforcer
+  **Future**: If plugins gain the ability to issue
+  cache operations back to the server (read-back),
+  the enforcer checks scopes on those too.
+
+  A "write"-scoped plugin calling FLUSHDB
+  internally would be denied — needs "admin".
+end note
+
+@enduml

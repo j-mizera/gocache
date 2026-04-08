@@ -1,0 +1,83 @@
+@startuml sequence_persistence
+!include ../../../design/theme.iuml
+
+mainframe **sd** Snapshot Persistence Flow
+
+participant "SnapshotWorker" as Worker
+participant "Engine\n(serial dispatch)" as Engine
+participant "Cache" as Cache
+participant "persistence\n(gob codec)" as Persist
+participant "FileSystem" as FS
+actor "main()" as Main
+
+== Save Snapshot (periodic or SNAPSHOT command) ==
+
+Worker -> Engine : Dispatch(fn)
+activate Engine
+
+note over Engine
+  Engine.Run acquires
+  cache.Lock() before
+  executing fn, and
+  cache.Unlock() after.
+end note
+
+Engine -> Persist : SaveSnapshot(filename, cache)
+activate Persist
+
+Persist -> FS : os.Create(filename)
+FS --> Persist : file handle
+
+Persist -> Cache : Range(fn)
+loop For each key
+    Cache --> Persist : key, entry, expiration
+    Persist -> Persist : Collect SnapshotEntry
+end
+
+Persist -> FS : gob.Encode(count)
+note right : Count header first\nso decoder knows how\nmany entries follow
+
+loop For each SnapshotEntry
+    Persist -> FS : gob.Encode(entry)
+end
+
+Persist -> FS : file.Close()
+Persist --> Engine : nil (success)
+deactivate Persist
+
+deactivate Engine
+
+== Load Snapshot (startup, before engine starts) ==
+
+Main -> Persist : LoadSnapshot(filename, cache)
+activate Persist
+
+Persist -> FS : os.Open(filename)
+
+alt File not found
+    FS --> Persist : ErrNotExist
+    Persist --> Main : nil (skip silently)
+else File exists
+    FS --> Persist : file handle
+    Persist -> Cache : Clear()
+
+    Persist -> FS : gob.Decode(&count)
+
+    loop count times
+        Persist -> FS : gob.Decode(&entry)
+
+        alt entry.Expiration > 0 && expired
+            Persist -> Persist : Skip (don't load)
+        else valid
+            Persist -> Cache : RawLoad(key, value, exp)
+            note right : Bypasses memory limit\nand OnMutate callback
+        end
+    end
+
+    Persist -> FS : file.Close()
+    Persist --> Main : nil (success)
+end
+
+deactivate Persist
+
+@enduml

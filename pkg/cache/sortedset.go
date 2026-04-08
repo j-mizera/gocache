@@ -1,0 +1,139 @@
+package cache
+
+import "sort"
+
+// SortedSet represents a sorted set with members and scores
+type SortedSet struct {
+	members map[string]float64 // member -> score
+}
+
+// NewSortedSet creates a new sorted set
+func NewSortedSet() *SortedSet {
+	return &SortedSet{
+		members: make(map[string]float64),
+	}
+}
+
+// Add adds or updates a member with a score
+// Returns true if the member was newly added, false if updated
+func (zset *SortedSet) Add(member string, score float64) bool {
+	_, exists := zset.members[member]
+	zset.members[member] = score
+	return !exists
+}
+
+// Remove removes a member
+// Returns true if the member existed and was removed
+func (zset *SortedSet) Remove(member string) bool {
+	_, exists := zset.members[member]
+	if exists {
+		delete(zset.members, member)
+	}
+	return exists
+}
+
+// Score returns the score of a member
+// Returns score and true if member exists, 0 and false otherwise
+func (zset *SortedSet) Score(member string) (float64, bool) {
+	score, exists := zset.members[member]
+	return score, exists
+}
+
+// Card returns the cardinality (number of members)
+func (zset *SortedSet) Card() int {
+	return len(zset.members)
+}
+
+// ScoredMember represents a member with its score
+type ScoredMember struct {
+	Member string
+	Score  float64
+}
+
+// GetSortedMembers returns all members sorted by score (ascending)
+func (zset *SortedSet) GetSortedMembers() []ScoredMember {
+	members := make([]ScoredMember, 0, len(zset.members))
+	for member, score := range zset.members {
+		members = append(members, ScoredMember{Member: member, Score: score})
+	}
+
+	sort.Slice(members, func(i, j int) bool {
+		if members[i].Score != members[j].Score {
+			return members[i].Score < members[j].Score
+		}
+		// If scores are equal, sort lexicographically by member
+		return members[i].Member < members[j].Member
+	})
+
+	return members
+}
+
+// Rank returns the rank (0-based index) of a member when sorted by score
+// Returns rank and true if member exists, -1 and false otherwise
+func (zset *SortedSet) Rank(member string) (int, bool) {
+	if _, exists := zset.members[member]; !exists {
+		return -1, false
+	}
+
+	sorted := zset.GetSortedMembers()
+	for i, sm := range sorted {
+		if sm.Member == member {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// Range returns members in the given rank range [start, stop]
+// Negative indices count from the end (-1 is last element)
+func (zset *SortedSet) Range(start, stop int) []ScoredMember {
+	sorted := zset.GetSortedMembers()
+	length := len(sorted)
+
+	if length == 0 {
+		return []ScoredMember{}
+	}
+
+	// Handle negative indices
+	if start < 0 {
+		start = length + start
+	}
+	if stop < 0 {
+		stop = length + stop
+	}
+
+	// Clamp to valid range
+	if start < 0 {
+		start = 0
+	}
+	if stop >= length {
+		stop = length - 1
+	}
+
+	// Check if range is valid
+	if start > stop || start >= length {
+		return []ScoredMember{}
+	}
+
+	return sorted[start : stop+1]
+}
+
+// EstimateSize returns an approximate memory usage in bytes for this sorted set.
+func (zset *SortedSet) EstimateSize() int64 {
+	var size int64
+	for member := range zset.members {
+		size += int64(len(member)) + 24 // 8 bytes float64 score + 16 bytes map overhead
+	}
+	return size
+}
+
+// Count returns the number of members with scores in the given range [min, max]
+func (zset *SortedSet) Count(min, max float64) int {
+	count := 0
+	for _, score := range zset.members {
+		if score >= min && score <= max {
+			count++
+		}
+	}
+	return count
+}

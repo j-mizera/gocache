@@ -1,0 +1,104 @@
+'' GoCache PlantUML Theme
+'' Usage: !include ../../../design/theme.iuml (adjust path as needed)
+
+!define ACCENT       #3B82F6
+!define ACCENT_DARK  #1E40AF
+!define ACCENT_LIGHT #DBEAFE
+!define SURFACE      #F8FAFC
+!define SURFACE_ALT  #F1F5F9
+!define BORDER       #334155
+!define BORDER_LIGHT #94A3B8
+!define TEXT_PRIMARY  #0F172A
+!define TEXT_MUTED    #475569
+!define SUCCESS      #10B981
+!define WARNING      #F59E0B
+!define DANGER       #EF4444
+!define PURPLE       #8B5CF6
+
+' -- Global --
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "JetBrains Mono, Fira Code, Consolas, monospace"
+skinparam defaultFontSize 12
+skinparam defaultFontColor TEXT_PRIMARY
+skinparam roundCorner 8
+skinparam wrapWidth 220
+skinparam minClassWidth 120
+skinparam linetype ortho
+skinparam ranksep 50
+skinparam nodesep 30
+
+' -- Frame --
+skinparam frameBorderColor BORDER
+skinparam frameBackgroundColor #FFFFFF
+skinparam frameFontColor TEXT_PRIMARY
+skinparam frameFontSize 16
+skinparam frameFontStyle bold
+
+' -- Notes --
+skinparam noteBorderColor BORDER_LIGHT
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteFontColor TEXT_PRIMARY
+skinparam noteFontSize 11
+
+' -- Sequence Diagram --
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceArrowColor BORDER
+skinparam sequenceParticipantBorderColor ACCENT_DARK
+skinparam sequenceParticipantBackgroundColor ACCENT_LIGHT
+skinparam sequenceParticipantFontColor TEXT_PRIMARY
+skinparam sequenceParticipantFontStyle bold
+skinparam sequenceParticipantPadding 10
+skinparam sequenceMessageAlignment center
+skinparam sequenceLifeLineBorderColor BORDER_LIGHT
+skinparam sequenceLifeLineBackgroundColor SURFACE_ALT
+skinparam sequenceGroupBorderColor BORDER_LIGHT
+skinparam sequenceGroupBackgroundColor SURFACE
+skinparam sequenceGroupFontColor TEXT_PRIMARY
+skinparam sequenceGroupHeaderFontColor ACCENT_DARK
+skinparam sequenceDividerBorderColor BORDER
+skinparam sequenceDividerBackgroundColor SURFACE_ALT
+skinparam sequenceDividerFontColor ACCENT_DARK
+skinparam sequenceDividerFontStyle bold
+skinparam sequenceBoxBorderColor BORDER_LIGHT
+skinparam sequenceBoxBackgroundColor SURFACE
+skinparam sequenceActorBorderColor ACCENT_DARK
+skinparam sequenceActorBackgroundColor ACCENT_LIGHT
+skinparam sequenceActorFontColor TEXT_PRIMARY
+
+' -- State Diagram --
+skinparam stateBorderColor BORDER
+skinparam stateBackgroundColor SURFACE
+skinparam stateFontColor TEXT_PRIMARY
+skinparam stateArrowColor BORDER
+skinparam stateAttributeFontColor TEXT_MUTED
+skinparam stateMessageAlignment center
+skinparam stateArrowThickness 1
+skinparam statePadding 12
+
+' -- Component / Package --
+skinparam packageBorderColor BORDER
+skinparam packageBackgroundColor SURFACE
+skinparam packageFontColor TEXT_PRIMARY
+skinparam packageFontStyle bold
+skinparam componentBorderColor ACCENT_DARK
+skinparam componentBackgroundColor ACCENT_LIGHT
+skinparam componentFontColor TEXT_PRIMARY
+skinparam componentStyle rectangle
+
+' -- Rectangle / Boundary --
+skinparam rectangleBorderColor BORDER
+skinparam rectangleBackgroundColor SURFACE
+skinparam rectangleFontColor TEXT_PRIMARY
+skinparam rectangleFontStyle bold
+
+' -- Arrow --
+skinparam arrowColor BORDER
+skinparam arrowFontColor TEXT_MUTED
+skinparam arrowFontSize 10
+skinparam arrowMessageAlignment center
+
+' -- Activity / Partition --
+skinparam activityBorderColor BORDER
+skinparam activityBackgroundColor ACCENT_LIGHT
+skinparam activityFontColor TEXT_PRIMARY

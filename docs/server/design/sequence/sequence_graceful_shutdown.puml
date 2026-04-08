@@ -1,0 +1,51 @@
+@startuml sequence_graceful_shutdown
+!include ../../../design/theme.iuml
+
+mainframe **sd** Graceful Shutdown with Plugins
+
+participant "OS Signal" as Signal
+    participant "GoCache Server" as Server
+    participant "Plugin Manager" as PluginMgr
+    participant "Plugin Process" as Plugin
+    participant "Client\nConnections" as Clients
+    participant "Background\nWorkers" as Workers
+
+    Signal -> Server : SIGTERM / SIGINT
+
+    == Step 1: Stop New Connections ==
+
+    Server -> Server : Close listener
+
+    == Step 2: Plugin Shutdown ==
+
+    Server -> PluginMgr : Initiate plugin shutdown
+    PluginMgr -> Plugin : SHUTDOWN (timeout=5s)
+    activate Plugin
+    Plugin -> Plugin : Stop workers
+    Plugin --> PluginMgr : SHUTDOWN_ACK
+    deactivate Plugin
+
+    alt Timeout
+        PluginMgr -[#EF4444]-> Plugin : SIGKILL (force)
+    end
+
+    == Step 3: Wait Clients ==
+
+    Server -> Clients : Wait (timeout=10s)
+    Clients --> Server : All disconnected
+
+    == Step 4: Stop Workers ==
+
+    Server -> Workers : STOP
+
+    == Step 5: Save Snapshot ==
+
+    Server -> Server : persistence.SaveSnapshot()
+
+    == Step 6: Stop Engine ==
+
+    Server -> Server : engine.Stop()
+
+Server --> Signal : Clean exit
+
+@enduml

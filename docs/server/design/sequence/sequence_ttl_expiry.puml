@@ -1,0 +1,59 @@
+@startuml sequence_ttl_expiry
+!include ../../../design/theme.iuml
+
+mainframe **sd** Dual TTL Expiry Strategy
+
+participant "Client" as Client
+participant "Evaluator" as Eval
+participant "Engine" as Engine
+participant "Cache" as Cache
+participant "CleanupWorker" as Worker
+
+== Passive Expiry (on access) ==
+
+Client -> Eval : GET key
+Eval -> Engine : DispatchWithResult(fn)
+activate Engine
+Engine -> Cache : Lock()
+Engine -> Cache : RawGet(key)
+Cache --> Engine : entry, found=true
+Engine -> Cache : TTLInternal(key)
+
+alt TTL expired (now > expiration)
+    Cache --> Engine : (0, ValueExpired)
+    Engine -> Cache : RawDelete(key)
+    Engine --> Eval : nil
+    Eval --> Client : (nil)
+else TTL valid or no TTL
+    Cache --> Engine : (remaining, ValuePresent)
+    Engine --> Eval : entry.Value
+    Eval --> Client : value
+end
+Engine -> Cache : Unlock()
+deactivate Engine
+
+== Active Expiry (background sweep) ==
+
+loop Every cleanup_interval (default 1m)
+    Worker -> Engine : Dispatch(fn)
+    activate Engine
+    Engine -> Cache : Lock()
+    Engine -> Cache : Range(fn)
+    loop For each key in cache
+        alt expiration > 0 && now > expiration
+            Cache -> Cache : RawDelete(key)
+            note right : Removes from items,\nttl, lruMap, sizes
+        end
+    end
+    Engine -> Cache : Unlock()
+    deactivate Engine
+end
+
+note over Client, Worker
+  **Dual strategy ensures:**
+  - Passive: expired keys never returned to clients
+  - Active: memory reclaimed even for unaccessed keys
+  - Both execute under engine lock (serialized)
+end note
+
+@enduml
