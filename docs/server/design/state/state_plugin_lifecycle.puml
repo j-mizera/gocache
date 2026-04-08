@@ -1,0 +1,58 @@
+@startuml state_plugin_lifecycle
+!include ../../../design/theme.iuml
+
+frame "Plugin Lifecycle & Failure States" as F {
+
+    state "Loaded" as Loaded : Config scanned\nfrom directory or YAML
+
+    state "Starting" as Starting : Fork/Exec process
+
+    state "Connected" as Connected : IPC socket established
+
+    state "Registered" as Registered : Sends REGISTER\nAnnounces capabilities
+
+    state "Running" as Running : Ready for\ncommands and hooks
+
+    state "HealthCheck" as HealthCheck : Every 10s
+
+    state "Healthy" as Healthy : OK
+
+    state "Unhealthy" as Unhealthy : Timeout or no response\n--\n**Critical:** crash server\n**Non-Critical:** restart
+
+    state "Restarting" as Restarting : Kill and fork new\n(non-critical only)
+
+    state "Shutdown Sequence" as ShutdownSeq {
+        state "ShuttingDown" as ShuttingDown : Sends SHUTDOWN
+        state "AwaitWorkers" as StopWorkers : Waits for plugin\nworkers (5s timeout)
+        state "Acked" as Acked : SHUTDOWN_ACK received\nIPC closed, process exited
+
+        [*] --> ShuttingDown
+        ShuttingDown --> StopWorkers
+        StopWorkers --> Acked
+        Acked --> [*]
+    }
+
+    [*] --> Loaded
+
+    Loaded --> Starting
+    Starting --> Connected
+    Connected --> Registered
+    Registered --> Running
+
+    Running --> HealthCheck : Check
+    Running --> ShutdownSeq : Shutdown
+
+    HealthCheck --> Healthy : OK
+    HealthCheck --> Unhealthy : Fail
+
+    Healthy --> Running
+
+    Unhealthy -[#EF4444]-> Restarting : Non-crit
+    Unhealthy -[#EF4444,bold]-> [*] : Critical
+
+    Restarting --> Starting
+
+    ShutdownSeq --> [*]
+}
+
+@enduml

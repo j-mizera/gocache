@@ -1,0 +1,60 @@
+@startuml components_command_routing
+!include ../../../design/theme.iuml
+
+frame "Plugin Command Registration & Routing" as F {
+
+    rectangle "Evaluator (pkg/evaluator)" as eval {
+        component [Handler Map\n(69 core commands)] as CoreHandlers <<map[string]CommandHandler>>
+        component [Plugin Router\nFallback] as Fallback <<if handler not found>>
+    }
+
+    rectangle "Command Router (pkg/plugin/router)" as router {
+        component [Route Table] as RouteTable <<map[string]*PluginRoute>>
+        component [REX Parser] as REX <<split on first ':'>>
+        component [Shadow Guard] as Shadow <<rejects core overlap>>
+    }
+
+    rectangle "Plugin Connections" as conns {
+        component [PluginConn\n"pubsub"] as PC1 <<multiplexed>>
+        component [PluginConn\n"kafka"] as PC2 <<multiplexed>>
+    }
+
+    rectangle "Plugin Processes" as procs {
+        component [pubsub plugin] as P1 <<non-critical\nPUBLISH, SUBSCRIBE>>
+        component [kafka plugin] as P2 <<non-critical\nKAFKA:PRODUCE, KAFKA:CONSUME>>
+    }
+
+    cloud "Redis Client" as client
+
+    ' -- Dispatch flow --
+    client --> CoreHandlers : RESP command
+    CoreHandlers --> Fallback : Handler not found
+
+    Fallback --> RouteTable : HasCommand(op)?
+    RouteTable --> REX : Try direct,\nthen split "PLUGIN:CMD"
+
+    ' -- Registration --
+    Shadow ..> CoreHandlers : Validates no overlap\nwith 69 core commands
+    Shadow ..> RouteTable : Validates no duplicate\nacross plugins
+
+    ' -- IPC --
+    RouteTable --> PC1 : "PUBLISH" -> pubsub
+    RouteTable --> PC2 : "KAFKA:PRODUCE" -> kafka
+    PC1 --> P1 : CommandRequestV1\n(Unix socket)
+    PC2 --> P2 : CommandRequestV1\n(Unix socket)
+
+    note bottom of RouteTable
+      **Main namespace** (no prefix):
+        PUBLISH -> pubsub plugin
+        SUBSCRIBE -> pubsub plugin
+        GEOADD -> geo plugin
+      Standard Redis clients work transparently.
+
+      **REX namespace** (PLUGIN:CMD):
+        KAFKA:PRODUCE -> kafka plugin
+        KAFKA:CONSUME -> kafka plugin
+      Plugin-specific commands.
+    end note
+}
+
+@enduml

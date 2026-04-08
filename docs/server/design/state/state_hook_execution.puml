@@ -1,0 +1,64 @@
+@startuml state_hook_execution
+!include ../../../design/theme.iuml
+
+frame "Hook Execution State Machine" as F {
+
+    state "Pre-Hook Chain" as PreChain {
+
+        state "MatchPre" as MatchPre : Registry.MatchPre(command)\nReturns priority-sorted entries\nor nil (zero-cost exit)
+
+        state "FireNonCritical" as FireNC : For each non-critical match:\ngoroutine SendFireAndForget()\nNo wait, no response expected
+
+        state "CriticalLoop" as CritLoop : For each critical match\n(priority order, sequential)
+
+        state "SendCritical" as SendCrit : PluginConn.Send(HookRequestV1)\nWait for HookResponseV1\nwith timeout
+
+        state "CheckDeny" as CheckDeny : deny == true?
+
+        state "Denied" as Denied : Return PreHookResult\n{Denied: true, DenyReason}\nCommand aborted
+
+        state "Allowed" as Allowed : Return PreHookResult\n{Denied: false}\nCommand proceeds
+
+        state "FailOpen" as FailOpen : Timeout or error\nLog warning\nContinue (allow)
+
+        [*] --> MatchPre
+        MatchPre --> [*] : No matches\n(nil — zero cost)
+        MatchPre --> FireNC : Has matches
+        FireNC --> CritLoop
+        CritLoop --> SendCrit : Next critical hook
+        SendCrit --> CheckDeny : Response received
+        SendCrit --> FailOpen : Timeout / error
+        FailOpen --> CritLoop : Next
+        CheckDeny --> Denied : deny=true
+        CheckDeny --> CritLoop : deny=false, next
+        CritLoop --> Allowed : All critical done
+        Denied --> [*]
+        Allowed --> [*]
+    }
+
+    --
+
+    state "Post-Hook Chain" as PostChain {
+
+        state "MatchPost" as MatchPost : Registry.MatchPost(command)\nReturns priority-sorted entries\nor nil (zero-cost exit)
+
+        state "FireNCPost" as FireNCPost : For each non-critical match:\ngoroutine SendFireAndForget()\nIncludes result_value, result_error
+
+        state "CritLoopPost" as CritLoopPost : For each critical match\n(priority order, sequential)
+
+        state "SendCritPost" as SendCritPost : PluginConn.Send(HookRequestV1)\nWait for HookResponseV1 (ack)\nPost-hooks cannot deny
+
+        state "Done" as Done : All hooks fired\nReturn to evaluator
+
+        [*] --> MatchPost
+        MatchPost --> [*] : No matches
+        MatchPost --> FireNCPost : Has matches
+        FireNCPost --> CritLoopPost
+        CritLoopPost --> SendCritPost : Next critical hook
+        SendCritPost --> CritLoopPost : Ack received or timeout
+        CritLoopPost --> Done : All done
+        Done --> [*]
+    }
+}
+
+@enduml

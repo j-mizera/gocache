@@ -1,0 +1,33 @@
+server:
+  address: "0.0.0.0"
+  port: 6379
+
+persistence:
+  snapshot_file: "snapshot.dat"
+  snapshot_interval: 5m
+  load_on_startup: true
+
+memory:
+  max_memory_mb: 1024
+  eviction_policy: "lru"  # options: lru, random, none
+
+workers:
+  cleanup_interval: 1m
+
+# plugins:
+#   enabled: false
+#   dir: "bin/plugins"
+#   socket_path: "/tmp/gocache-plugins.sock"
+#   health_interval: 10s
+#   shutdown_timeout: 5s
+#   max_restarts: 3
+#   connect_timeout: 10s
+#   overrides:
+#     auth:
+#       critical: true
+#       priority: 1
+#       scopes: ["hook:pre", "read"]
+#     kafka:
+#       critical: false
+#       priority: 5
+#       scopes: ["write", "keys:kafka:*"]

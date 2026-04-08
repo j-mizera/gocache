@@ -1,0 +1,37 @@
+@startuml components_permission_priority
+!include ../../../design/theme.iuml
+
+frame "Plugin Hook & Priority System" as F {
+
+    rectangle "Hook System" as hook_sys {
+        component [Hook Registry] as hook_reg <<Pattern Match>>
+        component [Hook Executor] as hook_exec <<Sync/Async Dispatch>>
+        component [PluginConn\n(multiplexed)] as pconn <<IPC>>
+    }
+
+    rectangle "Plugins" as plugins {
+        component [Auth Plugin] as auth <<critical\npriority=1\nhooks=*:PRE>>
+        component [AOF Plugin] as aof <<critical\npriority=5\nhooks=SET,DEL:POST>>
+        component [Audit Logger] as audit <<non-critical\npriority=10\nhooks=*:PRE+POST>>
+    }
+
+    ' -- Executor flow --
+    hook_exec --> hook_reg : MatchPre / MatchPost\n(returns priority-sorted)
+    hook_exec --> pconn : HookRequestV1
+
+    ' -- Priority dispatch --
+    pconn --> auth : Priority 1 (first)
+    pconn --> aof : Priority 5 (second)
+    pconn --> audit : Priority 10 (last)
+
+    note bottom of hook_exec
+      **Critical hooks**: blocking, sequential by priority.
+      Server waits for HookResponseV1.
+      Pre-hook can deny (abort command).
+
+      **Non-critical hooks**: fire-and-forget.
+      SendFireAndForget() — no wait.
+    end note
+}
+
+@enduml

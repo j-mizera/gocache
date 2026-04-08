@@ -1,0 +1,54 @@
+@startuml components_core
+!include ../../../design/theme.iuml
+
+frame "GoCache Core System HLD" as F {
+
+    rectangle "CORE Boundary" as core {
+
+        rectangle "Session Boundary" as session {
+            component [TCP Listener] as ServiceEntry <<Transport>>
+            component [RESP Handler] as ProtocolHandler <<Protocol>>
+        }
+
+        rectangle "Evaluator Boundary" as eval {
+            component [Evaluator] as Evaluator <<Dispatch>>
+            component [Hook Executor] as HookExec <<Pre/Post Hooks>>
+            component [Command Router] as CmdRouter <<Plugin Fallback>>
+        }
+
+        rectangle "Engine Boundary" as eng {
+            component [Engine\n(serial dispatch)] as Engine <<Serialization>>
+            component [Transaction\nManager] as TransactionMgr <<MULTI/EXEC>>
+            component [Watch Manager] as WatchMgr <<WATCH/UNWATCH>>
+            component [Blocking Registry] as BlockingReg <<BLPOP/BRPOP>>
+        }
+
+        rectangle "Storage Boundary" as storage {
+            component [Persistence\nManager] as PersistenceMgr <<gob Snapshots>>
+            component [Cache\n(in-memory)] as InMemCache <<Maps + LRU>>
+        }
+
+        rectangle "Background Workers" as workers {
+            component [Snapshot Worker] as SnapshotWorker <<Periodic>>
+            component [TTL Cleanup] as TTLWorker <<Active Expiry>>
+        }
+    }
+
+    ' -- Relations --
+    ServiceEntry --> ProtocolHandler : Raw bytes
+    ProtocolHandler --> Evaluator : Parsed command
+
+    Evaluator --> HookExec : Pre/Post hooks
+    Evaluator --> CmdRouter : Plugin fallback
+    Evaluator --> Engine : Core commands
+    Evaluator --> TransactionMgr : MULTI/EXEC/DISCARD
+
+    Engine --> InMemCache : Lock -> fn() -> Unlock
+    Engine --> WatchMgr : Mutation notify
+    Engine --> BlockingReg : Unblock waiters
+
+    SnapshotWorker --> PersistenceMgr : Periodic save
+    TTLWorker --> InMemCache : Sweep expired
+}
+
+@enduml

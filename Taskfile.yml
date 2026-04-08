@@ -1,0 +1,121 @@
+version: '3'
+
+vars:
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  BUILD_TIME:
+    sh: date -u '+%Y-%m-%dT%H:%M:%SZ'
+  PKG: gocache/pkg/version
+
+tasks:
+  build:
+    desc: Build all binaries (server, cli, plugins)
+    deps: [build:server, build:cli, build:plugins]
+
+  build:server:
+    desc: Build the server binary
+    vars:
+      VERSION:
+        sh: cat cmd/server/VERSION 2>/dev/null || echo "dev"
+    cmds:
+      - >-
+        go build
+        -ldflags '-X {{.PKG}}.Version={{.VERSION}} -X {{.PKG}}.Commit={{.COMMIT}} -X {{.PKG}}.BuildTime={{.BUILD_TIME}} -X {{.PKG}}.Artifact=gocache-server'
+        -o bin/gocache-server ./cmd/server
+    sources:
+      - cmd/server/**/*.go
+      - pkg/**/*.go
+    generates:
+      - bin/gocache-server
+
+  build:cli:
+    desc: Build the CLI binary
+    vars:
+      VERSION:
+        sh: cat cmd/cli/VERSION 2>/dev/null || echo "dev"
+    cmds:
+      - >-
+        go build
+        -ldflags '-X {{.PKG}}.Version={{.VERSION}} -X {{.PKG}}.Commit={{.COMMIT}} -X {{.PKG}}.BuildTime={{.BUILD_TIME}} -X {{.PKG}}.Artifact=gocache-cli'
+        -o bin/gocache-cli ./cmd/cli
+    sources:
+      - cmd/cli/**/*.go
+      - pkg/**/*.go
+    generates:
+      - bin/gocache-cli
+
+  build:plugins:
+    desc: Build all plugin binaries into bin/plugins/
+    cmds:
+      - mkdir -p bin/plugins
+      - for: { var: PLUGIN_DIRS, split: "\n" }
+        cmd: |
+          NAME=$(basename {{.ITEM}})
+          VERSION=$(cat {{.ITEM}}/VERSION 2>/dev/null || echo "dev")
+          go build \
+            -ldflags "-X {{.PKG}}.Version=$VERSION -X {{.PKG}}.Commit={{.COMMIT}} -X {{.PKG}}.BuildTime={{.BUILD_TIME}} -X {{.PKG}}.Artifact=plugin-$NAME" \
+            -o bin/plugins/$NAME {{.ITEM}}
+    vars:
+      PLUGIN_DIRS:
+        sh: find plugins -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+
+  test:
+    desc: Run all tests with race detector
+    cmds:
+      - go test -race ./...
+
+  test:verbose:
+    desc: Run all tests verbosely
+    cmds:
+      - go test -race -v ./...
+
+  test:coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -race -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run vet and build checks
+    deps: [vet]
+    cmds:
+      - go build ./...
+
+  proto:
+    desc: Regenerate protobuf Go code
+    cmds:
+      - PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative proto/gcpc/v1/gcpc.proto
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf bin/
+      - rm -f coverage.out
+
+  run:server:
+    desc: Build and run the server
+    deps: [build]
+    cmds:
+      - ./bin/gocache-server {{.CLI_ARGS}}
+
+  run:cli:
+    desc: Build and run the CLI
+    deps: [build:cli]
+    cmds:
+      - ./bin/gocache-cli {{.CLI_ARGS}}
+
+  version:
+    desc: Print version info for all artifacts
+    cmds:
+      - echo "server  $(cat cmd/server/VERSION) ({{.COMMIT}})"
+      - echo "cli     $(cat cmd/cli/VERSION) ({{.COMMIT}})"
+      - for: { var: PLUGIN_DIRS, split: "\n" }
+        cmd: echo "plugin/$(basename {{.ITEM}})  $(cat {{.ITEM}}/VERSION 2>/dev/null || echo dev) ({{.COMMIT}})"
+    vars:
+      PLUGIN_DIRS:
+        sh: find plugins -mindepth 1 -maxdepth 1 -type d 2>/dev/null

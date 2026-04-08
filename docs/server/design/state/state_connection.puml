@@ -1,0 +1,81 @@
+@startuml state_connection
+!include ../../../design/theme.iuml
+
+frame "Client Connection Lifecycle" as F {
+
+    state "  " as SpacerL <<hidden>>
+    state "  " as SpacerR <<hidden>>
+    hide SpacerL
+    hide SpacerR
+
+    state "Accepted" as Accepted : New TCP connection\nCreates Reader, Writer,\nClientContext (Proto=2)
+
+    state "ReadingCommand" as ReadingCommand : Blocks on conn read\nReturns on EOF, error,\nor successful parse
+
+    state "ValidatingCommand" as ValidatingCommand : Checks Value.Type\nand array length
+
+    state "ProtocolError" as ProtocolError : Writes -ERR to client\nContinues loop
+
+    state "AuthGate" as AuthGate : requirePass set?\nClient authenticated?
+
+    state "Evaluating" as Evaluating : Looks up handler\nValidates arg count
+
+    state "PreHooks" as PreHooks : RunPreHooks(op, args)\nCritical: blocking\nNon-critical: async
+
+    state "Dispatching" as Dispatching : DispatchWithResult(fn)\nSingle result via ResChan
+
+    state "PostHooks" as PostHooks : RunPostHooks(op, args, result)\nCritical: blocking\nNon-critical: async
+
+    state "WritingResponse" as WritingResponse : mapToResp()\nwriter.Write()
+
+    state "Closing" as Closing : conn.Close()\nconnectionWg.Done()\n--\nShutdown: sends -ERR first\nEOF: silent close
+
+    state "Transaction State" as TxState {
+        state "Queuing" as Queuing : Enqueues to CommandQueue\nReturns +QUEUED
+        state "BatchExecuting" as BatchExecuting : DispatchWithResult(batch)\nReturns RESP array
+        state "ReadyState" as ReadyState : ResetTransaction()\nReturns +OK
+
+        [*] --> Queuing
+        Queuing --> Queuing : More
+        Queuing --> BatchExecuting : EXEC
+        Queuing --> ReadyState : DISCARD
+        BatchExecuting --> [*]
+        ReadyState --> [*]
+    }
+
+    [*] --> Accepted
+
+    Accepted --> ReadingCommand
+
+    ReadingCommand --> ValidatingCommand
+
+    ValidatingCommand --> ReadingCommand : Empty
+    ValidatingCommand --> ProtocolError : Bad type
+    ValidatingCommand --> AuthGate : Valid
+    ValidatingCommand -[#EF4444]-> Closing : QUIT
+
+    ProtocolError --> ReadingCommand
+
+    AuthGate --> Evaluating : Authenticated\nor no auth required
+    AuthGate --> WritingResponse : Not authenticated\n(-NOAUTH)
+
+    Evaluating --> PreHooks : Core command
+    Evaluating --> TxState : In TX
+    Evaluating --> WritingResponse : Plugin command\n(via Router)
+    Evaluating --> WritingResponse : Unknown command
+
+    PreHooks --> Dispatching : Allowed
+    PreHooks --> WritingResponse : Denied\n(-DENIED reason)
+
+    TxState --> WritingResponse
+    Dispatching --> PostHooks
+    PostHooks --> WritingResponse
+
+    WritingResponse --> ReadingCommand
+
+    ReadingCommand -[#EF4444]up-> Closing : EOF/Shutdown
+
+    Closing --> [*]
+}
+
+@enduml

@@ -1,0 +1,60 @@
+@startuml components_config
+!include ../../../design/theme.iuml
+
+mainframe **cmp** Configuration System
+
+rectangle "Config Sources\n(priority: highest to lowest)" {
+    component "CLI Flags\n(pflag)" as CLI
+    component "Env Vars\n(GOCACHE_*)" as Env
+    component "Config File\n(gocache.yaml)" as File
+    component "Defaults" as Defaults
+}
+
+CLI -down-> Env : overrides
+Env -down-> File : overrides
+File -down-> Defaults : overrides
+
+package "Config Struct" {
+    component "Server\naddress, port,\nlog_level,\nrequire_pass" as ServerCfg
+    component "Persistence\nsnapshot_file,\nsnapshot_interval,\nload_on_startup" as PersistCfg
+    component "Memory\nmax_memory_mb,\neviction_policy" as MemCfg
+    component "Workers\ncleanup_interval" as WorkerCfg
+}
+
+rectangle "Viper\n(config management)" as Viper {
+    component "config.Load(flags)\nReturns Config, Viper, error" as Load
+    component "config.Reload(v)\nReturns Config, error" as Reload
+}
+
+rectangle "Hot Reload" as HotReload {
+    component "fsnotify Watcher" as FSNotify
+    component "OnConfigChange\ncallback" as OnChange
+}
+
+Load --> ServerCfg
+Load --> PersistCfg
+Load --> MemCfg
+Load --> WorkerCfg
+
+FSNotify -right-> OnChange : file changed
+
+rectangle "Live-Reloadable Fields" as Live {
+    component "Cache.SetMemoryLimit()" as SetMem
+    component "SnapshotWorker.UpdateInterval()" as SnapInt
+    component "SnapshotWorker.UpdateFile()" as SnapFile
+    component "CleanupWorker.UpdateInterval()" as CleanInt
+}
+
+OnChange --> Reload
+Reload --> SetMem
+Reload --> SnapInt
+Reload --> SnapFile
+Reload --> CleanInt
+
+note as N1
+  **Not hot-reloadable:**
+  server address/port
+  (requires restart)
+end note
+
+@enduml

@@ -1,0 +1,98 @@
+@startuml sequence_command_flow
+!include ../../../design/theme.iuml
+
+mainframe **sd** Core Command Flow (Hot Path)
+
+actor Client
+    participant "TCP Listener\n(net.Listener)" as Listener
+    participant "Connection Handler\n(per-goroutine)" as ConnHandler
+    participant "RESP Reader\n(resp.NewReader)" as Reader
+    participant "Evaluator\n(BaseEvaluator)" as Evaluator
+    participant "Hook Executor" as HookExec
+    participant "Command Router\n(plugin fallback)" as CmdRouter
+    participant "Engine\n(serial dispatch loop)" as Engine
+    participant "Cache\n(in-memory maps)" as Cache
+    participant "RESP Writer\n(resp.NewWriter)" as Writer
+
+    Client -> Listener : TCP connect
+    Listener -> ConnHandler : Accept -> go handleConnection(conn)
+
+    hnote over ConnHandler
+      Creates resp.Reader, resp.Writer,
+      and ClientContext (ProtoVersion=2)
+    end note
+
+    loop Per command (until EOF or QUIT)
+        ConnHandler -> ConnHandler : Check isShuttingDown
+
+        ConnHandler -> Reader : reader.Read()
+        Reader -> Reader : Parse RESP Array\nfrom wire bytes
+
+        alt Not an Array or empty
+            ConnHandler -> Writer : MarshalError("protocol error")
+            Writer --> Client : -ERR Protocol error
+
+        else QUIT command
+            ConnHandler -> Writer : OK()
+            Writer --> Client : +OK
+            hnote over ConnHandler : return (conn.Close + wg.Done)
+
+        else Auth required and not authenticated
+            ConnHandler -> Writer : MarshalError("NOAUTH")
+            Writer --> Client : -NOAUTH Authentication required.
+
+        else Valid command
+            ConnHandler -> Evaluator : Evaluate(ctx, op, args)
+
+            hnote over Evaluator
+              Lookup handler in map
+              Validate arg count via commandSpecs
+            end note
+
+            alt Unknown command (not in core handlers)
+                Evaluator -> CmdRouter : HasCommand(op)?
+                alt Plugin command found
+                    CmdRouter -> CmdRouter : Route via IPC\n(CommandRequestV1)
+                    CmdRouter --> Evaluator : Result from plugin
+                else Not found
+                    Evaluator --> ConnHandler : Result{ErrUnknown}
+                end
+
+            else In transaction (not MULTI/EXEC/DISCARD)
+                Evaluator --> ConnHandler : Queue command -> Result{"QUEUED"}
+
+            else Normal core command
+                Evaluator -> HookExec : RunPreHooks(op, args)
+                alt Pre-hook denies
+                    HookExec --> Evaluator : Denied{reason}
+                    Evaluator --> ConnHandler : Result{"-DENIED reason"}
+                else Pre-hook allows (or no hooks)
+                    HookExec --> Evaluator : OK
+
+                    Evaluator -> Engine : DispatchWithResult(fn)
+
+                    hnote over Engine : cmdChan <- Command{Execute, ResChan}
+
+                    Engine -> Cache : cache.Lock()
+                    activate Cache
+                    Engine -> Cache : fn() executes handler logic
+                    Cache --> Engine : result
+                    Engine -> Cache : cache.Unlock()
+                    deactivate Cache
+
+                    Engine --> Evaluator : result via ResChan
+
+                    Evaluator -> HookExec : RunPostHooks(op, args, result)
+                    note right : Non-critical: async\nCritical: blocks
+
+                    Evaluator --> ConnHandler : Result{Value}
+                end
+            end
+
+            ConnHandler -> ConnHandler : mapToResp(ctx, result)
+            ConnHandler -> Writer : Write(resp.Value)
+            Writer --> Client : RESP-encoded response
+        end
+    end
+
+@enduml

@@ -1,0 +1,15 @@
+server:
+  address: "127.0.0.1"
+  port: 7379
+
+persistence:
+  snapshot_file: "yaml_test.dat"
+  snapshot_interval: 10m
+  load_on_startup: false
+
+memory:
+  max_memory_mb: 512
+  eviction_policy: "random"
+
+workers:
+  cleanup_interval: 30s

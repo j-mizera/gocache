@@ -1,0 +1,53 @@
+@startuml components_plugin
+!include ../../../design/theme.iuml
+
+
+frame "GoCache Plugin Process Internals" as F {
+
+    rectangle "Plugin Process" as plugin {
+
+        rectangle "SDK Layer (pluginsdk.Run)" as sdk {
+            component [Transport\nConn] as TransConn <<Unix Socket>>
+            component [Message Loop] as MsgLoop <<Recv + Dispatch>>
+        }
+
+        rectangle "Concurrent Dispatch" as dispatch {
+            component [Command\nGoroutines] as CmdGo <<HandleCommand()>>
+            component [Hook\nGoroutines] as HookGo <<HandleHook()>>
+        }
+
+        rectangle "Plugin Interfaces" as ifaces {
+            component [CommandPlugin] as CmdPlugin <<Commands() + HandleCommand()>>
+            component [HookPlugin] as HkPlugin <<Hooks() + HandleHook()>>
+        }
+
+        rectangle "User Implementation" as impl {
+            component [Plugin Code] as UserCode <<User Logic>>
+        }
+    }
+
+    ' -- Relations --
+    TransConn --> MsgLoop : EnvelopeV1 stream
+
+    MsgLoop --> CmdGo : CommandRequestV1\n(goroutine per request)
+    MsgLoop --> HookGo : HookRequestV1\n(goroutine per hook)
+    MsgLoop --> TransConn : HealthResponseV1\nShutdownAckV1
+
+    CmdGo --> CmdPlugin : Dispatch
+    HookGo --> HkPlugin : Dispatch
+
+    CmdPlugin --> UserCode : Implements
+    HkPlugin --> UserCode : Implements
+
+    CmdGo --> TransConn : CommandResponseV1
+    HookGo --> TransConn : HookResponseV1
+
+    note bottom of dispatch
+      All command and hook handlers
+      execute in separate goroutines.
+      HandleCommand / HandleHook
+      must be goroutine-safe.
+    end note
+}
+
+@enduml

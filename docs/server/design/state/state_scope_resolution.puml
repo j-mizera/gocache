@@ -1,0 +1,73 @@
+@startuml state_scope_resolution
+!include ../../../design/theme.iuml
+
+title Scope Resolution State Machine
+
+state "Plugin Connecting" as connecting
+state "Scope Validation" as validating {
+    state "Parse Requested Scopes" as parse
+    state "Load Config Allowlist" as load_cfg
+    state "Check Hierarchy" as hierarchy
+    state "Match Key Patterns" as patterns
+    state "Compute Granted Set" as compute
+
+    parse --> load_cfg
+    load_cfg --> hierarchy : allowlist loaded
+    hierarchy --> patterns : base scopes resolved
+    patterns --> compute : key patterns validated
+}
+
+state "Registration" as registered {
+    state "Scopes Stored" as stored
+    state "Commands Registered" as cmds
+    state "Hooks Filtered" as hooks_f
+
+    stored --> cmds
+    cmds --> hooks_f : hooks filtered by\nhook:pre / hook:post scope
+}
+
+state "Running (Scoped)" as running
+state "Rejected" as rejected
+
+[*] --> connecting : Plugin connects\n(Unix socket)
+connecting --> parse : RegisterV1 received
+
+compute --> stored : All requested <= allowed
+compute --> rejected : Scope exceeds allowlist
+
+hooks_f --> running : Plugin ready
+
+rejected --> [*] : RegisterAckV1\n(accepted=false)
+running --> [*] : Shutdown
+
+note right of hierarchy
+  **Scope Hierarchy**
+  admin > write > read
+
+  Requesting "write" when
+  "admin" is allowed: OK
+  (admin implies write).
+
+  Requesting "admin" when
+  "write" is allowed: REJECTED
+  (write does not imply admin).
+end note
+
+note right of hooks_f
+  **Hook Scope Filtering**
+  Plugin declares hooks: [*:PRE, SET:POST]
+  Plugin has scope: [hook:post] only
+
+  Result: *:PRE silently dropped
+  Only SET:POST registered in hook registry.
+end note
+
+note left of running
+  **Enforcement is runtime**
+  Granted scopes are checked on
+  every command dispatch and
+  every hook invocation — not
+  just at registration.
+end note
+
+@enduml

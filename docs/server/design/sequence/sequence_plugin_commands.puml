@@ -1,0 +1,72 @@
+@startuml sequence_plugin_commands
+!include ../../../design/theme.iuml
+
+mainframe **sd** Command Flow with Plugin Hooks
+
+actor Client
+    participant "Evaluator" as Evaluator
+    participant "Hook Executor" as HookExec
+    participant "Hook Registry" as HookReg
+    participant "PluginConn\n(multiplexed)" as PluginConn
+    participant "Auth Plugin\n(critical, priority=1)" as PluginA
+    participant "AOF Plugin\n(critical, priority=5)" as PluginB
+    participant "Audit Plugin\n(non-critical, priority=10)" as PluginC
+    participant "Cache" as Cache
+
+    Client -> Evaluator : SET user:1 {name: John}
+
+    == Pre-Hooks ==
+
+    Evaluator -> HookExec : RunPreHooks("SET", args)
+    HookExec -> HookReg : MatchPre("SET")
+    HookReg --> HookExec : [Auth(crit), AOF(crit), Audit(non-crit)]\nsorted by priority
+
+    hnote over HookExec : Fire non-critical async first
+
+    HookExec ->> PluginC : HookRequestV1 (fire-and-forget)
+    note right : Non-critical: no wait
+
+    hnote over HookExec : Fire critical sequentially\nin priority order
+
+    HookExec -> PluginConn : Send HookRequestV1 (PRE)
+    PluginConn -> PluginA : HookRequestV1\n(request_id=req-1)
+    activate PluginA
+    PluginA --> PluginConn : HookResponseV1\n(deny=false)
+    deactivate PluginA
+    PluginConn --> HookExec : Allow
+
+    HookExec -> PluginConn : Send HookRequestV1 (PRE)
+    PluginConn -> PluginB : HookRequestV1\n(request_id=req-2)
+    activate PluginB
+    PluginB --> PluginConn : HookResponseV1\n(deny=false)
+    deactivate PluginB
+    PluginConn --> HookExec : Allow
+
+    HookExec --> Evaluator : PreHookResult{Denied=false}
+
+    == Command Execution ==
+
+    Evaluator -> Cache : Engine.DispatchWithResult(fn)
+    activate Cache
+    Cache --> Evaluator : Result{Value: "OK"}
+    deactivate Cache
+
+    == Post-Hooks ==
+
+    Evaluator -> HookExec : RunPostHooks("SET", args, "OK", "")
+    HookExec -> HookReg : MatchPost("SET")
+
+    HookExec ->> PluginC : HookRequestV1 POST\n(fire-and-forget)
+
+    HookExec -> PluginConn : Send HookRequestV1 (POST)
+    PluginConn -> PluginB : HookRequestV1\n(result_value="OK")
+    activate PluginB
+    PluginB --> PluginConn : HookResponseV1 (ack)
+    deactivate PluginB
+    PluginConn --> HookExec : Done
+
+    == Response ==
+
+    Evaluator --> Client : +OK
+
+@enduml

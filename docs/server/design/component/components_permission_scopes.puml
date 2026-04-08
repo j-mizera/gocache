@@ -1,0 +1,70 @@
+@startuml components_permission_scopes
+!include ../../../design/theme.iuml
+
+frame "Permission / Scope System" as F {
+
+    rectangle "Scope Model" as model {
+        component [Scope Registry] as ScopeReg <<pkg/plugin/permissions>>
+        component [Scope Validator] as ScopeVal <<registration-time>>
+        component [Scope Enforcer] as ScopeEnf <<runtime>>
+    }
+
+    rectangle "Scope Types" as types {
+        component [read] as S_READ <<cache read ops\nGET, MGET, KEYS, SCAN>>
+        component [write] as S_WRITE <<cache mutations\nSET, DEL, LPUSH, ...>>
+        component [admin] as S_ADMIN <<server ops\nFLUSHDB, CONFIG, DBSIZE>>
+        component [hook:pre] as S_HOOKPRE <<intercept before\ncommand execution>>
+        component [hook:post] as S_HOOKPOST <<intercept after\ncommand execution>>
+        component [keys:<pattern>] as S_KEYS <<key namespace\nglob restriction>>
+    }
+
+    rectangle "Registration Flow" as reg {
+        component [Plugin Process] as Plugin <<RegisterV1>>
+        component [Manager] as Mgr <<handshake>>
+        component [Config Overrides] as Cfg <<gocache.yaml>>
+    }
+
+    rectangle "Runtime Enforcement" as rt {
+        component [Hook Executor] as HookExec <<pre-hook gate>>
+        component [Command Router] as Router <<plugin IPC>>
+        component [Evaluator] as Eval <<core dispatch>>
+    }
+
+    ' -- Registration path --
+    Plugin --> Mgr : RegisterV1\n(requested_scopes)
+    Mgr --> ScopeVal : Validate requested\nvs allowed
+    Cfg ..> ScopeVal : Allowed scopes\nper plugin
+    ScopeVal --> ScopeReg : Store granted\nscopes
+
+    ' -- Scope type relationships --
+    S_WRITE ..> S_READ : implies (write\nincludes read)
+    S_ADMIN ..> S_WRITE : implies (admin\nincludes write)
+
+    ' -- Runtime path --
+    Eval --> ScopeEnf : Check plugin scope\nbefore IPC dispatch
+    ScopeEnf --> ScopeReg : Lookup granted\nscopes for plugin
+    HookExec --> ScopeEnf : Verify hook plugin\nhas hook:pre / hook:post
+
+    note bottom of ScopeReg
+      **Granted scopes** are the intersection of:
+        1. Plugin's requested scopes (RegisterV1)
+        2. Config-allowed scopes (gocache.yaml overrides)
+
+      If a plugin requests scopes beyond what config allows,
+      registration is **rejected** (RegisterAckV1.accepted=false).
+    end note
+
+    note bottom of S_KEYS
+      **Key namespace isolation** restricts a plugin's
+      cache access to keys matching a glob pattern.
+
+        keys:user:*     -> only user:* keys
+        keys:session:*  -> only session:* keys
+        keys:*          -> all keys (default)
+
+      Enforced in ScopeEnforcer before command
+      is forwarded to plugin via IPC.
+    end note
+}
+
+@enduml

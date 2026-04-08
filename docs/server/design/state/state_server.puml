@@ -1,0 +1,72 @@
+@startuml state_server
+!include ../../../design/theme.iuml
+
+skinparam linetype polyline
+
+frame "Server Lifecycle FSM" as F {
+
+    state "LoadingConfig" as LoadingConfig : Parses pflag CLI args\nReads gocache.yaml\nMerges GOCACHE_* env vars\nCLI > env > YAML > defaults
+
+    state "InitLogging" as InitLogging : logger.Init(logLevel)
+
+    state "InitCore" as InitCore : cache.NewWithConfig()\nengine.New()
+
+    state "LoadingSnapshot" as LoadingSnapshot : persistence.LoadSnapshot()\nSkipped if LoadOnStartup=false\nWarns on error (not fatal)
+
+    state "StartingEngine" as StartingEngine : go engine.Run()\nSerial dispatch loop
+
+    state "StartingWorkers" as StartingWorkers : snapshotWorker.Start()\ncleanupWorker.Start()
+
+    state "ConfiguringHotReload" as ConfiguringHotReload : v.WatchConfig()\nvia fsnotify
+
+    state "Listening" as Listening : signal.Notify registered\nSIGTERM, SIGINT, SIGHUP
+
+    state "AcceptingConnections" as AcceptingConnections : srv.Start(ctx)\ngo acceptConnections()\nSpawns goroutine per client
+
+    state "Hot Reload (concurrent)" as HotReload {
+        state "WatchingConfig" as WatchingConfig
+        state "ReloadTriggered" as ReloadTriggered : config.Reload(v)
+        state "ApplyingChanges" as ApplyingChanges : Updates workers\nand cache limits
+
+        [*] --> WatchingConfig
+        WatchingConfig --> ReloadTriggered : Event
+        ReloadTriggered --> ApplyingChanges
+        ApplyingChanges --> WatchingConfig
+    }
+
+    state "Graceful Shutdown" as Shutdown {
+        state "Stop Listener" as S1 : listener.Close()
+        state "Drain Connections" as S1W : connectionWg.Wait()\n10s timeout
+        state "Stop Workers" as S2 : snapshotWorker.Stop()\ncleanupWorker.Stop()
+        state "Save Snapshot" as S3 : persistence.SaveSnapshot()
+        state "Stop Engine" as S4 : engine.Stop()\nclose(stopChan)
+        state "Complete" as S5
+
+        [*] --> S1
+        S1 --> S1W
+        S1W --> S2
+        S2 --> S3
+        S3 --> S4
+        S4 --> S5
+        S5 --> [*]
+    }
+
+    [*] --> LoadingConfig
+
+    LoadingConfig --> InitLogging
+    InitLogging --> InitCore
+    InitCore --> LoadingSnapshot
+    LoadingSnapshot --> StartingEngine
+    StartingEngine --> StartingWorkers
+    StartingWorkers --> ConfiguringHotReload
+    ConfiguringHotReload --> Listening
+    Listening --> AcceptingConnections
+
+    AcceptingConnections --> AcceptingConnections : New conn
+
+    AcceptingConnections -[#EF4444,bold]-> Shutdown : Signal
+
+    Shutdown --> [*]
+}
+
+@enduml

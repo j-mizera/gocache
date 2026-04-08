@@ -1,0 +1,61 @@
+@startuml sequence_scope_registration
+!include ../../../design/theme.iuml
+
+title Plugin Scope Registration & Validation
+
+participant "Plugin Process" as Plugin
+participant "Manager" as Mgr
+participant "Scope Validator" as Val
+participant "Config (YAML)" as Cfg
+participant "Scope Registry" as Reg
+participant "Plugin Registry" as PReg
+
+== Plugin Connects ==
+
+Plugin -> Mgr : RegisterV1 {\n  name: "kafka"\n  requested_scopes: ["write", "keys:kafka:*"]\n  commands: [KAFKA:PRODUCE, KAFKA:CONSUME]\n  hooks: []\n}
+
+Mgr -> Cfg : Get allowed scopes\nfor "kafka"
+Cfg --> Mgr : allowed: ["write", "keys:kafka:*"]
+
+Mgr -> Val : Validate(\n  requested=["write", "keys:kafka:*"],\n  allowed=["write", "keys:kafka:*"]\n)
+
+alt All requested scopes are allowed
+    Val --> Mgr : OK (granted=["write", "keys:kafka:*"])
+    Mgr -> Reg : Store("kafka", granted_scopes)
+    Reg --> Mgr : OK
+    Mgr -> PReg : Register plugin + commands
+    PReg --> Mgr : OK
+    Mgr --> Plugin : RegisterAckV1 {\n  accepted: true\n  granted_scopes: ["write", "keys:kafka:*"]\n}
+else Requested scope exceeds allowed
+    Val --> Mgr : REJECTED ("scope 'admin' not allowed")
+    Mgr --> Plugin : RegisterAckV1 {\n  accepted: false\n  reason: "scope 'admin' not in allowed set"\n}
+end
+
+== Scope Hierarchy (Implicit Grants) ==
+
+note over Val
+  **Scope hierarchy**: admin > write > read
+
+  If config allows "write", plugin also gets "read"
+  (write implies read). Explicit "admin" required
+  for server-level operations.
+
+  Hook scopes are independent:
+  "hook:pre" and "hook:post" must be requested
+  and allowed separately.
+end note
+
+== No Config = No Scopes ==
+
+note over Cfg
+  If no overrides exist for a plugin,
+  **default scope = ["read"]** (least privilege).
+
+  Plugins that need more must be explicitly
+  configured in gocache.yaml:
+    overrides:
+      kafka:
+        scopes: ["write", "keys:kafka:*"]
+end note
+
+@enduml

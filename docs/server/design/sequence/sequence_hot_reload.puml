@@ -1,0 +1,60 @@
+@startuml sequence_hot_reload
+!include ../../../design/theme.iuml
+
+mainframe **sd** Config Hot Reload Flow
+
+participant "fsnotify\nWatcher" as FSNotify
+participant "Viper" as Viper
+participant "config.Reload()" as Reload
+participant "SnapshotWorker" as Snap
+participant "CleanupWorker" as Cleanup
+participant "Cache" as Cache
+participant "Logger" as Logger
+
+FSNotify -> Viper : File change event
+Viper -> Reload : OnConfigChange callback
+
+activate Reload
+Reload -> Reload : Parse updated YAML
+alt Parse error
+    Reload -> Logger : Warn("failed to parse updated config")
+    Reload --> Viper : return (no changes applied)
+else Parse success
+    Reload -> Logger : Info("config reloaded")
+
+    group Apply live-reloadable fields
+
+        alt address/port changed
+            Reload -> Logger : Warn("address changes require restart")
+        end
+
+        Reload -> Snap : UpdateInterval(newInterval)
+        note right : Sends new duration\nvia intervalChan;\nticker resets
+
+        Reload -> Snap : UpdateFile(newFile)
+        note right : Sends new path\nvia fileChan
+
+        Reload -> Cleanup : UpdateInterval(newInterval)
+
+        Reload -> Cache : SetMemoryLimit(newMB, newPolicy)
+        activate Cache
+        Cache -> Cache : Update maxBytes\nand evictionPolicy
+
+        alt new limit < current usage && policy = LRU
+            Cache -> Cache : evictLRU(0)
+            note right : Evict until within\nnew memory limit
+        end
+        deactivate Cache
+    end
+end
+deactivate Reload
+
+note over FSNotify, Cache
+  **Hot reload guarantees:**
+  - No server restart needed for memory, intervals, file paths
+  - Workers pick up new intervals on next tick
+  - Memory limit applied immediately (may trigger eviction)
+  - Log level change takes effect on next log call
+end note
+
+@enduml
