@@ -1,0 +1,244 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.25.5"
+
+jobs:
+  detect:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.changes.outputs.server }}
+      cli: ${{ steps.changes.outputs.cli }}
+      plugins: ${{ steps.changes.outputs.plugins }}
+      plugin_list: ${{ steps.changes.outputs.plugin_list }}
+      any_artifact: ${{ steps.changes.outputs.any_artifact }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed artifacts
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          SERVER=false
+          CLI=false
+          PLUGINS=false
+          PLUGIN_NAMES=""
+
+          # Shared code changes affect all artifacts
+          if echo "$CHANGED" | grep -qE '^(pkg/|proto/|go\.(mod|sum))'; then
+            SERVER=true
+            CLI=true
+            PLUGINS=true
+            # All plugins affected
+            PLUGIN_NAMES=$(find plugins -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+          else
+            # Check artifact-specific paths
+            if echo "$CHANGED" | grep -qE '^cmd/server/'; then
+              SERVER=true
+            fi
+            if echo "$CHANGED" | grep -qE '^cmd/cli/'; then
+              CLI=true
+            fi
+            # Check each plugin individually
+            for dir in plugins/*/; do
+              name=$(basename "$dir")
+              if echo "$CHANGED" | grep -qE "^plugins/$name/"; then
+                PLUGINS=true
+                if [ -n "$PLUGIN_NAMES" ]; then
+                  PLUGIN_NAMES="$PLUGIN_NAMES,$name"
+                else
+                  PLUGIN_NAMES="$name"
+                fi
+              fi
+            done
+          fi
+
+          ANY=false
+          if [ "$SERVER" = true ] || [ "$CLI" = true ] || [ "$PLUGINS" = true ]; then
+            ANY=true
+          fi
+
+          echo "server=$SERVER" >> "$GITHUB_OUTPUT"
+          echo "cli=$CLI" >> "$GITHUB_OUTPUT"
+          echo "plugins=$PLUGINS" >> "$GITHUB_OUTPUT"
+          echo "plugin_list=$PLUGIN_NAMES" >> "$GITHUB_OUTPUT"
+          echo "any_artifact=$ANY" >> "$GITHUB_OUTPUT"
+
+          echo "Results: server=$SERVER cli=$CLI plugins=$PLUGINS plugin_list=$PLUGIN_NAMES"
+
+  test:
+    name: Test
+    needs: detect
+    if: needs.detect.outputs.any_artifact == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: go test -race ./...
+
+  bump:
+    name: Bump Versions
+    needs: [detect, test]
+    if: needs.detect.outputs.any_artifact == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      server_version: ${{ steps.bump.outputs.server_version }}
+      cli_version: ${{ steps.bump.outputs.cli_version }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump affected VERSION files
+        id: bump
+        run: |
+          bump_patch() {
+            local file="$1"
+            local current
+            current=$(cat "$file" | tr -d '[:space:]')
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$current"
+            patch=$((patch + 1))
+            local new="${major}.${minor}.${patch}"
+            echo "$new" > "$file"
+            echo "$new"
+          }
+
+          BUMPED=false
+
+          if [ "${{ needs.detect.outputs.server }}" = "true" ]; then
+            VER=$(bump_patch cmd/server/VERSION)
+            echo "server_version=$VER" >> "$GITHUB_OUTPUT"
+            echo "Bumped server to $VER"
+            BUMPED=true
+          else
+            echo "server_version=$(cat cmd/server/VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "${{ needs.detect.outputs.cli }}" = "true" ]; then
+            VER=$(bump_patch cmd/cli/VERSION)
+            echo "cli_version=$VER" >> "$GITHUB_OUTPUT"
+            echo "Bumped cli to $VER"
+            BUMPED=true
+          else
+            echo "cli_version=$(cat cmd/cli/VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "${{ needs.detect.outputs.plugins }}" = "true" ]; then
+            IFS=',' read -ra PLUGINS <<< "${{ needs.detect.outputs.plugin_list }}"
+            for name in "${PLUGINS[@]}"; do
+              if [ -f "plugins/$name/VERSION" ]; then
+                VER=$(bump_patch "plugins/$name/VERSION")
+                echo "Bumped plugin/$name to $VER"
+                BUMPED=true
+              fi
+            done
+          fi
+
+          echo "bumped=$BUMPED" >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bumps
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add '*/VERSION'
+          git commit -m "chore: bump versions [skip ci]" || echo "No changes to commit"
+          git push
+
+  build:
+    name: Build Artifacts
+    needs: [detect, bump]
+    if: needs.detect.outputs.any_artifact == 'true'
+    runs-on: ubuntu-latest
+    env:
+      PKG: gocache/pkg/version
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Pull latest (with version bumps)
+        run: git pull origin main
+
+      - name: Build server
+        if: needs.detect.outputs.server == 'true'
+        run: |
+          VERSION=$(cat cmd/server/VERSION | tr -d '[:space:]')
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          go build \
+            -ldflags "-X $PKG.Version=$VERSION -X $PKG.Commit=$COMMIT -X $PKG.BuildTime=$BUILD_TIME -X $PKG.Artifact=gocache-server" \
+            -o bin/gocache-server ./cmd/server
+
+      - name: Build CLI
+        if: needs.detect.outputs.cli == 'true'
+        run: |
+          VERSION=$(cat cmd/cli/VERSION | tr -d '[:space:]')
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          go build \
+            -ldflags "-X $PKG.Version=$VERSION -X $PKG.Commit=$COMMIT -X $PKG.BuildTime=$BUILD_TIME -X $PKG.Artifact=gocache-cli" \
+            -o bin/gocache-cli ./cmd/cli
+
+      - name: Build plugins
+        if: needs.detect.outputs.plugins == 'true'
+        run: |
+          mkdir -p bin/plugins
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          IFS=',' read -ra PLUGINS <<< "${{ needs.detect.outputs.plugin_list }}"
+          for name in "${PLUGINS[@]}"; do
+            VERSION=$(cat "plugins/$name/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "dev")
+            go build \
+              -ldflags "-X $PKG.Version=$VERSION -X $PKG.Commit=$COMMIT -X $PKG.BuildTime=$BUILD_TIME -X $PKG.Artifact=plugin-$name" \
+              -o "bin/plugins/$name" "./plugins/$name"
+            echo "Built plugin/$name v$VERSION"
+          done
+
+      - name: Upload server binary
+        if: needs.detect.outputs.server == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gocache-server
+          path: bin/gocache-server
+          retention-days: 30
+
+      - name: Upload CLI binary
+        if: needs.detect.outputs.cli == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gocache-cli
+          path: bin/gocache-cli
+          retention-days: 30
+
+      - name: Upload plugin binaries
+        if: needs.detect.outputs.plugins == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins
+          path: bin/plugins/
+          retention-days: 30

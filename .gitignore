@@ -1,0 +1,28 @@
+# Build artifacts
+bin/**/*
+
+# Persistence data
+*.dat
+
+# Task runner cache
+.task/
+
+# IDE
+.idea/
+*.iml
+
+# Go
+*.exe
+*.test
+*.out
+*.prof
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config overrides (local dev)
+gocache.local.yaml
+
+# Plugin sockets
+tmp/gocache-*.sock
