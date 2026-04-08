@@ -41,8 +41,8 @@ func TestEvaluator_Basic(t *testing.T) {
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
-	if res.Value != "OK" {
-		t.Errorf("expected OK, got %v", res.Value)
+	if res.Value != 1 {
+		t.Errorf("expected 1, got %v", res.Value)
 	}
 
 	// Test EXISTS after DEL
@@ -58,16 +58,16 @@ func TestEvaluator_Basic(t *testing.T) {
 func TestEvaluator_TTL(t *testing.T) {
 	_, _, evalInstance, ctx := setup(t)
 
-	evalInstance.Evaluate(ctx, "SET", []string{"temp", "val", "100ms"})
+	evalInstance.Evaluate(ctx, "SET", []string{"temp", "val", "PX", "100"})
 
 	res := evalInstance.Evaluate(ctx, "TTL", []string{"temp"})
 	if res.Value.(int64) < 0 {
 		t.Errorf("expected positive TTL, got %v", res.Value)
 	}
 
-	// Test EXPIRE
+	// Test EXPIRE (integer seconds)
 	evalInstance.Evaluate(ctx, "SET", []string{"expireme", "val"})
-	res = evalInstance.Evaluate(ctx, "EXPIRE", []string{"expireme", "1s"})
+	res = evalInstance.Evaluate(ctx, "EXPIRE", []string{"expireme", "1"})
 	if res.Value != 1 {
 		t.Errorf("expected 1 (success), got %v", res.Value)
 	}

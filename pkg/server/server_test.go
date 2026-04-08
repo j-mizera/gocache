@@ -21,6 +21,7 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
+	c.OnMutate = wm.NotifyMutation
 
 	srv := New("127.0.0.1:0", c, e, "", requirePass, br, wm)
 

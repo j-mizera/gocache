@@ -48,8 +48,8 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("ZSCORE failed: %v", res.Err)
 	}
-	if score, ok := res.Value.(float64); !ok || score != 200 {
-		t.Errorf("Expected score 200, got %v", res.Value)
+	if res.Value != "200" {
+		t.Errorf("Expected score '200', got %v", res.Value)
 	}
 
 	// Test ZSCORE for non-existent member

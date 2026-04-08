@@ -108,7 +108,7 @@ func (b *BaseEvaluator) handleZscore(cmdCtx *CommandContext) Result {
 
 		zset := entry.Value.(*cache.SortedSet)
 		if score, exists := zset.Score(member); exists {
-			return score
+			return strconv.FormatFloat(score, 'f', -1, 64)
 		}
 		return nil
 	}

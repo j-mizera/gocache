@@ -269,7 +269,6 @@ func (b *BaseEvaluator) handleSet(cmdCtx *CommandContext) Result {
 		xx         bool
 		keepTTL    bool
 		expiration int64
-		parseErr   error
 	)
 
 	for i := 2; i < len(cmdCtx.Args); i++ {
@@ -302,18 +301,8 @@ func (b *BaseEvaluator) handleSet(cmdCtx *CommandContext) Result {
 			}
 			expiration = time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
 		default:
-			// Backward-compatible: try to parse as a Go duration string.
-			d, err := time.ParseDuration(cmdCtx.Args[i])
-			if err != nil {
-				parseErr = ErrInvalidDuration
-			} else if d > 0 {
-				expiration = time.Now().Add(d).UnixNano()
-			}
+			return Result{Value: resp.ErrSyntax()}
 		}
-	}
-
-	if parseErr != nil {
-		return Result{Err: parseErr}
 	}
 
 	executeFn := func() interface{} {
@@ -425,10 +414,16 @@ func (b *BaseEvaluator) handleGet(cmdCtx *CommandContext) Result {
 }
 
 func (b *BaseEvaluator) handleDelete(cmdCtx *CommandContext) Result {
-	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
-		cmdCtx.Cache.RawDelete(key)
-		return "OK"
+		count := 0
+		for _, key := range cmdCtx.Args {
+			_, found := cmdCtx.Cache.RawGet(key)
+			if found {
+				cmdCtx.Cache.RawDelete(key)
+				count++
+			}
+		}
+		return count
 	}
 	return dispatch(cmdCtx, executeFn)
 }
@@ -452,10 +447,11 @@ func (b *BaseEvaluator) handleExists(cmdCtx *CommandContext) Result {
 
 func (b *BaseEvaluator) handleExpire(cmdCtx *CommandContext) Result {
 	key := cmdCtx.Args[0]
-	ttl, err := time.ParseDuration(cmdCtx.Args[1])
-	if err != nil {
+	secs, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
+	if err != nil || secs <= 0 {
 		return Result{Err: ErrInvalidDuration}
 	}
+	ttl := time.Duration(secs) * time.Second
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
