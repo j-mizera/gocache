@@ -107,9 +107,16 @@ jobs:
       cli_version: ${{ steps.bump.outputs.cli_version }}
       bumped: ${{ steps.bump.outputs.bumped }}
     steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASER_APP_ID }}
+          private-key: ${{ secrets.RELEASER_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Bump affected VERSION files
         id: bump
@@ -161,9 +168,11 @@ jobs:
 
       - name: Commit version bumps
         if: steps.bump.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "gocache-releaser[bot]"
+          git config user.email "gocache-releaser[bot]@users.noreply.github.com"
           git add '*/VERSION'
           git commit -m "chore: bump versions [skip ci]" || echo "No changes to commit"
           git push
