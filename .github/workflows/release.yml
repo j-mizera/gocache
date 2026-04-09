@@ -257,7 +257,6 @@ jobs:
 
   wiki:
     name: Sync Wiki
-    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
