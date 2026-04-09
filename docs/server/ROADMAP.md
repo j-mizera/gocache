@@ -70,9 +70,29 @@ Implementation:
 
 ## Phase 4: Production Hardening
 
-- AOF persistence (Append-Only File with fsync policies)
-- Improved snapshot format (replace gob with a more robust binary format)
-- Connection limits and backpressure
+### Memory Optimization — Slab Allocator
+
+Redesign the storage layer around a slab allocator pattern (inspired by Badger/Dgraph). The Go GC should only see a thin index of key → slab location. All entry data lives in GC-opaque, manually managed memory.
+
+**Architecture**:
+
+- **Slab allocator**: Fixed-size slab classes (64B, 256B, 1K, 4K, 16K, 64K+). Each slab class is a contiguous `mmap`'d region. Entries are placed in the smallest slab that fits. The GC never scans slab memory — it only sees the index map.
+- **Key index**: `map[string]SlabPointer` is the only GC-visible structure. `SlabPointer` is a value type (slab class ID + offset), not a heap pointer. Key strings are the unavoidable GC cost; everything else is off-heap.
+- **Entry layout**: Each slab entry is a flat byte layout: `[header: type, TTL, size, LRU timestamp][value bytes]`. No Go structs, no pointers — just raw bytes. Encode/decode at the slab boundary.
+- **LRU via access timestamps**: Instead of a linked list (which creates GC-visible pointers), store last-access timestamps in the slab header. Eviction scans slab metadata directly — no heap allocation per access.
+- **Byte-oriented hot path**: Keep values as `[]byte` from RESP parse through slab storage to RESP serialize. No `string` conversions on the hot path. RESP reader produces `[]byte`, slab stores `[]byte`, RESP writer consumes `[]byte`.
+- **String pool**: Intern frequently-repeated strings (command names, common key prefixes) via a concurrent pool to reduce allocations for the key index.
+- **Pre-allocated buffers**: `sync.Pool` for RESP read/write buffers and slab encode/decode scratch space.
+- **Memory-mapped snapshots**: Snapshot loading via mmap — slab regions can be memory-mapped directly from the snapshot file without copying into heap.
+
+### Persistence
+
+- AOF persistence (Append-Only File with configurable fsync policies: always, everysec, no)
+- Improved snapshot format (replace gob with a compact binary format, support partial loads)
+
+### Operational
+
+- Connection limits and backpressure (max connections, per-client command rate)
 - Slow log (commands exceeding configurable latency threshold)
 - Memory introspection (`MEMORY USAGE`, `MEMORY STATS`)
 - Benchmarking suite vs Redis (redis-benchmark compatibility)
