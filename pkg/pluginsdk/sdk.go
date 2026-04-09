@@ -101,14 +101,16 @@ type HookRequest struct {
 	Phase       HookPhase
 	Command     string
 	Args        []string
-	ResultValue string // post-hook only
-	ResultError string // post-hook only
+	ResultValue string            // post-hook only
+	ResultError string            // post-hook only
+	Context     map[string]string // accumulated context from server + own namespace + shared
 }
 
 // HookResponse is the plugin's response to a hook invocation.
 type HookResponse struct {
-	Deny       bool // pre-hook only: true = abort the command
-	DenyReason string
+	Deny          bool // pre-hook only: true = abort the command
+	DenyReason    string
+	ContextValues map[string]string // pre-hook: values to add to command context
 }
 
 // Run connects to the GoCache server's plugin socket, registers the plugin,
@@ -271,19 +273,18 @@ func Run(ctx context.Context, p Plugin) error {
 					Args:        req.Args,
 					ResultValue: req.ResultValue,
 					ResultError: req.ResultError,
+					Context:     req.Context,
 				}
 				result := hp.HandleHook(ctx, hookReq)
-				// Only send response for critical hooks (server waits for it).
-				// Non-critical hooks are fire-and-forget — but since we don't know
-				// if we're critical from the plugin side, always send a response.
-				// The server simply doesn't wait for non-critical ones.
 				deny := false
 				denyReason := ""
+				var ctxValues map[string]string
 				if result != nil {
 					deny = result.Deny
 					denyReason = result.DenyReason
+					ctxValues = result.ContextValues
 				}
-				resp := protocol.NewHookResponse(req.RequestId, deny, denyReason)
+				resp := protocol.NewHookResponse(req.RequestId, deny, denyReason, ctxValues)
 				if err := tc.Send(resp); err != nil {
 					logger.Error().Err(err).Str("command", req.Command).Msg("failed to send hook response")
 				}

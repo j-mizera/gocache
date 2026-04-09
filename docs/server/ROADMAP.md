@@ -36,21 +36,63 @@
 
 ### Next
 
-- Example plugins: auth (critical), metrics (non-critical), rate limiter (critical)
+- Metrics plugin (non-critical): Prometheus `/metrics` endpoint with command counters, latency histograms, memory usage
 - Plugin-to-server cache read-back (allows plugins to query cache state)
 
-## Phase 3: Observability
+## Phase 3: REX Metadata + Observability
 
-- OpenTelemetry tracing integration (span per command, propagation through plugin IPC)
+### REX META -- Per-Request Metadata
+
+Stateless metadata directives attached to individual commands, not connection state. Metadata is discarded after each command executes.
+
+```
+META traceparent 00-abc123-def456-01
+META authorization Bearer eyJhbG...
+KAFKA:PRODUCE topic message
+```
+
+Enables:
+- OpenTelemetry trace context propagation per-request (different operations on the same connection can belong to different traces)
+- Per-request OAuth2 token validation (no stale tokens, no connection-scoped auth)
+- Arbitrary plugin-defined metadata (tenant ID, request ID, priority hints)
+
+Implementation:
+- RESP parser collects META lines into a temporary map, attaches to next command, discards after execution
+- GCPC protocol: `metadata` field added to `CommandRequestV1` and `HookRequestV1`
+- Standard Redis clients unaffected (never send META)
+
+### Observability
+
+- OpenTelemetry tracing via REX META context propagation (span per command, parent spans from client trace context)
 - Health check HTTP endpoint (`/healthz`, `/readyz`)
-- Prometheus metrics exporter plugin (command latency histograms, connection count, memory usage, hit/miss ratio)
-- Custom metrics aggregation plugin
+- Upgrade metrics plugin with OTEL trace export
+- Custom metrics aggregation
 
 ## Phase 4: Production Hardening
 
-- AOF persistence (Append-Only File with fsync policies)
-- Improved snapshot format (replace gob with a more robust binary format)
-- Connection limits and backpressure
+### Memory Optimization — Slab Allocator
+
+Redesign the storage layer around a slab allocator pattern (inspired by Badger/Dgraph). The Go GC should only see a thin index of key → slab location. All entry data lives in GC-opaque, manually managed memory.
+
+**Architecture**:
+
+- **Slab allocator**: Fixed-size slab classes (64B, 256B, 1K, 4K, 16K, 64K+). Each slab class is a contiguous `mmap`'d region. Entries are placed in the smallest slab that fits. The GC never scans slab memory — it only sees the index map.
+- **Key index**: `map[string]SlabPointer` is the only GC-visible structure. `SlabPointer` is a value type (slab class ID + offset), not a heap pointer. Key strings are the unavoidable GC cost; everything else is off-heap.
+- **Entry layout**: Each slab entry is a flat byte layout: `[header: type, TTL, size, LRU timestamp][value bytes]`. No Go structs, no pointers — just raw bytes. Encode/decode at the slab boundary.
+- **LRU via access timestamps**: Instead of a linked list (which creates GC-visible pointers), store last-access timestamps in the slab header. Eviction scans slab metadata directly — no heap allocation per access.
+- **Byte-oriented hot path**: Keep values as `[]byte` from RESP parse through slab storage to RESP serialize. No `string` conversions on the hot path. RESP reader produces `[]byte`, slab stores `[]byte`, RESP writer consumes `[]byte`.
+- **String pool**: Intern frequently-repeated strings (command names, common key prefixes) via a concurrent pool to reduce allocations for the key index.
+- **Pre-allocated buffers**: `sync.Pool` for RESP read/write buffers and slab encode/decode scratch space.
+- **Memory-mapped snapshots**: Snapshot loading via mmap — slab regions can be memory-mapped directly from the snapshot file without copying into heap.
+
+### Persistence
+
+- AOF persistence (Append-Only File with configurable fsync policies: always, everysec, no)
+- Improved snapshot format (replace gob with a compact binary format, support partial loads)
+
+### Operational
+
+- Connection limits and backpressure (max connections, per-client command rate)
 - Slow log (commands exceeding configurable latency threshold)
 - Memory introspection (`MEMORY USAGE`, `MEMORY STATS`)
 - Benchmarking suite vs Redis (redis-benchmark compatibility)
@@ -63,8 +105,9 @@
 
 ## Phase 6: Advanced Plugin Ecosystem
 
-- OAuth2/OIDC authentication plugin (critical)
-- Kafka bidirectional connector plugin
+- OAuth2/OIDC authentication plugin (critical, uses REX META for per-request token validation)
+- Kafka event streaming plugin (post-hooks on mutations, selective key namespace streaming to topics)
+- Rate limiter plugin (GoCache as a rate limiting service: sliding window, token bucket, Lua-scriptable policies via REX commands)
 - Stream processing: XADD, XREAD, XRANGE, consumer groups
 - Geospatial commands: GEOADD, GEODIST, GEORADIUS
 - Full-text search plugin
