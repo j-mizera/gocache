@@ -1,7 +1,7 @@
 @startuml sequence_plugin_commands
 !include ../../../design/theme.iuml
 
-mainframe **sd** Command Flow with Plugin Hooks
+mainframe **sd** Command Flow with Plugin Hooks & Context
 
 actor Client
     participant "Evaluator" as Evaluator
@@ -9,40 +9,31 @@ actor Client
     participant "Hook Registry" as HookReg
     participant "PluginConn\n(multiplexed)" as PluginConn
     participant "Auth Plugin\n(critical, priority=1)" as PluginA
-    participant "AOF Plugin\n(critical, priority=5)" as PluginB
-    participant "Audit Plugin\n(non-critical, priority=10)" as PluginC
+    participant "Metrics Plugin\n(non-critical, priority=100)" as PluginM
     participant "Cache" as Cache
 
     Client -> Evaluator : SET user:1 {name: John}
 
+    == Initialize Context ==
+
+    Evaluator -> Evaluator : hookCtx = cmdctx.New()\nhookCtx["_start_ns"] = now()
+
     == Pre-Hooks ==
 
-    Evaluator -> HookExec : RunPreHooks("SET", args)
+    Evaluator -> HookExec : RunPreHooks("SET", args, hookCtx)
     HookExec -> HookReg : MatchPre("SET")
-    HookReg --> HookExec : [Auth(crit), AOF(crit), Audit(non-crit)]\nsorted by priority
+    HookReg --> HookExec : [Auth(crit, pri=1)]\nsorted by priority
 
-    hnote over HookExec : Fire non-critical async first
-
-    HookExec ->> PluginC : HookRequestV1 (fire-and-forget)
-    note right : Non-critical: no wait
-
-    hnote over HookExec : Fire critical sequentially\nin priority order
-
-    HookExec -> PluginConn : Send HookRequestV1 (PRE)
+    HookExec -> PluginConn : Send HookRequestV1 (PRE)\ncontext: {_start_ns}
     PluginConn -> PluginA : HookRequestV1\n(request_id=req-1)
     activate PluginA
-    PluginA --> PluginConn : HookResponseV1\n(deny=false)
+    PluginA --> PluginConn : HookResponseV1\n(deny=false,\ncontext_values: {tenant_id: "acme"})
     deactivate PluginA
     PluginConn --> HookExec : Allow
 
-    HookExec -> PluginConn : Send HookRequestV1 (PRE)
-    PluginConn -> PluginB : HookRequestV1\n(request_id=req-2)
-    activate PluginB
-    PluginB --> PluginConn : HookResponseV1\n(deny=false)
-    deactivate PluginB
-    PluginConn --> HookExec : Allow
+    hnote over HookExec : cmdctx.Merge(hookCtx, "auth", values)\nhookCtx now has auth.tenant_id
 
-    HookExec --> Evaluator : PreHookResult{Denied=false}
+    HookExec --> Evaluator : PreHookResult{Denied=false, Context=hookCtx}
 
     == Command Execution ==
 
@@ -51,19 +42,17 @@ actor Client
     Cache --> Evaluator : Result{Value: "OK"}
     deactivate Cache
 
+    Evaluator -> Evaluator : hookCtx["_elapsed_ns"] = elapsed()
+
     == Post-Hooks ==
 
-    Evaluator -> HookExec : RunPostHooks("SET", args, "OK", "")
+    Evaluator -> HookExec : RunPostHooks("SET", args, "OK", "", hookCtx)
     HookExec -> HookReg : MatchPost("SET")
 
-    HookExec ->> PluginC : HookRequestV1 POST\n(fire-and-forget)
+    hnote over HookExec : cmdctx.Filter(hookCtx, "gobservability")\nreturns: {_start_ns, _elapsed_ns, shared.*}
 
-    HookExec -> PluginConn : Send HookRequestV1 (POST)
-    PluginConn -> PluginB : HookRequestV1\n(result_value="OK")
-    activate PluginB
-    PluginB --> PluginConn : HookResponseV1 (ack)
-    deactivate PluginB
-    PluginConn --> HookExec : Done
+    HookExec ->> PluginM : HookRequestV1 POST\n(fire-and-forget)\ncontext: {_start_ns, _elapsed_ns}
+    note right : Non-critical: no wait.\nReads _elapsed_ns for latency histogram.
 
     == Response ==
 

@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
+	"gocache/pkg/cmdctx"
 	"gocache/pkg/engine"
 	"gocache/pkg/logger"
 	"gocache/pkg/plugin/hooks"
@@ -347,19 +349,30 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		WatchManager:     b.watchManager,
 	}
 
-	// Pre-hooks: fire before command execution.
+	// Build hook context with server-injected values.
+	var hookCtx map[string]string
 	if b.hookExecutor != nil && b.hookExecutor.HasAny() {
-		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args); pre != nil && pre.Denied {
-			return Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
+		startNs := time.Now().UnixNano()
+		hookCtx = cmdctx.New()
+		hookCtx[cmdctx.StartNs] = strconv.FormatInt(startNs, 10)
+
+		// Pre-hooks: fire before command execution.
+		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args, hookCtx); pre != nil {
+			if pre.Denied {
+				return Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
+			}
+			hookCtx = pre.Context
 		}
 	}
 
 	result := handler(cmdCtx)
 
 	// Post-hooks: fire after command execution.
-	if b.hookExecutor != nil && b.hookExecutor.HasAny() {
+	if b.hookExecutor != nil && b.hookExecutor.HasAny() && hookCtx != nil {
+		elapsedNs := time.Now().UnixNano() - mustParseInt64(hookCtx[cmdctx.StartNs])
+		hookCtx[cmdctx.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
-		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr)
+		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr, hookCtx)
 	}
 
 	return result
@@ -398,6 +411,11 @@ func resultToHookStrings(r Result) (string, string) {
 		return "", ""
 	}
 	return fmt.Sprintf("%v", r.Value), ""
+}
+
+func mustParseInt64(s string) int64 {
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
 }
 
 // dispatch runs fn either directly (inBatch) or through the engine dispatcher,

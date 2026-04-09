@@ -101,6 +101,7 @@ message HookRequestV1 {
   repeated string args          = 4;
   string          result_value = 5; // post-hook only: serialized result
   string          result_error = 6; // post-hook only: error string if any
+  map<string, string> context  = 7; // accumulated hook context (server + own namespace + shared)
 }
 
 // HookResponseV1 is the plugin's response to a HookRequestV1.
@@ -109,6 +110,7 @@ message HookResponseV1 {
   string request_id  = 1;
   bool   deny        = 2; // pre-hook only: true = abort the command
   string deny_reason = 3;
+  map<string, string> context_values = 4; // pre-hook: values to add to command context
 }
 
 // ResultV1 is a recursive RESP-like value tree for command results.

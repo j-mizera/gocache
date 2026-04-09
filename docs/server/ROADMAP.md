@@ -36,15 +36,37 @@
 
 ### Next
 
-- Example plugins: auth (critical), metrics (non-critical), rate limiter (critical)
+- Metrics plugin (non-critical): Prometheus `/metrics` endpoint with command counters, latency histograms, memory usage
 - Plugin-to-server cache read-back (allows plugins to query cache state)
 
-## Phase 3: Observability
+## Phase 3: REX Metadata + Observability
 
-- OpenTelemetry tracing integration (span per command, propagation through plugin IPC)
+### REX META -- Per-Request Metadata
+
+Stateless metadata directives attached to individual commands, not connection state. Metadata is discarded after each command executes.
+
+```
+META traceparent 00-abc123-def456-01
+META authorization Bearer eyJhbG...
+KAFKA:PRODUCE topic message
+```
+
+Enables:
+- OpenTelemetry trace context propagation per-request (different operations on the same connection can belong to different traces)
+- Per-request OAuth2 token validation (no stale tokens, no connection-scoped auth)
+- Arbitrary plugin-defined metadata (tenant ID, request ID, priority hints)
+
+Implementation:
+- RESP parser collects META lines into a temporary map, attaches to next command, discards after execution
+- GCPC protocol: `metadata` field added to `CommandRequestV1` and `HookRequestV1`
+- Standard Redis clients unaffected (never send META)
+
+### Observability
+
+- OpenTelemetry tracing via REX META context propagation (span per command, parent spans from client trace context)
 - Health check HTTP endpoint (`/healthz`, `/readyz`)
-- Prometheus metrics exporter plugin (command latency histograms, connection count, memory usage, hit/miss ratio)
-- Custom metrics aggregation plugin
+- Upgrade metrics plugin with OTEL trace export
+- Custom metrics aggregation
 
 ## Phase 4: Production Hardening
 
@@ -63,8 +85,9 @@
 
 ## Phase 6: Advanced Plugin Ecosystem
 
-- OAuth2/OIDC authentication plugin (critical)
-- Kafka bidirectional connector plugin
+- OAuth2/OIDC authentication plugin (critical, uses REX META for per-request token validation)
+- Kafka event streaming plugin (post-hooks on mutations, selective key namespace streaming to topics)
+- Rate limiter plugin (GoCache as a rate limiting service: sliding window, token bucket, Lua-scriptable policies via REX commands)
 - Stream processing: XADD, XREAD, XRANGE, consumer groups
 - Geospatial commands: GEOADD, GEODIST, GEORADIUS
 - Full-text search plugin

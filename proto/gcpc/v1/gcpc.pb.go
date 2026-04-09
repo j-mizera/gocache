@@ -884,8 +884,9 @@ type HookRequestV1 struct {
 	Phase         HookPhaseV1            `protobuf:"varint,2,opt,name=phase,proto3,enum=gcpc.v1.HookPhaseV1" json:"phase,omitempty"`
 	Command       string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"` // the command being hooked (e.g. "SET")
 	Args          []string               `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`
-	ResultValue   string                 `protobuf:"bytes,5,opt,name=result_value,json=resultValue,proto3" json:"result_value,omitempty"` // post-hook only: serialized result
-	ResultError   string                 `protobuf:"bytes,6,opt,name=result_error,json=resultError,proto3" json:"result_error,omitempty"` // post-hook only: error string if any
+	ResultValue   string                 `protobuf:"bytes,5,opt,name=result_value,json=resultValue,proto3" json:"result_value,omitempty"`                                                // post-hook only: serialized result
+	ResultError   string                 `protobuf:"bytes,6,opt,name=result_error,json=resultError,proto3" json:"result_error,omitempty"`                                                // post-hook only: error string if any
+	Context       map[string]string      `protobuf:"bytes,7,rep,name=context,proto3" json:"context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // accumulated hook context (server + own namespace + shared)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -962,6 +963,13 @@ func (x *HookRequestV1) GetResultError() string {
 	return ""
 }
 
+func (x *HookRequestV1) GetContext() map[string]string {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
 // HookResponseV1 is the plugin's response to a HookRequestV1.
 // Only required for critical plugin hooks (non-critical are fire-and-forget).
 type HookResponseV1 struct {
@@ -969,6 +977,7 @@ type HookResponseV1 struct {
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Deny          bool                   `protobuf:"varint,2,opt,name=deny,proto3" json:"deny,omitempty"` // pre-hook only: true = abort the command
 	DenyReason    string                 `protobuf:"bytes,3,opt,name=deny_reason,json=denyReason,proto3" json:"deny_reason,omitempty"`
+	ContextValues map[string]string      `protobuf:"bytes,4,rep,name=context_values,json=contextValues,proto3" json:"context_values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // pre-hook: values to add to command context
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1022,6 +1031,13 @@ func (x *HookResponseV1) GetDenyReason() string {
 		return x.DenyReason
 	}
 	return ""
+}
+
+func (x *HookResponseV1) GetContextValues() map[string]string {
+	if x != nil {
+		return x.ContextValues
+	}
+	return nil
 }
 
 // ResultV1 is a recursive RESP-like value tree for command results.
@@ -1410,7 +1426,7 @@ const file_proto_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\x11CommandResponseV1\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12)\n" +
-	"\x06result\x18\x02 \x01(\v2\x11.gcpc.v1.ResultV1R\x06result\"\xce\x01\n" +
+	"\x06result\x18\x02 \x01(\v2\x11.gcpc.v1.ResultV1R\x06result\"\xc9\x02\n" +
 	"\rHookRequestV1\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12*\n" +
@@ -1418,13 +1434,21 @@ const file_proto_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\acommand\x18\x03 \x01(\tR\acommand\x12\x12\n" +
 	"\x04args\x18\x04 \x03(\tR\x04args\x12!\n" +
 	"\fresult_value\x18\x05 \x01(\tR\vresultValue\x12!\n" +
-	"\fresult_error\x18\x06 \x01(\tR\vresultError\"d\n" +
+	"\fresult_error\x18\x06 \x01(\tR\vresultError\x12=\n" +
+	"\acontext\x18\a \x03(\v2#.gcpc.v1.HookRequestV1.ContextEntryR\acontext\x1a:\n" +
+	"\fContextEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf9\x01\n" +
 	"\x0eHookResponseV1\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04deny\x18\x02 \x01(\bR\x04deny\x12\x1f\n" +
 	"\vdeny_reason\x18\x03 \x01(\tR\n" +
-	"denyReason\"\xae\x02\n" +
+	"denyReason\x12Q\n" +
+	"\x0econtext_values\x18\x04 \x03(\v2*.gcpc.v1.HookResponseV1.ContextValuesEntryR\rcontextValues\x1a@\n" +
+	"\x12ContextValuesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xae\x02\n" +
 	"\bResultV1\x12%\n" +
 	"\rsimple_string\x18\x01 \x01(\tH\x00R\fsimpleString\x12\x16\n" +
 	"\x05error\x18\x02 \x01(\tH\x00R\x05error\x12\x1a\n" +
@@ -1462,7 +1486,7 @@ func file_proto_gcpc_v1_gcpc_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_gcpc_v1_gcpc_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_gcpc_v1_gcpc_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_proto_gcpc_v1_gcpc_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_proto_gcpc_v1_gcpc_proto_goTypes = []any{
 	(HookPhaseV1)(0),          // 0: gcpc.v1.HookPhaseV1
 	(*EnvelopeV1)(nil),        // 1: gcpc.v1.EnvelopeV1
@@ -1482,6 +1506,8 @@ var file_proto_gcpc_v1_gcpc_proto_goTypes = []any{
 	(*ResultArrayV1)(nil),     // 15: gcpc.v1.ResultArrayV1
 	(*ResultMapV1)(nil),       // 16: gcpc.v1.ResultMapV1
 	(*ResultEntryV1)(nil),     // 17: gcpc.v1.ResultEntryV1
+	nil,                       // 18: gcpc.v1.HookRequestV1.ContextEntry
+	nil,                       // 19: gcpc.v1.HookResponseV1.ContextValuesEntry
 }
 var file_proto_gcpc_v1_gcpc_proto_depIdxs = []int32{
 	2,  // 0: gcpc.v1.EnvelopeV1.register:type_name -> gcpc.v1.RegisterV1
@@ -1499,16 +1525,18 @@ var file_proto_gcpc_v1_gcpc_proto_depIdxs = []int32{
 	0,  // 12: gcpc.v1.HookDeclV1.phase:type_name -> gcpc.v1.HookPhaseV1
 	14, // 13: gcpc.v1.CommandResponseV1.result:type_name -> gcpc.v1.ResultV1
 	0,  // 14: gcpc.v1.HookRequestV1.phase:type_name -> gcpc.v1.HookPhaseV1
-	15, // 15: gcpc.v1.ResultV1.array:type_name -> gcpc.v1.ResultArrayV1
-	16, // 16: gcpc.v1.ResultV1.map_val:type_name -> gcpc.v1.ResultMapV1
-	14, // 17: gcpc.v1.ResultArrayV1.elements:type_name -> gcpc.v1.ResultV1
-	17, // 18: gcpc.v1.ResultMapV1.entries:type_name -> gcpc.v1.ResultEntryV1
-	14, // 19: gcpc.v1.ResultEntryV1.value:type_name -> gcpc.v1.ResultV1
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	18, // 15: gcpc.v1.HookRequestV1.context:type_name -> gcpc.v1.HookRequestV1.ContextEntry
+	19, // 16: gcpc.v1.HookResponseV1.context_values:type_name -> gcpc.v1.HookResponseV1.ContextValuesEntry
+	15, // 17: gcpc.v1.ResultV1.array:type_name -> gcpc.v1.ResultArrayV1
+	16, // 18: gcpc.v1.ResultV1.map_val:type_name -> gcpc.v1.ResultMapV1
+	14, // 19: gcpc.v1.ResultArrayV1.elements:type_name -> gcpc.v1.ResultV1
+	17, // 20: gcpc.v1.ResultMapV1.entries:type_name -> gcpc.v1.ResultEntryV1
+	14, // 21: gcpc.v1.ResultEntryV1.value:type_name -> gcpc.v1.ResultV1
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_proto_gcpc_v1_gcpc_proto_init() }
@@ -1544,7 +1572,7 @@ func file_proto_gcpc_v1_gcpc_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_gcpc_v1_gcpc_proto_rawDesc), len(file_proto_gcpc_v1_gcpc_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

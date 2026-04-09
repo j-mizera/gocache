@@ -1,0 +1,59 @@
+@startuml components_hook_context
+!include ../../../design/theme.iuml
+
+frame "Hook Context System (cmdctx)" as F {
+
+    rectangle "Context Layers" as layers {
+        component [Server Context\n("_" prefix)] as server_ctx <<written by server\nreadable by all>>
+        component [Plugin Namespace\n("<plugin>." prefix)] as plugin_ctx <<auto-prefixed\nvisible to owner only>>
+        component [Shared Context\n("shared." prefix)] as shared_ctx <<explicit by plugin\nvisible to all>>
+    }
+
+    rectangle "Server-Injected Keys" as server_keys {
+        component [_start_ns] as start <<command start\ntimestamp (ns)>>
+        component [_elapsed_ns] as elapsed <<execution\nduration (ns)>>
+    }
+
+    rectangle "Lifecycle" as lifecycle {
+        component [cmdctx.New()] as new_ctx <<creates empty map>>
+        component [cmdctx.Merge()] as merge <<namespaces + merges\npre-hook response values>>
+        component [cmdctx.Filter()] as filter <<returns visible subset\nfor target plugin>>
+    }
+
+    rectangle "Flow" as flow {
+        component [Evaluator] as eval
+        component [Hook Executor] as exec
+        component [Pre-Hook Plugin] as pre
+        component [Post-Hook Plugin] as post
+    }
+
+    ' -- Server keys --
+    server_ctx --> start
+    server_ctx --> elapsed
+
+    ' -- Lifecycle flow --
+    eval --> new_ctx : 1. Create context
+    eval --> exec : 2. Pass to pre-hooks
+    exec --> filter : 3. Filter per plugin
+    filter --> pre : 4. Deliver filtered context
+    pre --> merge : 5. Plugin returns context_values
+    merge --> exec : 6. Merge into accumulated context
+    eval --> exec : 7. Pass to post-hooks (with _elapsed_ns)
+    exec --> filter : 8. Filter per plugin
+    filter --> post : 9. Deliver filtered context
+
+    note bottom of filter
+      **Visibility rules**:
+        Plugin "auth" sees: _*, auth.*, shared.*
+        Plugin "metrics" sees: _*, metrics.*, shared.*
+        Plugin "auth" does NOT see: metrics.*
+        Plugin "metrics" does NOT see: auth.*
+
+      **Auto-namespacing**:
+        Plugin "auth" writes {"tenant_id": "acme"}
+        Stored as: {"auth.tenant_id": "acme"}
+        To share: write {"shared.tenant_id": "acme"}
+    end note
+}
+
+@enduml

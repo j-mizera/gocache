@@ -111,6 +111,41 @@ Hooks allow plugins to intercept commands before or after execution.
 
 **Execution order**: Hooks fire in priority order (lower number first). Non-critical hooks fire asynchronously. Critical hooks fire sequentially -- the server waits for each response before proceeding to the next.
 
+## Hook Context
+
+Each command carries a per-command context map (`map<string, string>`) that flows through the hook chain. Pre-hooks can write values into the context; post-hooks can read the accumulated result. The context is discarded after the command completes.
+
+### Three namespaces
+
+| Namespace | Prefix | Written by | Visible to |
+|-----------|--------|------------|------------|
+| Server | `_` | Server only | All plugins |
+| Plugin-private | `<plugin>.` | Plugin (auto-prefixed) | Owning plugin only |
+| Shared | `shared.` | Plugin (explicit) | All plugins |
+
+### Server-injected keys
+
+| Key | When | Description |
+|-----|------|-------------|
+| `_start_ns` | Before pre-hooks | Command start timestamp (nanoseconds since epoch) |
+| `_elapsed_ns` | Before post-hooks | Command execution duration (nanoseconds) |
+
+These constants are available in the `cmdctx` package as `cmdctx.StartNs` and `cmdctx.ElapsedNs`.
+
+### Namespace enforcement
+
+When a pre-hook response includes `context_values`, the server auto-prefixes each key with `<plugin_name>.` unless the key already starts with `shared.`. When building a hook request for a specific plugin, the server filters the context to include only:
+
+- `_*` keys (server context)
+- `<target_plugin>.*` keys (the target plugin's own namespace)
+- `shared.*` keys (cross-plugin shared)
+
+This prevents plugins from reading each other's private state. To share data across plugins, use the `shared.` prefix explicitly.
+
+### Wire format
+
+`HookRequestV1` carries the filtered context in a `map<string, string> context` field (field 7). `HookResponseV1` carries plugin-written values in a `map<string, string> context_values` field (field 4).
+
 ## Scope Negotiation
 
 Plugins declare requested scopes in the `Register` message. The server validates against the configuration-defined allowlist and returns the granted set in `RegisterAck`.
@@ -135,9 +170,11 @@ The full Protobuf schema is at `proto/gcpc/v1/gcpc.proto`.
 | Component | [Command Routing](design/component/components_command_routing.puml) | Main + REX namespace routing |
 | Component | [Hook & Priority System](design/component/components_hooks_priority.puml) | Hook registry, executor, priority dispatch |
 | Component | [Permission Scopes](design/component/components_permission_scopes.puml) | Scope model, validation, enforcement |
+| Component | [Hook Context](design/component/components_hook_context.puml) | Context namespacing, lifecycle, visibility rules |
 | Sequence | [Plugin Registration](design/sequence/sequence_plugin_registration.puml) | Registration handshake flow |
 | Sequence | [Command Routing](design/sequence/sequence_plugin_command_routing.puml) | Plugin command dispatch over IPC |
-| Sequence | [Hook Flow](design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution with critical/non-critical dispatch |
+| Sequence | [Hook Flow](design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution with context propagation |
+| Sequence | [Hook Context Flow](design/sequence/sequence_hook_context.puml) | Context namespacing and filtering across multiple plugins |
 | Sequence | [Scope Registration](design/sequence/sequence_scope_registration.puml) | Scope negotiation during registration |
 | Sequence | [Scope Enforcement](design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
 | State | [Plugin Lifecycle](design/state/state_plugin_lifecycle.puml) | Plugin FSM: Loaded -> Running -> Shutdown |

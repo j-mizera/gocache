@@ -93,7 +93,7 @@ func NewShutdownAck() *gcpc.EnvelopeV1 {
 	}
 }
 
-func NewHookRequest(requestID string, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string) *gcpc.EnvelopeV1 {
+func NewHookRequest(requestID string, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string, ctx map[string]string) *gcpc.EnvelopeV1 {
 	return &gcpc.EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      id(),
@@ -105,20 +105,22 @@ func NewHookRequest(requestID string, phase gcpc.HookPhaseV1, command string, ar
 				Args:        args,
 				ResultValue: resultValue,
 				ResultError: resultError,
+				Context:     ctx,
 			},
 		},
 	}
 }
 
-func NewHookResponse(requestID string, deny bool, denyReason string) *gcpc.EnvelopeV1 {
+func NewHookResponse(requestID string, deny bool, denyReason string, contextValues map[string]string) *gcpc.EnvelopeV1 {
 	return &gcpc.EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      id(),
 		Payload: &gcpc.EnvelopeV1_HookResponse{
 			HookResponse: &gcpc.HookResponseV1{
-				RequestId:  requestID,
-				Deny:       deny,
-				DenyReason: denyReason,
+				RequestId:     requestID,
+				Deny:          deny,
+				DenyReason:    denyReason,
+				ContextValues: contextValues,
 			},
 		},
 	}

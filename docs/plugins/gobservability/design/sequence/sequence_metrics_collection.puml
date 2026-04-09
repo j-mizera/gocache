@@ -1,0 +1,45 @@
+@startuml sequence_metrics_collection
+!include ../../../../design/theme.iuml
+
+mainframe **sd** Gobservability Metrics Collection
+
+actor Client
+participant "GoCache Server" as Server
+participant "Hook Executor" as Exec
+participant "Gobservability\nPlugin" as Plugin
+participant "Collector" as Collector
+actor "Prometheus" as Prom
+
+== Command Execution ==
+
+Client -> Server : SET user:1 "John"
+Server -> Server : Execute command\nMeasure elapsed time
+
+== Post-Hook Dispatch ==
+
+Server -> Exec : RunPostHooks("SET", args, "OK", "", hookCtx)
+note right : hookCtx contains:\n  _start_ns = "171270..."\n  _elapsed_ns = "150000"
+
+Exec ->> Plugin : HookRequestV1 (POST)\n(fire-and-forget)
+note right : Non-critical:\nserver does NOT wait
+
+Plugin -> Plugin : Parse _elapsed_ns\nfrom context
+Plugin -> Collector : Record("SET", 150000, false)
+activate Collector
+Collector -> Collector : total["SET"]++\nsum["SET"] += 0.00015\nbucket[0] (le=0.001)++
+deactivate Collector
+
+Server --> Client : +OK
+note left : Response sent immediately.\nDoes not wait for plugin.
+
+== Prometheus Scrape ==
+
+Prom -> Plugin : GET /metrics
+Plugin -> Collector : WritePrometheus(w)
+activate Collector
+Collector -> Collector : Lock, snapshot, unlock
+Collector --> Plugin : Prometheus text format
+deactivate Collector
+Plugin --> Prom : text/plain\ngocache_commands_total{command="SET"} 1\ngocache_command_duration_seconds_bucket{...}
+
+@enduml

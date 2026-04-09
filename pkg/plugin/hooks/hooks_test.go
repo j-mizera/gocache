@@ -188,14 +188,14 @@ func TestExecutorPreHookDeny(t *testing.T) {
 		if req.Command != "SET" {
 			t.Errorf("expected SET, got %s", req.Command)
 		}
-		resp := protocol.NewHookResponse(req.RequestId, true, "permission denied")
+		resp := protocol.NewHookResponse(req.RequestId, true, "permission denied", nil)
 		if err := clientConn.Send(resp); err != nil {
 			t.Errorf("plugin send: %v", err)
 		}
 	}()
 
 	ctx := context.Background()
-	result := exec.RunPreHooks(ctx, "SET", []string{"key", "val"})
+	result := exec.RunPreHooks(ctx, "SET", []string{"key", "val"}, nil)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -227,11 +227,11 @@ func TestExecutorPreHookAllow(t *testing.T) {
 	go func() {
 		env, _ := clientConn.Recv()
 		req := env.GetHookRequest()
-		resp := protocol.NewHookResponse(req.RequestId, false, "")
+		resp := protocol.NewHookResponse(req.RequestId, false, "", nil)
 		_ = clientConn.Send(resp)
 	}()
 
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"})
+	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
 	if result == nil || result.Denied {
 		t.Error("expected command to be allowed")
 	}
@@ -267,7 +267,7 @@ func TestExecutorNonCriticalFireAndForget(t *testing.T) {
 	}()
 
 	// Non-critical pre-hooks should not block — returns immediately.
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"})
+	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
 	if result == nil || result.Denied {
 		t.Error("non-critical hook should not deny")
 	}
@@ -290,7 +290,7 @@ func TestExecutorNoHooksZeroCost(t *testing.T) {
 	}
 
 	// Should return nil immediately — no allocations, no goroutines.
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"})
+	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
 	if result != nil {
 		t.Error("expected nil result when no hooks")
 	}
@@ -321,11 +321,11 @@ func TestExecutorPostHook(t *testing.T) {
 		if req.ResultValue != "OK" {
 			t.Errorf("expected result 'OK', got %q", req.ResultValue)
 		}
-		resp := protocol.NewHookResponse(req.RequestId, false, "")
+		resp := protocol.NewHookResponse(req.RequestId, false, "", nil)
 		_ = clientConn.Send(resp)
 	}()
 
-	exec.RunPostHooks(context.Background(), "SET", []string{"key", "val"}, "OK", "")
+	exec.RunPostHooks(context.Background(), "SET", []string{"key", "val"}, "OK", "", nil)
 
 	clientConn.Close()
 }
@@ -353,7 +353,7 @@ func TestExecutorPreHookTimeout(t *testing.T) {
 	}()
 
 	// Should fail-open (allow command) after timeout.
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"})
+	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
 	if result == nil || result.Denied {
 		t.Error("expected fail-open on timeout (command allowed)")
 	}
@@ -376,7 +376,7 @@ func TestExecutorNoMatchReturnsNil(t *testing.T) {
 	exec := NewExecutor(reg, time.Second)
 
 	// GET should not trigger hooks.
-	result := exec.RunPreHooks(context.Background(), "GET", []string{"key"})
+	result := exec.RunPreHooks(context.Background(), "GET", []string{"key"}, nil)
 	if result != nil {
 		t.Error("expected nil for non-matching command")
 	}

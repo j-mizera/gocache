@@ -260,9 +260,11 @@ See [GCPC documentation](../gcpc/README.md) for protocol details and the followi
 | Component | [Command Routing](../gcpc/design/component/components_command_routing.puml) | Main + REX namespace routing |
 | Component | [Hook & Priority](../gcpc/design/component/components_hooks_priority.puml) | Hook registry and priority dispatch |
 | Component | [Permission Scopes](../gcpc/design/component/components_permission_scopes.puml) | Scope model and enforcement |
+| Component | [Hook Context](../gcpc/design/component/components_hook_context.puml) | Context namespacing, lifecycle, visibility |
 | Sequence | [Plugin Registration](../gcpc/design/sequence/sequence_plugin_registration.puml) | Registration handshake |
 | Sequence | [Command Dispatch](../gcpc/design/sequence/sequence_plugin_command_routing.puml) | Plugin command routing over IPC |
-| Sequence | [Hook Flow](../gcpc/design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution |
+| Sequence | [Hook Flow](../gcpc/design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution with context |
+| Sequence | [Hook Context Flow](../gcpc/design/sequence/sequence_hook_context.puml) | Context namespacing across multiple plugins |
 | Sequence | [Scope Registration](../gcpc/design/sequence/sequence_scope_registration.puml) | Scope negotiation |
 | Sequence | [Scope Enforcement](../gcpc/design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
 | State | [Plugin Lifecycle](../gcpc/design/state/state_plugin_lifecycle.puml) | Plugin FSM |

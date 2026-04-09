@@ -1,0 +1,48 @@
+@startuml sequence_hook_context
+!include ../../../design/theme.iuml
+
+mainframe **sd** Hook Context Namespacing & Flow
+
+participant "Evaluator" as Eval
+participant "Hook Executor" as Exec
+participant "Auth Plugin\n(critical, pri=1)" as Auth
+participant "RateLimiter Plugin\n(critical, pri=2)" as RL
+participant "Metrics Plugin\n(non-critical, pri=100)" as Metrics
+
+== Context Initialization ==
+
+Eval -> Eval : ctx = cmdctx.New()
+note right : ctx = {}
+
+Eval -> Eval : ctx["_start_ns"] = "1712700000000000000"
+note right : ctx = {\n  _start_ns: "171..."\n}
+
+== Pre-Hook: Auth (priority 1) ==
+
+Exec -> Auth : HookRequestV1\ncontext: {_start_ns}
+note right : Filter: _ keys only\n(no plugin data yet)
+Auth --> Exec : HookResponseV1\ncontext_values: {\n  tenant_id: "acme",\n  shared.user: "john"\n}
+
+Exec -> Exec : cmdctx.Merge(ctx, "auth", values)
+note right : ctx = {\n  _start_ns: "171...",\n  auth.tenant_id: "acme",\n  shared.user: "john"\n}
+
+== Pre-Hook: RateLimiter (priority 2) ==
+
+Exec -> RL : HookRequestV1\ncontext: {\n  _start_ns,\n  shared.user: "john"\n}
+note right : Filter: _ keys + shared.*\n(ratelimiter.* = none)\n(auth.* = hidden)
+RL --> Exec : HookResponseV1\ncontext_values: {\n  remaining: "42"\n}
+
+Exec -> Exec : cmdctx.Merge(ctx, "ratelimiter", values)
+note right : ctx = {\n  _start_ns: "171...",\n  auth.tenant_id: "acme",\n  shared.user: "john",\n  ratelimiter.remaining: "42"\n}
+
+== Command Execution ==
+
+Eval -> Eval : execute command
+Eval -> Eval : ctx["_elapsed_ns"] = "150000"
+
+== Post-Hook: Metrics (non-critical) ==
+
+Exec ->> Metrics : HookRequestV1\ncontext: {\n  _start_ns,\n  _elapsed_ns,\n  shared.user: "john"\n}
+note right : Filter: _ keys + shared.*\n(auth.* = hidden)\n(ratelimiter.* = hidden)\n\nMetrics reads _elapsed_ns\nfor latency histogram
+
+@enduml
