@@ -270,5 +270,5 @@ jobs:
         uses: newrelic/wiki-sync-action@main
         with:
           source: docs/
-          destination: .
+          destination: wiki
           token: ${{ secrets.GITHUB_TOKEN }}
