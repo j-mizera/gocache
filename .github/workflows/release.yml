@@ -254,3 +254,22 @@ jobs:
           name: plugins
           path: bin/plugins/
           retention-days: 30
+
+  wiki:
+    name: Sync Wiki
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pull latest
+        run: git pull origin main
+
+      - name: Sync to wiki
+        uses: newrelic/wiki-sync-action@main
+        with:
+          source: docs/
+          destination: .
+          token: ${{ secrets.GITHUB_TOKEN }}
