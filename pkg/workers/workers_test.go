@@ -105,11 +105,13 @@ func TestSnapshotWorker_UpdateFile(t *testing.T) {
 
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file1)
 	w.Start()
-	defer w.Stop()
 
 	// Switch to file2.
 	w.UpdateFile(file2)
 	time.Sleep(200 * time.Millisecond)
+
+	// Stop before TempDir cleanup to avoid race on directory removal.
+	w.Stop()
 
 	if _, err := os.Stat(file2); os.IsNotExist(err) {
 		t.Error("expected snapshot at updated file path")
