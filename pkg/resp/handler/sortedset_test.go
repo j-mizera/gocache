@@ -1,23 +1,16 @@
-package evaluator
+package handler_test
 
 import (
 	"gocache/pkg/cache"
-	"gocache/pkg/clientctx"
 	"gocache/pkg/engine"
 	"testing"
 )
 
 func TestEvaluator_SortedSet(t *testing.T) {
-	cacheInstance := cache.New()
-	engineInstance := engine.New(cacheInstance)
-	go engineInstance.Run()
-	defer engineInstance.Stop()
-
-	evalInstance := New(cacheInstance, engineInstance, "", "", nil, nil)
-	ctx := clientctx.New()
+	c, e, ctx := setup(t)
 
 	// Test ZADD single member
-	res := evalInstance.Evaluate(ctx, "ZADD", []string{"leaderboard", "100", "player1"})
+	res := eval(t, c, e, ctx, "ZADD", []string{"leaderboard", "100", "player1"})
 	if res.Err != nil {
 		t.Fatalf("ZADD failed: %v", res.Err)
 	}
@@ -26,7 +19,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZADD multiple members
-	res = evalInstance.Evaluate(ctx, "ZADD", []string{"leaderboard", "200", "player2", "150", "player3", "100", "player1"})
+	res = eval(t, c, e, ctx, "ZADD", []string{"leaderboard", "200", "player2", "150", "player3", "100", "player1"})
 	if res.Err != nil {
 		t.Fatalf("ZADD multiple failed: %v", res.Err)
 	}
@@ -35,7 +28,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZCARD
-	res = evalInstance.Evaluate(ctx, "ZCARD", []string{"leaderboard"})
+	res = eval(t, c, e, ctx, "ZCARD", []string{"leaderboard"})
 	if res.Err != nil {
 		t.Fatalf("ZCARD failed: %v", res.Err)
 	}
@@ -44,7 +37,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZSCORE
-	res = evalInstance.Evaluate(ctx, "ZSCORE", []string{"leaderboard", "player2"})
+	res = eval(t, c, e, ctx, "ZSCORE", []string{"leaderboard", "player2"})
 	if res.Err != nil {
 		t.Fatalf("ZSCORE failed: %v", res.Err)
 	}
@@ -53,7 +46,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZSCORE for non-existent member
-	res = evalInstance.Evaluate(ctx, "ZSCORE", []string{"leaderboard", "player99"})
+	res = eval(t, c, e, ctx, "ZSCORE", []string{"leaderboard", "player99"})
 	if res.Err != nil {
 		t.Fatalf("ZSCORE failed: %v", res.Err)
 	}
@@ -62,7 +55,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZRANGE without scores
-	res = evalInstance.Evaluate(ctx, "ZRANGE", []string{"leaderboard", "0", "-1"})
+	res = eval(t, c, e, ctx, "ZRANGE", []string{"leaderboard", "0", "-1"})
 	if res.Err != nil {
 		t.Fatalf("ZRANGE failed: %v", res.Err)
 	}
@@ -82,7 +75,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZRANGE with scores
-	res = evalInstance.Evaluate(ctx, "ZRANGE", []string{"leaderboard", "0", "1", "WITHSCORES"})
+	res = eval(t, c, e, ctx, "ZRANGE", []string{"leaderboard", "0", "1", "WITHSCORES"})
 	if res.Err != nil {
 		t.Fatalf("ZRANGE WITHSCORES failed: %v", res.Err)
 	}
@@ -95,7 +88,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZRANGE with negative indices
-	res = evalInstance.Evaluate(ctx, "ZRANGE", []string{"leaderboard", "-2", "-1"})
+	res = eval(t, c, e, ctx, "ZRANGE", []string{"leaderboard", "-2", "-1"})
 	if res.Err != nil {
 		t.Fatalf("ZRANGE with negative indices failed: %v", res.Err)
 	}
@@ -108,7 +101,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZRANK
-	res = evalInstance.Evaluate(ctx, "ZRANK", []string{"leaderboard", "player3"})
+	res = eval(t, c, e, ctx, "ZRANK", []string{"leaderboard", "player3"})
 	if res.Err != nil {
 		t.Fatalf("ZRANK failed: %v", res.Err)
 	}
@@ -117,7 +110,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZRANK for non-existent member
-	res = evalInstance.Evaluate(ctx, "ZRANK", []string{"leaderboard", "player99"})
+	res = eval(t, c, e, ctx, "ZRANK", []string{"leaderboard", "player99"})
 	if res.Err != nil {
 		t.Fatalf("ZRANK failed: %v", res.Err)
 	}
@@ -126,7 +119,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZCOUNT
-	res = evalInstance.Evaluate(ctx, "ZCOUNT", []string{"leaderboard", "100", "180"})
+	res = eval(t, c, e, ctx, "ZCOUNT", []string{"leaderboard", "100", "180"})
 	if res.Err != nil {
 		t.Fatalf("ZCOUNT failed: %v", res.Err)
 	}
@@ -135,7 +128,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZREM
-	res = evalInstance.Evaluate(ctx, "ZREM", []string{"leaderboard", "player3"})
+	res = eval(t, c, e, ctx, "ZREM", []string{"leaderboard", "player3"})
 	if res.Err != nil {
 		t.Fatalf("ZREM failed: %v", res.Err)
 	}
@@ -144,7 +137,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Verify removal
-	res = evalInstance.Evaluate(ctx, "ZCARD", []string{"leaderboard"})
+	res = eval(t, c, e, ctx, "ZCARD", []string{"leaderboard"})
 	if res.Err != nil {
 		t.Fatalf("ZCARD after ZREM failed: %v", res.Err)
 	}
@@ -153,7 +146,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test ZREM multiple members
-	res = evalInstance.Evaluate(ctx, "ZREM", []string{"leaderboard", "player1", "player2"})
+	res = eval(t, c, e, ctx, "ZREM", []string{"leaderboard", "player1", "player2"})
 	if res.Err != nil {
 		t.Fatalf("ZREM multiple failed: %v", res.Err)
 	}
@@ -162,7 +155,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Verify key is deleted when sorted set is empty
-	res = evalInstance.Evaluate(ctx, "EXISTS", []string{"leaderboard"})
+	res = eval(t, c, e, ctx, "EXISTS", []string{"leaderboard"})
 	if res.Err != nil {
 		t.Fatalf("EXISTS failed: %v", res.Err)
 	}
@@ -171,14 +164,14 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	}
 
 	// Test WRONGTYPE error
-	evalInstance.Evaluate(ctx, "SET", []string{"stringkey", "value"})
-	res = evalInstance.Evaluate(ctx, "ZADD", []string{"stringkey", "100", "member"})
+	eval(t, c, e, ctx, "SET", []string{"stringkey", "value"})
+	res = eval(t, c, e, ctx, "ZADD", []string{"stringkey", "100", "member"})
 	if res.Err == nil {
 		t.Error("Expected WRONGTYPE error for ZADD on string key")
 	}
 
 	// Test invalid score
-	res = evalInstance.Evaluate(ctx, "ZADD", []string{"newzset", "notanumber", "member"})
+	res = eval(t, c, e, ctx, "ZADD", []string{"newzset", "notanumber", "member"})
 	if res.Err == nil {
 		t.Error("Expected error for invalid score")
 	}
@@ -186,36 +179,29 @@ func TestEvaluator_SortedSet(t *testing.T) {
 
 func TestZadd_OOM_NoEviction(t *testing.T) {
 	// Use a tiny cache with noeviction — ZADD should return an OOM error.
-	cacheInstance := cache.NewWithBytes(1, cache.EvictionNone)
-	engineInstance := engine.New(cacheInstance)
-	go engineInstance.Run()
-	defer engineInstance.Stop()
+	c := cache.NewWithBytes(1, cache.EvictionNone)
+	e := engine.New(c)
+	go e.Run()
+	defer e.Stop()
 
-	evalInstance := New(cacheInstance, engineInstance, "", "", nil, nil)
-	ctx := clientctx.New()
+	ctx := setupCtx(t)
 
 	// First ZADD may succeed if entry fits; subsequent must fail.
-	_ = evalInstance.Evaluate(ctx, "ZADD", []string{"zz", "1", "m1"})
+	_ = eval(t, c, e, ctx, "ZADD", []string{"zz", "1", "m1"})
 
-	res := evalInstance.Evaluate(ctx, "ZADD", []string{"zz2", "2", "m2"})
+	res := eval(t, c, e, ctx, "ZADD", []string{"zz2", "2", "m2"})
 	if res.Err == nil {
 		t.Error("expected OOM error from ZADD with noeviction, got nil")
 	}
 }
 
 func TestSortedSet_Lexicographic(t *testing.T) {
-	cacheInstance := cache.New()
-	engineInstance := engine.New(cacheInstance)
-	go engineInstance.Run()
-	defer engineInstance.Stop()
-
-	evalInstance := New(cacheInstance, engineInstance, "", "", nil, nil)
-	ctx := clientctx.New()
+	c, e, ctx := setup(t)
 
 	// Add members with same score - should sort lexicographically
-	evalInstance.Evaluate(ctx, "ZADD", []string{"samescores", "1", "charlie", "1", "alice", "1", "bob"})
+	eval(t, c, e, ctx, "ZADD", []string{"samescores", "1", "charlie", "1", "alice", "1", "bob"})
 
-	res := evalInstance.Evaluate(ctx, "ZRANGE", []string{"samescores", "0", "-1"})
+	res := eval(t, c, e, ctx, "ZRANGE", []string{"samescores", "0", "-1"})
 	if res.Err != nil {
 		t.Fatalf("ZRANGE failed: %v", res.Err)
 	}

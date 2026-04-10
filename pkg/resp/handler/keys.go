@@ -1,4 +1,4 @@
-package evaluator
+package handler
 
 import (
 	"fmt"
@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"gocache/pkg/cache"
+	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
 
-// TYPE key
-func (b *BaseEvaluator) handleType(cmdCtx *CommandContext) Result {
+// HandleType implements TYPE key.
+func HandleType(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -42,11 +43,11 @@ func (b *BaseEvaluator) handleType(cmdCtx *CommandContext) Result {
 		}
 		return resp.Value{Type: resp.SimpleString, Str: typeName}
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// RENAME key newkey
-func (b *BaseEvaluator) handleRename(cmdCtx *CommandContext) Result {
+// HandleRename implements RENAME key newkey.
+func HandleRename(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	executeFn := func() interface{} {
@@ -74,11 +75,11 @@ func (b *BaseEvaluator) handleRename(cmdCtx *CommandContext) Result {
 		}
 		return "OK"
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// RENAMENX key newkey
-func (b *BaseEvaluator) handleRenameNX(cmdCtx *CommandContext) Result {
+// HandleRenameNX implements RENAMENX key newkey.
+func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	executeFn := func() interface{} {
@@ -115,11 +116,11 @@ func (b *BaseEvaluator) handleRenameNX(cmdCtx *CommandContext) Result {
 		}
 		return 1
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// KEYS pattern
-func (b *BaseEvaluator) handleKeys(cmdCtx *CommandContext) Result {
+// HandleKeys implements KEYS pattern.
+func HandleKeys(cmdCtx *command.Context) command.Result {
 	pattern := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		var keys []string
@@ -142,15 +143,15 @@ func (b *BaseEvaluator) handleKeys(cmdCtx *CommandContext) Result {
 		}
 		return keys
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SCAN cursor [MATCH pattern] [COUNT count]
-func (b *BaseEvaluator) handleScan(cmdCtx *CommandContext) Result {
+// HandleScan implements SCAN cursor [MATCH pattern] [COUNT count].
+func HandleScan(cmdCtx *command.Context) command.Result {
 	cursorStr := cmdCtx.Args[0]
 	cursor, err := strconv.Atoi(cursorStr)
 	if err != nil || cursor < 0 {
-		return Result{Value: resp.MarshalError("ERR value is not an integer or out of range")}
+		return command.Result{Value: resp.MarshalError("ERR value is not an integer or out of range")}
 	}
 
 	// Parse optional MATCH and COUNT arguments.
@@ -220,11 +221,11 @@ func (b *BaseEvaluator) handleScan(cmdCtx *CommandContext) Result {
 
 		return []interface{}{strconv.Itoa(nextCursor), page}
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// RANDOMKEY
-func (b *BaseEvaluator) handleRandomKey(cmdCtx *CommandContext) Result {
+// HandleRandomKey implements RANDOMKEY.
+func HandleRandomKey(cmdCtx *command.Context) command.Result {
 	executeFn := func() interface{} {
 		now := time.Now().UnixNano()
 		var found string
@@ -240,19 +241,19 @@ func (b *BaseEvaluator) handleRandomKey(cmdCtx *CommandContext) Result {
 		}
 		return found
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// OBJECT subcommand [key]
-func (b *BaseEvaluator) handleObject(cmdCtx *CommandContext) Result {
+// HandleObject implements OBJECT subcommand [key].
+func HandleObject(cmdCtx *command.Context) command.Result {
 	sub := strings.ToUpper(cmdCtx.Args[0])
 	switch sub {
 	case "ENCODING":
 		if len(cmdCtx.Args) < 2 {
-			return Result{Value: resp.ErrArgs("object")}
+			return command.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
-		return dispatch(cmdCtx, func() interface{} {
+		return command.Dispatch(cmdCtx, func() interface{} {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
 				return nil
@@ -283,10 +284,10 @@ func (b *BaseEvaluator) handleObject(cmdCtx *CommandContext) Result {
 		})
 	case "IDLETIME":
 		if len(cmdCtx.Args) < 2 {
-			return Result{Value: resp.ErrArgs("object")}
+			return command.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
-		return dispatch(cmdCtx, func() interface{} {
+		return command.Dispatch(cmdCtx, func() interface{} {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
 				return nil
@@ -300,12 +301,12 @@ func (b *BaseEvaluator) handleObject(cmdCtx *CommandContext) Result {
 			return idle
 		})
 	case "HELP":
-		return Result{Value: []string{
+		return command.Result{Value: []string{
 			"OBJECT ENCODING <key> - Return the encoding of the object stored at <key>.",
 			"OBJECT IDLETIME <key> - Return the idle time of the object stored at <key>.",
 			"OBJECT HELP - Return help about the OBJECT command.",
 		}}
 	default:
-		return Result{Value: resp.MarshalError(fmt.Sprintf("ERR unknown subcommand '%s'", cmdCtx.Args[0]))}
+		return command.Result{Value: resp.MarshalError(fmt.Sprintf("ERR unknown subcommand '%s'", cmdCtx.Args[0]))}
 	}
 }

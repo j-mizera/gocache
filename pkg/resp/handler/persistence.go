@@ -1,25 +1,26 @@
-package evaluator
+package handler
 
 import (
+	"gocache/pkg/command"
 	"gocache/pkg/logger"
 	"gocache/pkg/persistence"
 )
 
-func (b *BaseEvaluator) handleSnapshot(cmdCtx *CommandContext) Result {
+func HandleSnapshot(cmdCtx *command.Context) command.Result {
 	executeFn := func() interface{} {
-		if err := persistence.SaveSnapshot(b.snapshotFile, cmdCtx.Cache); err != nil {
+		if err := persistence.SaveSnapshot(cmdCtx.SnapshotFile, cmdCtx.Cache); err != nil {
 			return err
 		}
 		return "OK"
 	}
-	res := dispatch(cmdCtx, executeFn)
+	res := command.Dispatch(cmdCtx, executeFn)
 	if res.Err != nil {
 		logger.Error().Err(res.Err).Msg("snapshot command failed")
 	}
 	return res
 }
 
-func (b *BaseEvaluator) handleLoadSnapshot(cmdCtx *CommandContext) Result {
+func HandleLoadSnapshot(cmdCtx *command.Context) command.Result {
 	filename := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		if err := persistence.LoadSnapshot(filename, cmdCtx.Cache); err != nil {
@@ -27,7 +28,7 @@ func (b *BaseEvaluator) handleLoadSnapshot(cmdCtx *CommandContext) Result {
 		}
 		return "OK"
 	}
-	res := dispatch(cmdCtx, executeFn)
+	res := command.Dispatch(cmdCtx, executeFn)
 	if res.Err != nil {
 		logger.Error().Err(res.Err).Str("file", filename).Msg("loadsnapshot command failed")
 	}

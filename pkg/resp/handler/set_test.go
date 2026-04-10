@@ -1,25 +1,16 @@
-package evaluator
+package handler_test
 
 import (
 	"errors"
-	"gocache/pkg/cache"
-	"gocache/pkg/clientctx"
-	"gocache/pkg/engine"
 	"gocache/pkg/resp"
 	"testing"
 )
 
 func TestEvaluator_Set(t *testing.T) {
-	cacheInstance := cache.New()
-	engineInstance := engine.New(cacheInstance)
-	go engineInstance.Run()
-	defer engineInstance.Stop()
-
-	evalInstance := New(cacheInstance, engineInstance, "", "", nil, nil)
-	ctx := clientctx.New()
+	c, e, ctx := setup(t)
 
 	// Test SADD single member
-	res := evalInstance.Evaluate(ctx, "SADD", []string{"myset", "apple"})
+	res := eval(t, c, e, ctx, "SADD", []string{"myset", "apple"})
 	if res.Err != nil {
 		t.Fatalf("SADD failed: %v", res.Err)
 	}
@@ -28,7 +19,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test SADD multiple members
-	res = evalInstance.Evaluate(ctx, "SADD", []string{"myset", "banana", "cherry", "apple"})
+	res = eval(t, c, e, ctx, "SADD", []string{"myset", "banana", "cherry", "apple"})
 	if res.Err != nil {
 		t.Fatalf("SADD multiple failed: %v", res.Err)
 	}
@@ -37,7 +28,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test SISMEMBER
-	res = evalInstance.Evaluate(ctx, "SISMEMBER", []string{"myset", "banana"})
+	res = eval(t, c, e, ctx, "SISMEMBER", []string{"myset", "banana"})
 	if res.Err != nil {
 		t.Fatalf("SISMEMBER failed: %v", res.Err)
 	}
@@ -45,7 +36,7 @@ func TestEvaluator_Set(t *testing.T) {
 		t.Errorf("Expected 1 (member exists), got %v", res.Value)
 	}
 
-	res = evalInstance.Evaluate(ctx, "SISMEMBER", []string{"myset", "orange"})
+	res = eval(t, c, e, ctx, "SISMEMBER", []string{"myset", "orange"})
 	if res.Err != nil {
 		t.Fatalf("SISMEMBER failed: %v", res.Err)
 	}
@@ -54,7 +45,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test SCARD
-	res = evalInstance.Evaluate(ctx, "SCARD", []string{"myset"})
+	res = eval(t, c, e, ctx, "SCARD", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("SCARD failed: %v", res.Err)
 	}
@@ -63,7 +54,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test SMEMBERS
-	res = evalInstance.Evaluate(ctx, "SMEMBERS", []string{"myset"})
+	res = eval(t, c, e, ctx, "SMEMBERS", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("SMEMBERS failed: %v", res.Err)
 	}
@@ -73,7 +64,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test SREM
-	res = evalInstance.Evaluate(ctx, "SREM", []string{"myset", "banana"})
+	res = eval(t, c, e, ctx, "SREM", []string{"myset", "banana"})
 	if res.Err != nil {
 		t.Fatalf("SREM failed: %v", res.Err)
 	}
@@ -82,7 +73,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Verify removal
-	res = evalInstance.Evaluate(ctx, "SCARD", []string{"myset"})
+	res = eval(t, c, e, ctx, "SCARD", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("SCARD after SREM failed: %v", res.Err)
 	}
@@ -91,7 +82,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test SPOP
-	res = evalInstance.Evaluate(ctx, "SPOP", []string{"myset"})
+	res = eval(t, c, e, ctx, "SPOP", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("SPOP failed: %v", res.Err)
 	}
@@ -100,7 +91,7 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Verify size after pop
-	res = evalInstance.Evaluate(ctx, "SCARD", []string{"myset"})
+	res = eval(t, c, e, ctx, "SCARD", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("SCARD after SPOP failed: %v", res.Err)
 	}
@@ -109,13 +100,13 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test removing all members
-	res = evalInstance.Evaluate(ctx, "SPOP", []string{"myset"})
+	res = eval(t, c, e, ctx, "SPOP", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("SPOP failed: %v", res.Err)
 	}
 
 	// Verify key is deleted when set is empty
-	res = evalInstance.Evaluate(ctx, "EXISTS", []string{"myset"})
+	res = eval(t, c, e, ctx, "EXISTS", []string{"myset"})
 	if res.Err != nil {
 		t.Fatalf("EXISTS failed: %v", res.Err)
 	}
@@ -124,8 +115,8 @@ func TestEvaluator_Set(t *testing.T) {
 	}
 
 	// Test WRONGTYPE error
-	evalInstance.Evaluate(ctx, "SET", []string{"stringkey", "value"})
-	res = evalInstance.Evaluate(ctx, "SADD", []string{"stringkey", "member"})
+	eval(t, c, e, ctx, "SET", []string{"stringkey", "value"})
+	res = eval(t, c, e, ctx, "SADD", []string{"stringkey", "member"})
 	if !errors.Is(res.Err, resp.ErrWrongType) {
 		t.Error("Expected WRONGTYPE error for SADD on string key")
 	}

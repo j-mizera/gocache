@@ -1,112 +1,118 @@
-package evaluator
+package handler
 
 import (
+	"errors"
 	"fmt"
-	"gocache/pkg/cache"
-	"gocache/pkg/resp"
 	"strconv"
 	"strings"
 	"time"
+
+	"gocache/pkg/cache"
+	"gocache/pkg/command"
+	"gocache/pkg/resp"
 )
 
-// handlePing returns PONG with no arguments, or echoes the first argument.
-func (b *BaseEvaluator) handlePing(cmdCtx *CommandContext) Result {
+// ErrInvalidDuration is returned when a duration argument cannot be parsed.
+var ErrInvalidDuration = errors.New("invalid duration")
+
+// HandlePing returns PONG with no arguments, or echoes the first argument.
+func HandlePing(cmdCtx *command.Context) command.Result {
 	if len(cmdCtx.Args) == 0 {
-		return Result{Value: "PONG"}
+		return command.Result{Value: "PONG"}
 	}
-	return Result{Value: cmdCtx.Args[0]}
+	return command.Result{Value: cmdCtx.Args[0]}
 }
 
-// handleEcho returns the single argument as-is.
-func (b *BaseEvaluator) handleEcho(cmdCtx *CommandContext) Result {
-	return Result{Value: cmdCtx.Args[0]}
+// HandleEcho returns the single argument as-is.
+func HandleEcho(cmdCtx *command.Context) command.Result {
+	return command.Result{Value: cmdCtx.Args[0]}
 }
 
-// handleSelect accepts only DB 0; any other index is an error.
-func (b *BaseEvaluator) handleSelect(cmdCtx *CommandContext) Result {
+// HandleSelect accepts only DB 0; any other index is an error.
+func HandleSelect(cmdCtx *command.Context) command.Result {
 	idx, err := strconv.Atoi(cmdCtx.Args[0])
 	if err != nil || idx != 0 {
-		return Result{Value: resp.MarshalError("ERR DB index is out of range")}
+		return command.Result{Value: resp.MarshalError("ERR DB index is out of range")}
 	}
-	return Result{Value: "OK"}
+	return command.Result{Value: "OK"}
 }
 
-// handleFlushDB clears the entire cache (single-DB server, same as FLUSHALL).
-func (b *BaseEvaluator) handleFlushDB(cmdCtx *CommandContext) Result {
-	return dispatch(cmdCtx, func() interface{} {
+// HandleFlushDB clears the entire cache (single-DB server, same as FLUSHALL).
+func HandleFlushDB(cmdCtx *command.Context) command.Result {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		cmdCtx.Cache.Clear()
 		return "OK"
 	})
 }
 
-// handleFlushAll clears the entire cache.
-func (b *BaseEvaluator) handleFlushAll(cmdCtx *CommandContext) Result {
-	return dispatch(cmdCtx, func() interface{} {
+// HandleFlushAll clears the entire cache.
+func HandleFlushAll(cmdCtx *command.Context) command.Result {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		cmdCtx.Cache.Clear()
 		return "OK"
 	})
 }
 
-// handleAuth validates a password against requirePass.
-func (b *BaseEvaluator) handleAuth(cmdCtx *CommandContext) Result {
-	if b.requirePass == "" {
-		return Result{Value: resp.MarshalError("ERR Client sent AUTH, but no password is set")}
+// HandleAuth validates a password against RequirePass.
+func HandleAuth(cmdCtx *command.Context) command.Result {
+	if cmdCtx.RequirePass == "" {
+		return command.Result{Value: resp.MarshalError("ERR Client sent AUTH, but no password is set")}
 	}
-	if cmdCtx.Args[0] != b.requirePass {
-		return Result{Value: resp.MarshalError("WRONGPASS invalid username-password pair")}
+	if cmdCtx.Args[0] != cmdCtx.RequirePass {
+		return command.Result{Value: resp.MarshalError("WRONGPASS invalid username-password pair")}
 	}
 	cmdCtx.Client.Authenticated = true
-	return Result{Value: "OK"}
+	return command.Result{Value: "OK"}
 }
 
-// handleIncr atomically increments the integer value stored at key by 1.
-func (b *BaseEvaluator) handleIncr(cmdCtx *CommandContext) Result {
+// HandleIncr atomically increments the integer value stored at key by 1.
+func HandleIncr(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		return incrByDelta(cmdCtx, key, 1)
 	})
 }
 
-// handleDecr atomically decrements the integer value stored at key by 1.
-func (b *BaseEvaluator) handleDecr(cmdCtx *CommandContext) Result {
+// HandleDecr atomically decrements the integer value stored at key by 1.
+func HandleDecr(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		return incrByDelta(cmdCtx, key, -1)
 	})
 }
 
-// handleIncrBy increments by the supplied integer delta.
-func (b *BaseEvaluator) handleIncrBy(cmdCtx *CommandContext) Result {
+// HandleIncrBy increments by the supplied integer delta.
+func HandleIncrBy(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	delta, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return Result{Value: resp.ErrNotIntegerValue()}
+		return command.Result{Value: resp.ErrNotIntegerValue()}
 	}
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		return incrByDelta(cmdCtx, key, delta)
 	})
 }
 
-// handleDecrBy decrements by the supplied integer delta.
-func (b *BaseEvaluator) handleDecrBy(cmdCtx *CommandContext) Result {
+// HandleDecrBy decrements by the supplied integer delta.
+func HandleDecrBy(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	delta, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return Result{Value: resp.ErrNotIntegerValue()}
+		return command.Result{Value: resp.ErrNotIntegerValue()}
 	}
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		return incrByDelta(cmdCtx, key, -delta)
 	})
 }
 
-// handleIncrByFloat increments the float value stored at key.
-func (b *BaseEvaluator) handleIncrByFloat(cmdCtx *CommandContext) Result {
+// HandleIncrByFloat increments the float value stored at key.
+func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	incr, err := strconv.ParseFloat(cmdCtx.Args[1], 64)
 	if err != nil {
-		return Result{Value: resp.ErrNotFloatValue()}
+		return command.Result{Value: resp.ErrNotFloatValue()}
 	}
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		_, state := cmdCtx.Cache.TTLInternal(key)
 		if state == cache.ValueExpired {
 			cmdCtx.Cache.RawDelete(key)
@@ -134,12 +140,12 @@ func (b *BaseEvaluator) handleIncrByFloat(cmdCtx *CommandContext) Result {
 	})
 }
 
-// handleAppend appends value to the string stored at key, creating it if absent.
+// HandleAppend appends value to the string stored at key, creating it if absent.
 // Returns the new length of the string.
-func (b *BaseEvaluator) handleAppend(cmdCtx *CommandContext) Result {
+func HandleAppend(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	suffix := cmdCtx.Args[1]
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		_, state := cmdCtx.Cache.TTLInternal(key)
 		if state == cache.ValueExpired {
 			cmdCtx.Cache.RawDelete(key)
@@ -164,10 +170,10 @@ func (b *BaseEvaluator) handleAppend(cmdCtx *CommandContext) Result {
 	})
 }
 
-// handleStrlen returns the length of the string stored at key, or 0 if absent.
-func (b *BaseEvaluator) handleStrlen(cmdCtx *CommandContext) Result {
+// HandleStrlen returns the length of the string stored at key, or 0 if absent.
+func HandleStrlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		_, state := cmdCtx.Cache.TTLInternal(key)
 		if state == cache.ValueExpired {
 			cmdCtx.Cache.RawDelete(key)
@@ -186,10 +192,10 @@ func (b *BaseEvaluator) handleStrlen(cmdCtx *CommandContext) Result {
 	})
 }
 
-// handleMget returns the values for all specified keys (nil for absent/non-string).
-func (b *BaseEvaluator) handleMget(cmdCtx *CommandContext) Result {
+// HandleMget returns the values for all specified keys (nil for absent/non-string).
+func HandleMget(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		result := make([]interface{}, len(keys))
 		for i, key := range keys {
 			_, state := cmdCtx.Cache.TTLInternal(key)
@@ -214,12 +220,12 @@ func (b *BaseEvaluator) handleMget(cmdCtx *CommandContext) Result {
 	})
 }
 
-// handleMset sets multiple key-value pairs in a single call.
-func (b *BaseEvaluator) handleMset(cmdCtx *CommandContext) Result {
+// HandleMset sets multiple key-value pairs in a single call.
+func HandleMset(cmdCtx *command.Context) command.Result {
 	if len(cmdCtx.Args)%2 != 0 {
-		return Result{Value: resp.ErrArgs("mset")}
+		return command.Result{Value: resp.ErrArgs("mset")}
 	}
-	return dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() interface{} {
 		for i := 0; i < len(cmdCtx.Args); i += 2 {
 			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Args[i], cmdCtx.Args[i+1], 0); setErr != nil {
 				return setErr
@@ -230,8 +236,8 @@ func (b *BaseEvaluator) handleMset(cmdCtx *CommandContext) Result {
 }
 
 // incrByDelta is shared logic for INCR, DECR, INCRBY, DECRBY.
-// Must be called inside a dispatch closure (cache lock is held).
-func incrByDelta(cmdCtx *CommandContext, key string, delta int64) interface{} {
+// Must be called inside a Dispatch closure (cache lock is held).
+func incrByDelta(cmdCtx *command.Context, key string, delta int64) interface{} {
 	_, state := cmdCtx.Cache.TTLInternal(key)
 	if state == cache.ValueExpired {
 		cmdCtx.Cache.RawDelete(key)
@@ -259,8 +265,8 @@ func incrByDelta(cmdCtx *CommandContext, key string, delta int64) interface{} {
 	return newVal
 }
 
-// handleSet implements SET key value [NX|XX] [EX seconds|PX milliseconds] [KEEPTTL]
-func (b *BaseEvaluator) handleSet(cmdCtx *CommandContext) Result {
+// HandleSet implements SET key value [NX|XX] [EX seconds|PX milliseconds] [KEEPTTL]
+func HandleSet(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	val := cmdCtx.Args[1]
 
@@ -282,26 +288,26 @@ func (b *BaseEvaluator) handleSet(cmdCtx *CommandContext) Result {
 			keepTTL = true
 		case "EX":
 			if i+1 >= len(cmdCtx.Args) {
-				return Result{Value: resp.ErrSyntax()}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			i++
 			secs, err := strconv.ParseInt(cmdCtx.Args[i], 10, 64)
 			if err != nil || secs <= 0 {
-				return Result{Value: resp.ErrSyntax()}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			expiration = time.Now().Add(time.Duration(secs) * time.Second).UnixNano()
 		case "PX":
 			if i+1 >= len(cmdCtx.Args) {
-				return Result{Value: resp.ErrSyntax()}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			i++
 			ms, err := strconv.ParseInt(cmdCtx.Args[i], 10, 64)
 			if err != nil || ms <= 0 {
-				return Result{Value: resp.ErrSyntax()}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			expiration = time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
 		default:
-			return Result{Value: resp.ErrSyntax()}
+			return command.Result{Value: resp.ErrSyntax()}
 		}
 	}
 
@@ -327,12 +333,12 @@ func (b *BaseEvaluator) handleSet(cmdCtx *CommandContext) Result {
 		}
 		return "OK"
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// handleSetnx implements SETNX key value.
+// HandleSetnx implements SETNX key value.
 // Returns 1 if set, 0 if key already exists (non-expired).
-func (b *BaseEvaluator) handleSetnx(cmdCtx *CommandContext) Result {
+func HandleSetnx(cmdCtx *command.Context) command.Result {
 	key, val := cmdCtx.Args[0], cmdCtx.Args[1]
 	executeFn := func() interface{} {
 		_, found := cmdCtx.Cache.RawGet(key)
@@ -348,15 +354,15 @@ func (b *BaseEvaluator) handleSetnx(cmdCtx *CommandContext) Result {
 		}
 		return 1
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// handlePexpire implements PEXPIRE key milliseconds.
-func (b *BaseEvaluator) handlePexpire(cmdCtx *CommandContext) Result {
+// HandlePexpire implements PEXPIRE key milliseconds.
+func HandlePexpire(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	ms, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return Result{Err: ErrInvalidDuration}
+		return command.Result{Err: ErrInvalidDuration}
 	}
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -374,12 +380,12 @@ func (b *BaseEvaluator) handlePexpire(cmdCtx *CommandContext) Result {
 		}
 		return 1
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// handlePttl implements PTTL key.
+// HandlePttl implements PTTL key.
 // Returns remaining TTL in milliseconds, -1 if no TTL, -2 if absent/expired.
-func (b *BaseEvaluator) handlePttl(cmdCtx *CommandContext) Result {
+func HandlePttl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
@@ -393,10 +399,11 @@ func (b *BaseEvaluator) handlePttl(cmdCtx *CommandContext) Result {
 		}
 		return ttl.Milliseconds()
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleGet(cmdCtx *CommandContext) Result {
+// HandleGet implements GET key.
+func HandleGet(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -410,10 +417,11 @@ func (b *BaseEvaluator) handleGet(cmdCtx *CommandContext) Result {
 		}
 		return entry.Value
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleDelete(cmdCtx *CommandContext) Result {
+// HandleDelete implements DEL key [key ...].
+func HandleDelete(cmdCtx *command.Context) command.Result {
 	executeFn := func() interface{} {
 		count := 0
 		for _, key := range cmdCtx.Args {
@@ -425,10 +433,11 @@ func (b *BaseEvaluator) handleDelete(cmdCtx *CommandContext) Result {
 		}
 		return count
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleExists(cmdCtx *CommandContext) Result {
+// HandleExists implements EXISTS key.
+func HandleExists(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		_, found := cmdCtx.Cache.RawGet(key)
@@ -442,14 +451,15 @@ func (b *BaseEvaluator) handleExists(cmdCtx *CommandContext) Result {
 		}
 		return 1
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleExpire(cmdCtx *CommandContext) Result {
+// HandleExpire implements EXPIRE key seconds.
+func HandleExpire(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	secs, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil || secs <= 0 {
-		return Result{Err: ErrInvalidDuration}
+		return command.Result{Err: ErrInvalidDuration}
 	}
 	ttl := time.Duration(secs) * time.Second
 	executeFn := func() interface{} {
@@ -472,10 +482,11 @@ func (b *BaseEvaluator) handleExpire(cmdCtx *CommandContext) Result {
 		}
 		return 1
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleTtl(cmdCtx *CommandContext) Result {
+// HandleTtl implements TTL key.
+func HandleTtl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
@@ -490,16 +501,18 @@ func (b *BaseEvaluator) handleTtl(cmdCtx *CommandContext) Result {
 			return int64(ttl.Seconds())
 		}
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleDbsize(cmdCtx *CommandContext) Result {
+// HandleDbsize implements DBSIZE.
+func HandleDbsize(cmdCtx *command.Context) command.Result {
 	executeFn := func() interface{} {
 		return cmdCtx.Cache.Len()
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
+// humanBytes formats a byte count into a human-readable string.
 func humanBytes(n int64) string {
 	const (
 		kb = 1024
@@ -518,14 +531,15 @@ func humanBytes(n int64) string {
 	}
 }
 
-func (b *BaseEvaluator) handleInfo(cmdCtx *CommandContext) Result {
+// HandleInfo implements INFO [section].
+func HandleInfo(cmdCtx *command.Context) command.Result {
 	section := ""
 	if len(cmdCtx.Args) > 0 {
 		section = strings.ToLower(cmdCtx.Args[0])
 	}
 
 	if section != "" && section != "memory" {
-		return Result{Value: ""}
+		return command.Result{Value: ""}
 	}
 
 	executeFn := func() interface{} {
@@ -546,16 +560,56 @@ func (b *BaseEvaluator) handleInfo(cmdCtx *CommandContext) Result {
 		return sb.String()
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleHello(cmdCtx *CommandContext) Result {
+// HandleHello implements the HELLO command for protocol negotiation.
+func HandleHello(cmdCtx *command.Context) command.Result {
 	version, err := strconv.Atoi(cmdCtx.Args[0])
 	if err != nil || (version != 2 && version != 3) {
-		return Result{Value: resp.MarshalError("NOPROTO unsupported protocol version")}
+		return command.Result{Value: resp.MarshalError("NOPROTO unsupported protocol version")}
 	}
 
 	cmdCtx.Client.ProtoVersion = version
+
+	// Parse optional keyword-value pairs: AUTH user pass, SETNAME name, REXV version
+	args := cmdCtx.Args[1:]
+	for len(args) > 0 {
+		keyword := strings.ToUpper(args[0])
+		switch keyword {
+		case "AUTH":
+			if len(args) < 3 {
+				return command.Result{Value: resp.MarshalError("ERR syntax error")}
+			}
+			// AUTH username password -- username is ignored for now (single-user)
+			if cmdCtx.RequirePass != "" && args[2] != cmdCtx.RequirePass {
+				return command.Result{Value: resp.MarshalError("WRONGPASS invalid password")}
+			}
+			cmdCtx.Client.Authenticated = true
+			args = args[3:]
+		case "SETNAME":
+			if len(args) < 2 {
+				return command.Result{Value: resp.MarshalError("ERR syntax error")}
+			}
+			// Client name is informational; not stored yet.
+			args = args[2:]
+		case "REXV":
+			if len(args) < 2 {
+				return command.Result{Value: resp.MarshalError("ERR syntax error")}
+			}
+			rv, err := strconv.Atoi(args[1])
+			if err != nil || rv < 0 {
+				return command.Result{Value: resp.MarshalError("ERR invalid REXV version")}
+			}
+			if rv > 1 {
+				return command.Result{Value: resp.MarshalError("ERR unsupported REXV version")}
+			}
+			cmdCtx.Client.RexVersion = rv
+			args = args[2:]
+		default:
+			return command.Result{Value: resp.MarshalError("ERR syntax error")}
+		}
+	}
 
 	info := map[string]interface{}{
 		"server":  "gocache",
@@ -564,6 +618,9 @@ func (b *BaseEvaluator) handleHello(cmdCtx *CommandContext) Result {
 		"mode":    "standalone",
 		"role":    "master",
 	}
+	if cmdCtx.Client.RexVersion > 0 {
+		info["rexv"] = cmdCtx.Client.RexVersion
+	}
 
-	return Result{Value: info}
+	return command.Result{Value: info}
 }

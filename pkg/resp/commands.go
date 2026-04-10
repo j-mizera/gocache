@@ -97,4 +97,8 @@ const (
 
 	// Key introspection
 	CmdObject = "OBJECT"
+
+	// REX metadata
+	CmdMeta    = "META"     // Per-command metadata line (requires REXV negotiation)
+	CmdRexMeta = "REX.META" // Connection-scoped metadata management
 )

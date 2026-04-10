@@ -11,12 +11,15 @@ import (
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
-	"gocache/pkg/cmdctx"
+	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/logger"
 	"gocache/pkg/plugin/hooks"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
+	resphandler "gocache/pkg/resp/handler"
+	"gocache/pkg/rex"
+	rexhandler "gocache/pkg/rex/handler"
 	"gocache/pkg/transaction"
 	"gocache/pkg/watch"
 )
@@ -24,140 +27,117 @@ import (
 // pluginCommandTimeout is the maximum time to wait for a plugin to respond.
 const pluginCommandTimeout = 10 * time.Second
 
-// ErrInvalidDuration is returned when a duration argument cannot be parsed.
-var ErrInvalidDuration = errors.New("invalid duration")
-
-type Result struct {
-	Value interface{}
-	Err   error
-}
-
-type CommandContext struct {
-	Client           *clientctx.ClientContext
-	Op               string
-	Args             []string
-	InBatch          bool
-	Engine           *engine.Engine
-	Cache            *cache.Cache
-	Transaction      *transaction.Manager
-	BlockingRegistry *blocking.Registry
-	WatchManager     *watch.Manager
-}
-
-type CommandHandler func(cmdCtx *CommandContext) Result
-
-// commandSpec defines the minimum and maximum number of arguments a command
-// accepts (not counting the command name itself). max == -1 means unlimited.
-type commandSpec struct {
-	min int
-	max int
-}
-
-var commandSpecs = map[string]commandSpec{
-	resp.CmdSet:          {2, -1},
-	resp.CmdGet:          {1, 1},
-	resp.CmdDelete:       {1, -1},
-	resp.CmdExists:       {1, 1},
-	resp.CmdExpire:       {2, 2},
-	resp.CmdTTL:          {1, 1},
-	resp.CmdLPush:        {2, -1},
-	resp.CmdRPush:        {2, -1},
-	resp.CmdLPop:         {1, 1},
-	resp.CmdRPop:         {1, 1},
-	resp.CmdLLen:         {1, 1},
-	resp.CmdLRange:       {3, 3},
-	resp.CmdBLPop:        {2, -1},
-	resp.CmdBRPop:        {2, -1},
-	resp.CmdHSet:         {3, -1},
-	resp.CmdHGet:         {2, 2},
-	resp.CmdHDel:         {2, -1},
-	resp.CmdHExists:      {2, 2},
-	resp.CmdHGetAll:      {1, 1},
-	resp.CmdHKeys:        {1, 1},
-	resp.CmdHVals:        {1, 1},
-	resp.CmdHLen:         {1, 1},
-	resp.CmdSAdd:         {2, -1},
-	resp.CmdSRem:         {2, -1},
-	resp.CmdSMembers:     {1, 1},
-	resp.CmdSIsMember:    {2, 2},
-	resp.CmdSCard:        {1, 1},
-	resp.CmdSPop:         {1, 1},
-	resp.CmdZAdd:         {3, -1},
-	resp.CmdZRem:         {2, -1},
-	resp.CmdZScore:       {2, 2},
-	resp.CmdZCard:        {1, 1},
-	resp.CmdZRange:       {3, 4},
-	resp.CmdZRank:        {2, 2},
-	resp.CmdZCount:       {3, 3},
-	resp.CmdMulti:        {0, 0},
-	resp.CmdExec:         {0, 0},
-	resp.CmdDiscard:      {0, 0},
-	resp.CmdSnapshot:     {0, 0},
-	resp.CmdLoadSnapshot: {1, 1},
-	resp.CmdDBSize:       {0, 0},
-	resp.CmdInfo:         {0, 1},
-	resp.CmdHello:        {1, 1},
+// commandSpecs defines argument count constraints for each command.
+var commandSpecs = map[string]command.Spec{
+	resp.CmdSet:          {Min: 2, Max: -1},
+	resp.CmdGet:          {Min: 1, Max: 1},
+	resp.CmdDelete:       {Min: 1, Max: -1},
+	resp.CmdExists:       {Min: 1, Max: 1},
+	resp.CmdExpire:       {Min: 2, Max: 2},
+	resp.CmdTTL:          {Min: 1, Max: 1},
+	resp.CmdLPush:        {Min: 2, Max: -1},
+	resp.CmdRPush:        {Min: 2, Max: -1},
+	resp.CmdLPop:         {Min: 1, Max: 1},
+	resp.CmdRPop:         {Min: 1, Max: 1},
+	resp.CmdLLen:         {Min: 1, Max: 1},
+	resp.CmdLRange:       {Min: 3, Max: 3},
+	resp.CmdBLPop:        {Min: 2, Max: -1},
+	resp.CmdBRPop:        {Min: 2, Max: -1},
+	resp.CmdHSet:         {Min: 3, Max: -1},
+	resp.CmdHGet:         {Min: 2, Max: 2},
+	resp.CmdHDel:         {Min: 2, Max: -1},
+	resp.CmdHExists:      {Min: 2, Max: 2},
+	resp.CmdHGetAll:      {Min: 1, Max: 1},
+	resp.CmdHKeys:        {Min: 1, Max: 1},
+	resp.CmdHVals:        {Min: 1, Max: 1},
+	resp.CmdHLen:         {Min: 1, Max: 1},
+	resp.CmdSAdd:         {Min: 2, Max: -1},
+	resp.CmdSRem:         {Min: 2, Max: -1},
+	resp.CmdSMembers:     {Min: 1, Max: 1},
+	resp.CmdSIsMember:    {Min: 2, Max: 2},
+	resp.CmdSCard:        {Min: 1, Max: 1},
+	resp.CmdSPop:         {Min: 1, Max: 1},
+	resp.CmdZAdd:         {Min: 3, Max: -1},
+	resp.CmdZRem:         {Min: 2, Max: -1},
+	resp.CmdZScore:       {Min: 2, Max: 2},
+	resp.CmdZCard:        {Min: 1, Max: 1},
+	resp.CmdZRange:       {Min: 3, Max: 4},
+	resp.CmdZRank:        {Min: 2, Max: 2},
+	resp.CmdZCount:       {Min: 3, Max: 3},
+	resp.CmdMulti:        {Min: 0, Max: 0},
+	resp.CmdExec:         {Min: 0, Max: 0},
+	resp.CmdDiscard:      {Min: 0, Max: 0},
+	resp.CmdSnapshot:     {Min: 0, Max: 0},
+	resp.CmdLoadSnapshot: {Min: 1, Max: 1},
+	resp.CmdDBSize:       {Min: 0, Max: 0},
+	resp.CmdInfo:         {Min: 0, Max: 1},
+	resp.CmdHello:        {Min: 1, Max: -1},
 
 	// Server/connection commands
-	resp.CmdPing:     {0, 1},
-	resp.CmdEcho:     {1, 1},
-	resp.CmdSelect:   {1, 1},
-	resp.CmdFlushDB:  {0, 0},
-	resp.CmdFlushAll: {0, 0},
-	resp.CmdAuth:     {1, 1},
+	resp.CmdPing:     {Min: 0, Max: 1},
+	resp.CmdEcho:     {Min: 1, Max: 1},
+	resp.CmdSelect:   {Min: 1, Max: 1},
+	resp.CmdFlushDB:  {Min: 0, Max: 0},
+	resp.CmdFlushAll: {Min: 0, Max: 0},
+	resp.CmdAuth:     {Min: 1, Max: 1},
 
 	// String counter commands
-	resp.CmdIncr:        {1, 1},
-	resp.CmdDecr:        {1, 1},
-	resp.CmdIncrBy:      {2, 2},
-	resp.CmdDecrBy:      {2, 2},
-	resp.CmdIncrByFloat: {2, 2},
-	resp.CmdAppend:      {2, 2},
-	resp.CmdStrlen:      {1, 1},
+	resp.CmdIncr:        {Min: 1, Max: 1},
+	resp.CmdDecr:        {Min: 1, Max: 1},
+	resp.CmdIncrBy:      {Min: 2, Max: 2},
+	resp.CmdDecrBy:      {Min: 2, Max: 2},
+	resp.CmdIncrByFloat: {Min: 2, Max: 2},
+	resp.CmdAppend:      {Min: 2, Max: 2},
+	resp.CmdStrlen:      {Min: 1, Max: 1},
 
 	// Multi-key commands
-	resp.CmdMGet: {1, -1},
-	resp.CmdMSet: {2, -1},
+	resp.CmdMGet: {Min: 1, Max: -1},
+	resp.CmdMSet: {Min: 2, Max: -1},
 
 	// SET variants and TTL commands
-	resp.CmdSetNX:   {2, 2},
-	resp.CmdPExpire: {2, 2},
-	resp.CmdPTTL:    {1, 1},
+	resp.CmdSetNX:   {Min: 2, Max: 2},
+	resp.CmdPExpire: {Min: 2, Max: 2},
+	resp.CmdPTTL:    {Min: 1, Max: 1},
 
 	// Set operations
-	resp.CmdSInter: {1, -1},
-	resp.CmdSUnion: {1, -1},
-	resp.CmdSDiff:  {1, -1},
+	resp.CmdSInter: {Min: 1, Max: -1},
+	resp.CmdSUnion: {Min: 1, Max: -1},
+	resp.CmdSDiff:  {Min: 1, Max: -1},
 
 	// Key management commands
-	resp.CmdType:      {1, 1},
-	resp.CmdRename:    {2, 2},
-	resp.CmdRenameNX:  {2, 2},
-	resp.CmdKeys:      {1, 1},
-	resp.CmdScan:      {1, -1},
-	resp.CmdRandomKey: {0, 0},
+	resp.CmdType:      {Min: 1, Max: 1},
+	resp.CmdRename:    {Min: 2, Max: 2},
+	resp.CmdRenameNX:  {Min: 2, Max: 2},
+	resp.CmdKeys:      {Min: 1, Max: 1},
+	resp.CmdScan:      {Min: 1, Max: -1},
+	resp.CmdRandomKey: {Min: 0, Max: 0},
 
 	// Watch commands
-	resp.CmdWatch:   {1, -1},
-	resp.CmdUnwatch: {0, 0},
+	resp.CmdWatch:   {Min: 1, Max: -1},
+	resp.CmdUnwatch: {Min: 0, Max: 0},
 
 	// Key introspection
-	resp.CmdObject: {1, 2},
+	resp.CmdObject: {Min: 1, Max: 2},
+
+	// REX metadata
+	resp.CmdRexMeta: {Min: 1, Max: -1},
 }
 
+// Evaluator is the command dispatch pipeline.
 type Evaluator interface {
-	Evaluate(ctx *clientctx.ClientContext, op string, args []string) Result
-	RegisterHandler(op string, handler CommandHandler)
+	Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result
+	RegisterHandler(op string, handler command.Handler)
 	SetPluginRouter(r *router.Router)
 	SetHookExecutor(e *hooks.Executor)
 	CoreCommandNames() []string
 }
 
+// BaseEvaluator is the pipeline implementation.
 type BaseEvaluator struct {
 	cache              *cache.Cache
 	engine             *engine.Engine
 	transactionManager *transaction.Manager
-	handlers           map[string]CommandHandler
+	handlers           map[string]command.Handler
 	snapshotFile       string
 	requirePass        string
 	blockingRegistry   *blocking.Registry
@@ -171,7 +151,7 @@ func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br 
 		cache:              c,
 		engine:             e,
 		transactionManager: transaction.NewManager(),
-		handlers:           make(map[string]CommandHandler),
+		handlers:           make(map[string]command.Handler),
 		snapshotFile:       snapshotFile,
 		requirePass:        requirePass,
 		blockingRegistry:   br,
@@ -181,7 +161,7 @@ func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br 
 	return b
 }
 
-func (b *BaseEvaluator) RegisterHandler(op string, handler CommandHandler) {
+func (b *BaseEvaluator) RegisterHandler(op string, handler command.Handler) {
 	b.handlers[strings.ToUpper(op)] = handler
 }
 
@@ -202,111 +182,19 @@ func (b *BaseEvaluator) CoreCommandNames() []string {
 }
 
 func (b *BaseEvaluator) registerHandlers() {
-	// Basic commands
-	b.handlers[resp.CmdSet] = b.handleSet
-	b.handlers[resp.CmdGet] = b.handleGet
-	b.handlers[resp.CmdDelete] = b.handleDelete
-	b.handlers[resp.CmdExists] = b.handleExists
-	b.handlers[resp.CmdExpire] = b.handleExpire
-	b.handlers[resp.CmdPExpire] = b.handlePexpire
-	b.handlers[resp.CmdTTL] = b.handleTtl
-	b.handlers[resp.CmdPTTL] = b.handlePttl
-	b.handlers[resp.CmdSetNX] = b.handleSetnx
-
-	// List commands
-	b.handlers[resp.CmdLPush] = b.handleLpush
-	b.handlers[resp.CmdRPush] = b.handleRpush
-	b.handlers[resp.CmdLPop] = b.handleLpop
-	b.handlers[resp.CmdRPop] = b.handleRpop
-	b.handlers[resp.CmdLLen] = b.handleLlen
-	b.handlers[resp.CmdLRange] = b.handleLrange
-	b.handlers[resp.CmdBLPop] = b.handleBlpop
-	b.handlers[resp.CmdBRPop] = b.handleBrpop
-
-	// Hash commands
-	b.handlers[resp.CmdHSet] = b.handleHset
-	b.handlers[resp.CmdHGet] = b.handleHget
-	b.handlers[resp.CmdHDel] = b.handleHdel
-	b.handlers[resp.CmdHExists] = b.handleHexists
-	b.handlers[resp.CmdHGetAll] = b.handleHgetall
-	b.handlers[resp.CmdHKeys] = b.handleHkeys
-	b.handlers[resp.CmdHVals] = b.handleHvals
-	b.handlers[resp.CmdHLen] = b.handleHlen
-
-	// Set commands
-	b.handlers[resp.CmdSAdd] = b.handleSadd
-	b.handlers[resp.CmdSRem] = b.handleSrem
-	b.handlers[resp.CmdSMembers] = b.handleSmembers
-	b.handlers[resp.CmdSIsMember] = b.handleSismember
-	b.handlers[resp.CmdSCard] = b.handleScard
-	b.handlers[resp.CmdSPop] = b.handleSpop
-	b.handlers[resp.CmdSInter] = b.handleSinter
-	b.handlers[resp.CmdSUnion] = b.handleSunion
-	b.handlers[resp.CmdSDiff] = b.handleSdiff
-
-	// Sorted Set commands
-	b.handlers[resp.CmdZAdd] = b.handleZadd
-	b.handlers[resp.CmdZRem] = b.handleZrem
-	b.handlers[resp.CmdZScore] = b.handleZscore
-	b.handlers[resp.CmdZCard] = b.handleZcard
-	b.handlers[resp.CmdZRange] = b.handleZrange
-	b.handlers[resp.CmdZRank] = b.handleZrank
-	b.handlers[resp.CmdZCount] = b.handleZcount
-
-	// Transaction commands
-	b.handlers[resp.CmdMulti] = b.handleMulti
-	b.handlers[resp.CmdDiscard] = b.handleDiscard
-	b.handlers[resp.CmdExec] = b.handleExec
-
-	// Persistence commands
-	b.handlers[resp.CmdSnapshot] = b.handleSnapshot
-	b.handlers[resp.CmdLoadSnapshot] = b.handleLoadSnapshot
-
-	// Server commands
-	b.handlers[resp.CmdDBSize] = b.handleDbsize
-	b.handlers[resp.CmdInfo] = b.handleInfo
-	b.handlers[resp.CmdHello] = b.handleHello
-	b.handlers[resp.CmdPing] = b.handlePing
-	b.handlers[resp.CmdEcho] = b.handleEcho
-	b.handlers[resp.CmdSelect] = b.handleSelect
-	b.handlers[resp.CmdFlushDB] = b.handleFlushDB
-	b.handlers[resp.CmdFlushAll] = b.handleFlushAll
-	b.handlers[resp.CmdAuth] = b.handleAuth
-
-	// String counter commands
-	b.handlers[resp.CmdIncr] = b.handleIncr
-	b.handlers[resp.CmdDecr] = b.handleDecr
-	b.handlers[resp.CmdIncrBy] = b.handleIncrBy
-	b.handlers[resp.CmdDecrBy] = b.handleDecrBy
-	b.handlers[resp.CmdIncrByFloat] = b.handleIncrByFloat
-	b.handlers[resp.CmdAppend] = b.handleAppend
-	b.handlers[resp.CmdStrlen] = b.handleStrlen
-
-	// Multi-key commands
-	b.handlers[resp.CmdMGet] = b.handleMget
-	b.handlers[resp.CmdMSet] = b.handleMset
-
-	// Key management commands
-	b.handlers[resp.CmdType] = b.handleType
-	b.handlers[resp.CmdRename] = b.handleRename
-	b.handlers[resp.CmdRenameNX] = b.handleRenameNX
-	b.handlers[resp.CmdKeys] = b.handleKeys
-	b.handlers[resp.CmdScan] = b.handleScan
-	b.handlers[resp.CmdRandomKey] = b.handleRandomKey
-
-	// Watch commands
-	b.handlers[resp.CmdWatch] = b.handleWatch
-	b.handlers[resp.CmdUnwatch] = b.handleUnwatch
-
-	// Key introspection
-	b.handlers[resp.CmdObject] = b.handleObject
+	// Register all RESP command handlers.
+	for name, handler := range resphandler.Handlers() {
+		b.handlers[name] = handler
+	}
+	// Register REX metadata handler.
+	b.handlers[resp.CmdRexMeta] = rexhandler.HandleRexMeta
 }
 
-func (b *BaseEvaluator) Evaluate(ctx *clientctx.ClientContext, op string, args []string) Result {
+func (b *BaseEvaluator) Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result {
 	return b.evaluateInternal(ctx, op, args, false)
 }
 
-func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string, args []string, inBatch bool) Result {
+func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
 	op = strings.ToUpper(op)
 
 	handler, ok := b.handlers[op]
@@ -316,28 +204,30 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 			return b.routeToPlugin(op, args)
 		}
 		logger.Debug().Str("command", op).Msg("unknown command")
-		return Result{Value: resp.ErrUnknown(strings.ToLower(op))}
+		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 
 	if spec, hasSpec := commandSpecs[op]; hasSpec {
 		n := len(args)
-		if n < spec.min || (spec.max >= 0 && n > spec.max) {
-			return Result{Value: resp.ErrArgs(strings.ToLower(op))}
+		if n < spec.Min || (spec.Max >= 0 && n > spec.Max) {
+			return command.Result{Value: resp.ErrArgs(strings.ToLower(op))}
 		}
 	}
 
-	// Transactional logic: queue commands if in transaction, except for transaction control commands
+	// Transactional logic: queue commands if in transaction, except for
+	// transaction control commands and REX.META (connection state, like AUTH).
 	if ctx.InTransaction && !inBatch {
-		if op != resp.CmdMulti && op != resp.CmdExec && op != resp.CmdDiscard && op != resp.CmdHello {
+		if op != resp.CmdMulti && op != resp.CmdExec && op != resp.CmdDiscard &&
+			op != resp.CmdHello && op != resp.CmdRexMeta {
 			if op == "QUIT" {
-				return Result{Value: "OK"}
+				return command.Result{Value: "OK"}
 			}
 			ctx.EnqueueCommand(append([]string{op}, args...))
-			return Result{Value: "QUEUED"}
+			return command.Result{Value: "QUEUED"}
 		}
 	}
 
-	cmdCtx := &CommandContext{
+	cmdCtx := &command.Context{
 		Client:           ctx,
 		Op:               op,
 		Args:             args,
@@ -347,19 +237,27 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		Transaction:      b.transactionManager,
 		BlockingRegistry: b.blockingRegistry,
 		WatchManager:     b.watchManager,
+		SnapshotFile:     b.snapshotFile,
+		RequirePass:      b.requirePass,
+		EvalFn:           b.evaluateInternal,
 	}
 
 	// Build hook context with server-injected values.
 	var hookCtx map[string]string
 	if b.hookExecutor != nil && b.hookExecutor.HasAny() {
 		startNs := time.Now().UnixNano()
-		hookCtx = cmdctx.New()
-		hookCtx[cmdctx.StartNs] = strconv.FormatInt(startNs, 10)
+		hookCtx = command.NewHookCtx()
+		hookCtx[command.StartNs] = strconv.FormatInt(startNs, 10)
+
+		// Inject REX metadata into hook context (connection defaults + per-command).
+		if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
+			rex.InjectIntoHookCtx(hookCtx, ctx.RexMeta, ctx.CmdMeta)
+		}
 
 		// Pre-hooks: fire before command execution.
 		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args, hookCtx); pre != nil {
 			if pre.Denied {
-				return Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
+				return command.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
 			}
 			hookCtx = pre.Context
 		}
@@ -369,8 +267,8 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 
 	// Post-hooks: fire after command execution.
 	if b.hookExecutor != nil && b.hookExecutor.HasAny() && hookCtx != nil {
-		elapsedNs := time.Now().UnixNano() - mustParseInt64(hookCtx[cmdctx.StartNs])
-		hookCtx[cmdctx.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
+		elapsedNs := time.Now().UnixNano() - mustParseInt64(hookCtx[command.StartNs])
+		hookCtx[command.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
 		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr, hookCtx)
 	}
@@ -379,31 +277,27 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 }
 
 // routeToPlugin dispatches a command to a plugin via the router.
-func (b *BaseEvaluator) routeToPlugin(op string, args []string) Result {
-	// Use a background context with a generous timeout; the router
-	// handles per-request timeouts internally if needed.
+func (b *BaseEvaluator) routeToPlugin(op string, args []string) command.Result {
 	ctx, cancel := context.WithTimeout(context.Background(), pluginCommandTimeout)
 	defer cancel()
 
 	val, err := b.pluginRouter.Route(ctx, op, args)
 	if err != nil {
 		if errors.Is(err, router.ErrPluginTimeout) {
-			return Result{Value: resp.MarshalError("ERR plugin timeout")}
+			return command.Result{Value: resp.MarshalError("ERR plugin timeout")}
 		}
 		if errors.Is(err, router.ErrPluginDown) {
-			return Result{Value: resp.MarshalError("ERR plugin unavailable")}
+			return command.Result{Value: resp.MarshalError("ERR plugin unavailable")}
 		}
-		return Result{Value: resp.MarshalError("ERR " + err.Error())}
+		return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
 	}
-	// If the plugin returned an error as the value, propagate it.
 	if e, ok := val.(error); ok {
-		return Result{Err: e}
+		return command.Result{Err: e}
 	}
-	return Result{Value: val}
+	return command.Result{Value: val}
 }
 
-// resultToHookStrings extracts a string representation of a Result for post-hooks.
-func resultToHookStrings(r Result) (string, string) {
+func resultToHookStrings(r command.Result) (string, string) {
 	if r.Err != nil {
 		return "", r.Err.Error()
 	}
@@ -416,19 +310,4 @@ func resultToHookStrings(r Result) (string, string) {
 func mustParseInt64(s string) int64 {
 	v, _ := strconv.ParseInt(s, 10, 64)
 	return v
-}
-
-// dispatch runs fn either directly (inBatch) or through the engine dispatcher,
-// then wraps the result into a Result, propagating any error.
-func dispatch(cmdCtx *CommandContext, fn func() interface{}) Result {
-	var res interface{}
-	if cmdCtx.InBatch {
-		res = fn()
-	} else {
-		res = cmdCtx.Engine.DispatchWithResult(fn)
-	}
-	if err, ok := res.(error); ok {
-		return Result{Err: err}
-	}
-	return Result{Value: res}
 }
