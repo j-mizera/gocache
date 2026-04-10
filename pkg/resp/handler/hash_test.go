@@ -1,25 +1,16 @@
-package evaluator
+package handler_test
 
 import (
 	"errors"
-	"gocache/pkg/cache"
-	"gocache/pkg/clientctx"
-	"gocache/pkg/engine"
 	"gocache/pkg/resp"
 	"testing"
 )
 
 func TestEvaluator_Hash(t *testing.T) {
-	cacheInstance := cache.New()
-	engineInstance := engine.New(cacheInstance)
-	go engineInstance.Run()
-	defer engineInstance.Stop()
-
-	evalInstance := New(cacheInstance, engineInstance, "", "", nil, nil)
-	ctx := clientctx.New()
+	c, e, ctx := setup(t)
 
 	// Test HSET single field
-	res := evalInstance.Evaluate(ctx, "HSET", []string{"user:1", "name", "Alice"})
+	res := eval(t, c, e, ctx, "HSET", []string{"user:1", "name", "Alice"})
 	if res.Err != nil {
 		t.Fatalf("HSET failed: %v", res.Err)
 	}
@@ -28,7 +19,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HGET
-	res = evalInstance.Evaluate(ctx, "HGET", []string{"user:1", "name"})
+	res = eval(t, c, e, ctx, "HGET", []string{"user:1", "name"})
 	if res.Err != nil {
 		t.Fatalf("HGET failed: %v", res.Err)
 	}
@@ -37,7 +28,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HSET multiple fields
-	res = evalInstance.Evaluate(ctx, "HSET", []string{"user:1", "age", "30", "city", "NYC"})
+	res = eval(t, c, e, ctx, "HSET", []string{"user:1", "age", "30", "city", "NYC"})
 	if res.Err != nil {
 		t.Fatalf("HSET multiple failed: %v", res.Err)
 	}
@@ -46,7 +37,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HEXISTS
-	res = evalInstance.Evaluate(ctx, "HEXISTS", []string{"user:1", "age"})
+	res = eval(t, c, e, ctx, "HEXISTS", []string{"user:1", "age"})
 	if res.Err != nil {
 		t.Fatalf("HEXISTS failed: %v", res.Err)
 	}
@@ -54,7 +45,7 @@ func TestEvaluator_Hash(t *testing.T) {
 		t.Errorf("Expected 1 (exists), got %v", res.Value)
 	}
 
-	res = evalInstance.Evaluate(ctx, "HEXISTS", []string{"user:1", "nonexistent"})
+	res = eval(t, c, e, ctx, "HEXISTS", []string{"user:1", "nonexistent"})
 	if res.Err != nil {
 		t.Fatalf("HEXISTS failed: %v", res.Err)
 	}
@@ -63,7 +54,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HLEN
-	res = evalInstance.Evaluate(ctx, "HLEN", []string{"user:1"})
+	res = eval(t, c, e, ctx, "HLEN", []string{"user:1"})
 	if res.Err != nil {
 		t.Fatalf("HLEN failed: %v", res.Err)
 	}
@@ -72,7 +63,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HKEYS
-	res = evalInstance.Evaluate(ctx, "HKEYS", []string{"user:1"})
+	res = eval(t, c, e, ctx, "HKEYS", []string{"user:1"})
 	if res.Err != nil {
 		t.Fatalf("HKEYS failed: %v", res.Err)
 	}
@@ -82,7 +73,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HVALS
-	res = evalInstance.Evaluate(ctx, "HVALS", []string{"user:1"})
+	res = eval(t, c, e, ctx, "HVALS", []string{"user:1"})
 	if res.Err != nil {
 		t.Fatalf("HVALS failed: %v", res.Err)
 	}
@@ -92,7 +83,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HGETALL
-	res = evalInstance.Evaluate(ctx, "HGETALL", []string{"user:1"})
+	res = eval(t, c, e, ctx, "HGETALL", []string{"user:1"})
 	if res.Err != nil {
 		t.Fatalf("HGETALL failed: %v", res.Err)
 	}
@@ -105,7 +96,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HDEL
-	res = evalInstance.Evaluate(ctx, "HDEL", []string{"user:1", "age"})
+	res = eval(t, c, e, ctx, "HDEL", []string{"user:1", "age"})
 	if res.Err != nil {
 		t.Fatalf("HDEL failed: %v", res.Err)
 	}
@@ -114,7 +105,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Verify deletion
-	res = evalInstance.Evaluate(ctx, "HLEN", []string{"user:1"})
+	res = eval(t, c, e, ctx, "HLEN", []string{"user:1"})
 	if res.Err != nil {
 		t.Fatalf("HLEN after HDEL failed: %v", res.Err)
 	}
@@ -123,7 +114,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test HDEL all fields
-	res = evalInstance.Evaluate(ctx, "HDEL", []string{"user:1", "name", "city"})
+	res = eval(t, c, e, ctx, "HDEL", []string{"user:1", "name", "city"})
 	if res.Err != nil {
 		t.Fatalf("HDEL all failed: %v", res.Err)
 	}
@@ -132,7 +123,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Verify key is deleted when hash is empty
-	res = evalInstance.Evaluate(ctx, "EXISTS", []string{"user:1"})
+	res = eval(t, c, e, ctx, "EXISTS", []string{"user:1"})
 	if res.Err != nil {
 		t.Fatalf("EXISTS failed: %v", res.Err)
 	}
@@ -141,8 +132,8 @@ func TestEvaluator_Hash(t *testing.T) {
 	}
 
 	// Test WRONGTYPE error
-	evalInstance.Evaluate(ctx, "SET", []string{"stringkey", "value"})
-	res = evalInstance.Evaluate(ctx, "HGET", []string{"stringkey", "field"})
+	eval(t, c, e, ctx, "SET", []string{"stringkey", "value"})
+	res = eval(t, c, e, ctx, "HGET", []string{"stringkey", "field"})
 	if !errors.Is(res.Err, resp.ErrWrongType) {
 		t.Error("Expected WRONGTYPE error for HGET on string key")
 	}

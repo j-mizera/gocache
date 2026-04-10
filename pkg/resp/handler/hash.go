@@ -1,14 +1,15 @@
-package evaluator
+package handler
 
 import (
 	"gocache/pkg/cache"
+	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
 
-// HSET key field value [field value ...]
-func (b *BaseEvaluator) handleHset(cmdCtx *CommandContext) Result {
+// HandleHset implements HSET key field value [field value ...]
+func HandleHset(cmdCtx *command.Context) command.Result {
 	if (len(cmdCtx.Args)-1)%2 != 0 {
-		return Result{Value: resp.ErrArgs("hset")}
+		return command.Result{Value: resp.ErrArgs("hset")}
 	}
 
 	key := cmdCtx.Args[0]
@@ -41,11 +42,11 @@ func (b *BaseEvaluator) handleHset(cmdCtx *CommandContext) Result {
 		return added
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HGET key field
-func (b *BaseEvaluator) handleHget(cmdCtx *CommandContext) Result {
+// HandleHget implements HGET key field
+func HandleHget(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	field := cmdCtx.Args[1]
 
@@ -66,11 +67,11 @@ func (b *BaseEvaluator) handleHget(cmdCtx *CommandContext) Result {
 		return nil
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HDEL key field [field ...]
-func (b *BaseEvaluator) handleHdel(cmdCtx *CommandContext) Result {
+// HandleHdel implements HDEL key field [field ...]
+func HandleHdel(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	fields := cmdCtx.Args[1:]
 
@@ -105,11 +106,11 @@ func (b *BaseEvaluator) handleHdel(cmdCtx *CommandContext) Result {
 		return deleted
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HEXISTS key field
-func (b *BaseEvaluator) handleHexists(cmdCtx *CommandContext) Result {
+// HandleHexists implements HEXISTS key field
+func HandleHexists(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	field := cmdCtx.Args[1]
 
@@ -130,11 +131,11 @@ func (b *BaseEvaluator) handleHexists(cmdCtx *CommandContext) Result {
 		return 0
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HGETALL key
-func (b *BaseEvaluator) handleHgetall(cmdCtx *CommandContext) Result {
+// HandleHgetall implements HGETALL key
+func HandleHgetall(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -150,11 +151,11 @@ func (b *BaseEvaluator) handleHgetall(cmdCtx *CommandContext) Result {
 		return entry.Value.(map[string]string)
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HKEYS key
-func (b *BaseEvaluator) handleHkeys(cmdCtx *CommandContext) Result {
+// HandleHkeys implements HKEYS key
+func HandleHkeys(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -177,11 +178,11 @@ func (b *BaseEvaluator) handleHkeys(cmdCtx *CommandContext) Result {
 		return result
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HVALS key
-func (b *BaseEvaluator) handleHvals(cmdCtx *CommandContext) Result {
+// HandleHvals implements HVALS key
+func HandleHvals(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -204,11 +205,11 @@ func (b *BaseEvaluator) handleHvals(cmdCtx *CommandContext) Result {
 		return result
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HLEN key
-func (b *BaseEvaluator) handleHlen(cmdCtx *CommandContext) Result {
+// HandleHlen implements HLEN key
+func HandleHlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -225,5 +226,5 @@ func (b *BaseEvaluator) handleHlen(cmdCtx *CommandContext) Result {
 		return len(hash)
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }

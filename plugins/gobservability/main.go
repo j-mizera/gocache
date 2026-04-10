@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"gocache/pkg/cmdctx"
+	"gocache/pkg/command"
 	"gocache/pkg/pluginsdk"
 )
 
@@ -54,7 +54,7 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 	}
 
 	var elapsedNs uint64
-	if v, ok := req.Context[cmdctx.ElapsedNs]; ok {
+	if v, ok := req.Context[command.ElapsedNs]; ok {
 		elapsedNs, _ = strconv.ParseUint(v, 10, 64)
 	}
 

@@ -13,12 +13,14 @@ import (
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
+	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/evaluator"
 	"gocache/pkg/logger"
 	"gocache/pkg/plugin/hooks"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
+	"gocache/pkg/rex"
 	"gocache/pkg/watch"
 )
 
@@ -163,6 +165,10 @@ func (srv *Server) handleConnection(conn net.Conn) {
 	writer := resp.NewWriter(conn)
 	defer writer.Flush()
 
+	// Per-command metadata accumulator. META lines fill this map;
+	// the next non-META command consumes and clears it.
+	var cmdMeta map[string]string
+
 	for {
 		// Check if server is shutting down
 		srv.mu.RLock()
@@ -204,6 +210,30 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		}
 
 		op := strings.ToUpper(parts[0])
+
+		// META accumulation: when REXV is negotiated and the command is META,
+		// collect key-value into the per-command map and read the next value.
+		if ctx.RexVersion > 0 && op == resp.CmdMeta {
+			key, value, err := rex.ParseMeta(parts[1:])
+			if err != nil {
+				if writeErr := writer.Write(resp.MarshalError("ERR " + err.Error())); writeErr != nil {
+					return
+				}
+				if reader.Buffered() == 0 {
+					if flushErr := writer.Flush(); flushErr != nil {
+						return
+					}
+				}
+				cmdMeta = nil // discard accumulated metadata on error
+				continue
+			}
+			if cmdMeta == nil {
+				cmdMeta = make(map[string]string)
+			}
+			cmdMeta[key] = value
+			continue
+		}
+
 		if op == "QUIT" {
 			_ = writer.Write(resp.OK())
 			return
@@ -220,11 +250,15 @@ func (srv *Server) handleConnection(conn net.Conn) {
 						return
 					}
 				}
+				cmdMeta = nil
 				continue
 			}
 		}
 
+		ctx.CmdMeta = cmdMeta
 		res := srv.evaluator.Evaluate(ctx, op, parts[1:])
+		ctx.CmdMeta = nil
+		cmdMeta = nil
 		if err := writer.Write(srv.mapToResp(ctx, res)); err != nil {
 			return
 		}
@@ -236,7 +270,7 @@ func (srv *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res evaluator.Result) resp.Value {
+func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res command.Result) resp.Value {
 	if res.Err != nil {
 		switch {
 		case errors.Is(res.Err, resp.ErrWrongType):

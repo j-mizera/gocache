@@ -1,4 +1,4 @@
-package evaluator_test
+package handler_test
 
 import (
 	"gocache/pkg/resp"
@@ -7,10 +7,10 @@ import (
 )
 
 func TestEvaluator_Basic(t *testing.T) {
-	_, _, evalInstance, ctx := setup(t)
+	c, e, ctx := setup(t)
 
 	// Test SET
-	res := evalInstance.Evaluate(ctx, "SET", []string{"key", "value"})
+	res := eval(t, c, e, ctx, "SET", []string{"key", "value"})
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
@@ -19,7 +19,7 @@ func TestEvaluator_Basic(t *testing.T) {
 	}
 
 	// Test GET
-	res = evalInstance.Evaluate(ctx, "GET", []string{"key"})
+	res = eval(t, c, e, ctx, "GET", []string{"key"})
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
@@ -28,7 +28,7 @@ func TestEvaluator_Basic(t *testing.T) {
 	}
 
 	// Test EXISTS
-	res = evalInstance.Evaluate(ctx, "EXISTS", []string{"key"})
+	res = eval(t, c, e, ctx, "EXISTS", []string{"key"})
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
@@ -37,7 +37,7 @@ func TestEvaluator_Basic(t *testing.T) {
 	}
 
 	// Test DEL
-	res = evalInstance.Evaluate(ctx, "DEL", []string{"key"})
+	res = eval(t, c, e, ctx, "DEL", []string{"key"})
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
@@ -46,7 +46,7 @@ func TestEvaluator_Basic(t *testing.T) {
 	}
 
 	// Test EXISTS after DEL
-	res = evalInstance.Evaluate(ctx, "EXISTS", []string{"key"})
+	res = eval(t, c, e, ctx, "EXISTS", []string{"key"})
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
@@ -56,28 +56,28 @@ func TestEvaluator_Basic(t *testing.T) {
 }
 
 func TestEvaluator_TTL(t *testing.T) {
-	_, _, evalInstance, ctx := setup(t)
+	c, e, ctx := setup(t)
 
-	evalInstance.Evaluate(ctx, "SET", []string{"temp", "val", "PX", "100"})
+	eval(t, c, e, ctx, "SET", []string{"temp", "val", "PX", "100"})
 
-	res := evalInstance.Evaluate(ctx, "TTL", []string{"temp"})
+	res := eval(t, c, e, ctx, "TTL", []string{"temp"})
 	if res.Value.(int64) < 0 {
 		t.Errorf("expected positive TTL, got %v", res.Value)
 	}
 
 	// Test EXPIRE (integer seconds)
-	evalInstance.Evaluate(ctx, "SET", []string{"expireme", "val"})
-	res = evalInstance.Evaluate(ctx, "EXPIRE", []string{"expireme", "1"})
+	eval(t, c, e, ctx, "SET", []string{"expireme", "val"})
+	res = eval(t, c, e, ctx, "EXPIRE", []string{"expireme", "1"})
 	if res.Value != 1 {
 		t.Errorf("expected 1 (success), got %v", res.Value)
 	}
 }
 
 func TestEvaluator_DBSize(t *testing.T) {
-	_, _, evalInstance, ctx := setup(t)
+	c, e, ctx := setup(t)
 
 	// Empty cache
-	res := evalInstance.Evaluate(ctx, "DBSIZE", nil)
+	res := eval(t, c, e, ctx, "DBSIZE", nil)
 	if res.Err != nil {
 		t.Fatalf("DBSIZE failed: %v", res.Err)
 	}
@@ -86,11 +86,11 @@ func TestEvaluator_DBSize(t *testing.T) {
 	}
 
 	// Add some keys
-	evalInstance.Evaluate(ctx, "SET", []string{"a", "1"})
-	evalInstance.Evaluate(ctx, "SET", []string{"b", "2"})
-	evalInstance.Evaluate(ctx, "SET", []string{"c", "3"})
+	eval(t, c, e, ctx, "SET", []string{"a", "1"})
+	eval(t, c, e, ctx, "SET", []string{"b", "2"})
+	eval(t, c, e, ctx, "SET", []string{"c", "3"})
 
-	res = evalInstance.Evaluate(ctx, "DBSIZE", nil)
+	res = eval(t, c, e, ctx, "DBSIZE", nil)
 	if res.Err != nil {
 		t.Fatalf("DBSIZE failed: %v", res.Err)
 	}
@@ -99,9 +99,9 @@ func TestEvaluator_DBSize(t *testing.T) {
 	}
 
 	// Delete one
-	evalInstance.Evaluate(ctx, "DEL", []string{"b"})
+	eval(t, c, e, ctx, "DEL", []string{"b"})
 
-	res = evalInstance.Evaluate(ctx, "DBSIZE", nil)
+	res = eval(t, c, e, ctx, "DBSIZE", nil)
 	if res.Err != nil {
 		t.Fatalf("DBSIZE failed: %v", res.Err)
 	}
@@ -111,11 +111,11 @@ func TestEvaluator_DBSize(t *testing.T) {
 }
 
 func TestEvaluator_Info(t *testing.T) {
-	_, _, evalInstance, ctx := setup(t)
+	c, e, ctx := setup(t)
 
-	evalInstance.Evaluate(ctx, "SET", []string{"x", "hello"})
+	eval(t, c, e, ctx, "SET", []string{"x", "hello"})
 
-	res := evalInstance.Evaluate(ctx, "INFO", []string{"memory"})
+	res := eval(t, c, e, ctx, "INFO", []string{"memory"})
 	if res.Err != nil {
 		t.Fatalf("INFO memory failed: %v", res.Err)
 	}
@@ -132,7 +132,7 @@ func TestEvaluator_Info(t *testing.T) {
 	}
 
 	// INFO with no args should also work
-	res = evalInstance.Evaluate(ctx, "INFO", nil)
+	res = eval(t, c, e, ctx, "INFO", nil)
 	if res.Err != nil {
 		t.Fatalf("INFO (no args) failed: %v", res.Err)
 	}
@@ -141,7 +141,7 @@ func TestEvaluator_Info(t *testing.T) {
 	}
 
 	// INFO with unknown section returns empty string
-	res = evalInstance.Evaluate(ctx, "INFO", []string{"replication"})
+	res = eval(t, c, e, ctx, "INFO", []string{"replication"})
 	if res.Err != nil {
 		t.Fatalf("INFO replication failed: %v", res.Err)
 	}
@@ -151,10 +151,10 @@ func TestEvaluator_Info(t *testing.T) {
 }
 
 func TestEvaluator_Hello(t *testing.T) {
-	_, _, evalInstance, ctx := setup(t)
+	c, e, ctx := setup(t)
 
 	t.Run("HELLO 2 keeps proto at 2", func(t *testing.T) {
-		res := evalInstance.Evaluate(ctx, "HELLO", []string{"2"})
+		res := eval(t, c, e, ctx, "HELLO", []string{"2"})
 		if res.Err != nil {
 			t.Fatalf("HELLO 2 failed: %v", res.Err)
 		}
@@ -171,7 +171,7 @@ func TestEvaluator_Hello(t *testing.T) {
 	})
 
 	t.Run("HELLO 3 upgrades to RESP3", func(t *testing.T) {
-		res := evalInstance.Evaluate(ctx, "HELLO", []string{"3"})
+		res := eval(t, c, e, ctx, "HELLO", []string{"3"})
 		if res.Err != nil {
 			t.Fatalf("HELLO 3 failed: %v", res.Err)
 		}
@@ -188,7 +188,7 @@ func TestEvaluator_Hello(t *testing.T) {
 	})
 
 	t.Run("HELLO 4 returns NOPROTO", func(t *testing.T) {
-		res := evalInstance.Evaluate(ctx, "HELLO", []string{"4"})
+		res := eval(t, c, e, ctx, "HELLO", []string{"4"})
 		v, ok := res.Value.(resp.Value)
 		if !ok || v.Type != resp.Error {
 			t.Fatalf("expected NOPROTO error, got %T: %v", res.Value, res.Value)

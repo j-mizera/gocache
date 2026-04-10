@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"gocache/pkg/cmdctx"
+	cmd "gocache/pkg/command"
 	"gocache/pkg/logger"
 	"gocache/pkg/plugin/protocol"
 	"gocache/pkg/plugin/router"
@@ -56,7 +56,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 	for _, h := range matches {
 		if !h.Critical {
 			reqID := router.NextRequestID()
-			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmdctx.Filter(hookCtx, h.PluginName))
+			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName))
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -66,7 +66,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 		if !h.Critical {
 			continue
 		}
-		result, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmdctx.Filter(hookCtx, h.PluginName))
+		result, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName))
 		if err != nil {
 			logger.Warn().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical pre-hook failed, allowing command")
 			continue
@@ -75,7 +75,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 			return &PreHookResult{Denied: true, DenyReason: result.DenyReason, Context: hookCtx}
 		}
 		// Merge context values from the response, namespaced.
-		cmdctx.Merge(hookCtx, h.PluginName, result.ContextValues)
+		cmd.MergeHookCtx(hookCtx, h.PluginName, result.ContextValues)
 	}
 
 	return &PreHookResult{Denied: false, Context: hookCtx}
@@ -94,7 +94,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 	for _, h := range matches {
 		if !h.Critical {
 			reqID := router.NextRequestID()
-			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmdctx.Filter(hookCtx, h.PluginName))
+			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName))
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -104,7 +104,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 		if !h.Critical {
 			continue
 		}
-		_, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmdctx.Filter(hookCtx, h.PluginName))
+		_, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName))
 		if err != nil {
 			logger.Warn().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical post-hook failed")
 		}

@@ -41,14 +41,14 @@
 
 ## Phase 3: REX Metadata + Observability
 
-### REX META -- Per-Request Metadata
+### REX META -- Per-Request Metadata -- DONE
 
 Stateless metadata directives attached to individual commands, not connection state. Metadata is discarded after each command executes.
 
 ```
 META traceparent 00-abc123-def456-01
 META authorization Bearer eyJhbG...
-KAFKA:PRODUCE topic message
+GET mykey
 ```
 
 Enables:
@@ -57,9 +57,12 @@ Enables:
 - Arbitrary plugin-defined metadata (tenant ID, request ID, priority hints)
 
 Implementation:
-- RESP parser collects META lines into a temporary map, attaches to next command, discards after execution
-- GCPC protocol: `metadata` field added to `CommandRequestV1` and `HookRequestV1`
-- Standard Redis clients unaffected (never send META)
+- Capability negotiation: `HELLO 3 REXV 1` enables META lines
+- Server read loop collects META lines into a temporary map, attaches to next command, discards after execution
+- `REX.META` standalone command for connection-scoped sticky defaults (SET/MSET/GET/DEL/LIST)
+- Precedence: per-command META > REX.META connection defaults
+- Metadata injected into hook context under `shared.rex.` prefix — all plugins see it via existing `shared.` visibility
+- Standard Redis clients unaffected (never send META, never negotiate REXV)
 
 ### Observability
 
@@ -84,6 +87,15 @@ Redesign the storage layer around a slab allocator pattern (inspired by Badger/D
 - **String pool**: Intern frequently-repeated strings (command names, common key prefixes) via a concurrent pool to reduce allocations for the key index.
 - **Pre-allocated buffers**: `sync.Pool` for RESP read/write buffers and slab encode/decode scratch space.
 - **Memory-mapped snapshots**: Snapshot loading via mmap — slab regions can be memory-mapped directly from the snapshot file without copying into heap.
+
+### IPC Optimization — GCPC String Table
+
+Reduce plugin IPC overhead by interning repeated strings at the GCPC protocol level:
+
+- **Static table**: Server-defined constants embedded at compile time — command names (`GET`, `SET`, ...), hook context keys (`_start_ns`, `_elapsed_ns`, `shared.rex.*`), hook phases. Both sides know the table; no negotiation needed.
+- **Dynamic table**: Grows during the plugin connection lifetime. When a string is first seen, it's sent in full and assigned an integer ID. Subsequent uses send only the ID. Similar to HTTP/2 HPACK compression.
+- **Wire format**: `StringEntry { uint32 id; string value; }` exchanged inline or during registration. Context map keys and command names use IDs; values (JWTs, trace IDs) stay as full strings since they're unique per-request.
+- **Priority**: Static table for command names and context keys first (biggest win, zero negotiation). Dynamic table later if profiling shows value.
 
 ### Persistence
 

@@ -1,7 +1,8 @@
-package evaluator
+package handler
 
 import (
 	"gocache/pkg/cache"
+	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
 
@@ -19,8 +20,8 @@ func getSet(c *cache.Cache, key string) (map[string]struct{}, error) {
 	return entry.Value.(map[string]struct{}), nil
 }
 
-// SINTER key [key ...]
-func (b *BaseEvaluator) handleSinter(cmdCtx *CommandContext) Result {
+// HandleSinter implements SINTER key [key ...]
+func HandleSinter(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
 	executeFn := func() interface{} {
 		first, err := getSet(cmdCtx.Cache, keys[0])
@@ -52,11 +53,11 @@ func (b *BaseEvaluator) handleSinter(cmdCtx *CommandContext) Result {
 		}
 		return result
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SUNION key [key ...]
-func (b *BaseEvaluator) handleSunion(cmdCtx *CommandContext) Result {
+// HandleSunion implements SUNION key [key ...]
+func HandleSunion(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
 	executeFn := func() interface{} {
 		union := make(map[string]struct{})
@@ -75,11 +76,11 @@ func (b *BaseEvaluator) handleSunion(cmdCtx *CommandContext) Result {
 		}
 		return result
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SDIFF key [key ...]
-func (b *BaseEvaluator) handleSdiff(cmdCtx *CommandContext) Result {
+// HandleSdiff implements SDIFF key [key ...]
+func HandleSdiff(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
 	executeFn := func() interface{} {
 		first, err := getSet(cmdCtx.Cache, keys[0])
@@ -108,11 +109,11 @@ func (b *BaseEvaluator) handleSdiff(cmdCtx *CommandContext) Result {
 		}
 		return result
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SADD key member [member ...]
-func (b *BaseEvaluator) handleSadd(cmdCtx *CommandContext) Result {
+// HandleSadd implements SADD key member [member ...]
+func HandleSadd(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
@@ -143,11 +144,11 @@ func (b *BaseEvaluator) handleSadd(cmdCtx *CommandContext) Result {
 		return added
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SREM key member [member ...]
-func (b *BaseEvaluator) handleSrem(cmdCtx *CommandContext) Result {
+// HandleSrem implements SREM key member [member ...]
+func HandleSrem(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
@@ -182,11 +183,11 @@ func (b *BaseEvaluator) handleSrem(cmdCtx *CommandContext) Result {
 		return removed
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SMEMBERS key
-func (b *BaseEvaluator) handleSmembers(cmdCtx *CommandContext) Result {
+// HandleSmembers implements SMEMBERS key
+func HandleSmembers(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -209,11 +210,11 @@ func (b *BaseEvaluator) handleSmembers(cmdCtx *CommandContext) Result {
 		return result
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SISMEMBER key member
-func (b *BaseEvaluator) handleSismember(cmdCtx *CommandContext) Result {
+// HandleSismember implements SISMEMBER key member
+func HandleSismember(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
@@ -234,11 +235,11 @@ func (b *BaseEvaluator) handleSismember(cmdCtx *CommandContext) Result {
 		return 0
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SCARD key
-func (b *BaseEvaluator) handleScard(cmdCtx *CommandContext) Result {
+// HandleScard implements SCARD key
+func HandleScard(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -255,11 +256,11 @@ func (b *BaseEvaluator) handleScard(cmdCtx *CommandContext) Result {
 		return len(set)
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// SPOP key
-func (b *BaseEvaluator) handleSpop(cmdCtx *CommandContext) Result {
+// HandleSpop implements SPOP key
+func HandleSpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -296,5 +297,5 @@ func (b *BaseEvaluator) handleSpop(cmdCtx *CommandContext) Result {
 		return popped
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }

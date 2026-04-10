@@ -1,16 +1,18 @@
-package evaluator
+package handler
 
 import (
-	"gocache/pkg/cache"
-	"gocache/pkg/resp"
 	"strconv"
 	"strings"
+
+	"gocache/pkg/cache"
+	"gocache/pkg/command"
+	"gocache/pkg/resp"
 )
 
-// ZADD key score member [score member ...]
-func (b *BaseEvaluator) handleZadd(cmdCtx *CommandContext) Result {
+// HandleZadd implements ZADD key score member [score member ...]
+func HandleZadd(cmdCtx *command.Context) command.Result {
 	if (len(cmdCtx.Args)-1)%2 != 0 {
-		return Result{Value: resp.ErrArgs("zadd")}
+		return command.Result{Value: resp.ErrArgs("zadd")}
 	}
 
 	key := cmdCtx.Args[0]
@@ -50,11 +52,11 @@ func (b *BaseEvaluator) handleZadd(cmdCtx *CommandContext) Result {
 		return added
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// ZREM key member [member ...]
-func (b *BaseEvaluator) handleZrem(cmdCtx *CommandContext) Result {
+// HandleZrem implements ZREM key member [member ...]
+func HandleZrem(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
@@ -88,11 +90,11 @@ func (b *BaseEvaluator) handleZrem(cmdCtx *CommandContext) Result {
 		return removed
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// ZSCORE key member
-func (b *BaseEvaluator) handleZscore(cmdCtx *CommandContext) Result {
+// HandleZscore implements ZSCORE key member
+func HandleZscore(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
@@ -113,11 +115,11 @@ func (b *BaseEvaluator) handleZscore(cmdCtx *CommandContext) Result {
 		return nil
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// ZCARD key
-func (b *BaseEvaluator) handleZcard(cmdCtx *CommandContext) Result {
+// HandleZcard implements ZCARD key
+func HandleZcard(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() interface{} {
@@ -134,23 +136,23 @@ func (b *BaseEvaluator) handleZcard(cmdCtx *CommandContext) Result {
 		return zset.Card()
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// ZRANGE key start stop [WITHSCORES]
-func (b *BaseEvaluator) handleZrange(cmdCtx *CommandContext) Result {
+// HandleZrange implements ZRANGE key start stop [WITHSCORES]
+func HandleZrange(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	start, err1 := strconv.Atoi(cmdCtx.Args[1])
 	stop, err2 := strconv.Atoi(cmdCtx.Args[2])
 
 	if err1 != nil || err2 != nil {
-		return Result{Err: resp.ErrNotInteger}
+		return command.Result{Err: resp.ErrNotInteger}
 	}
 
 	withScores := false
 	if len(cmdCtx.Args) > 3 {
 		if strings.ToUpper(cmdCtx.Args[3]) != "WITHSCORES" {
-			return Result{Value: resp.ErrSyntax()}
+			return command.Result{Value: resp.ErrSyntax()}
 		}
 		withScores = true
 	}
@@ -183,11 +185,11 @@ func (b *BaseEvaluator) handleZrange(cmdCtx *CommandContext) Result {
 		return result
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// ZRANK key member
-func (b *BaseEvaluator) handleZrank(cmdCtx *CommandContext) Result {
+// HandleZrank implements ZRANK key member
+func HandleZrank(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
@@ -208,17 +210,17 @@ func (b *BaseEvaluator) handleZrank(cmdCtx *CommandContext) Result {
 		return nil
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// ZCOUNT key min max
-func (b *BaseEvaluator) handleZcount(cmdCtx *CommandContext) Result {
+// HandleZcount implements ZCOUNT key min max
+func HandleZcount(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	min, err1 := strconv.ParseFloat(cmdCtx.Args[1], 64)
 	max, err2 := strconv.ParseFloat(cmdCtx.Args[2], 64)
 
 	if err1 != nil || err2 != nil {
-		return Result{Err: resp.ErrNotFloat}
+		return command.Result{Err: resp.ErrNotFloat}
 	}
 
 	executeFn := func() interface{} {
@@ -235,5 +237,5 @@ func (b *BaseEvaluator) handleZcount(cmdCtx *CommandContext) Result {
 		return zset.Count(min, max)
 	}
 
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }

@@ -1,6 +1,10 @@
 package clientctx
 
-import "errors"
+import (
+	"errors"
+
+	"gocache/pkg/rex"
+)
 
 var (
 	ErrNestedMulti         = errors.New("multi calls cannot be nested")
@@ -15,6 +19,9 @@ type ClientContext struct {
 	Authenticated bool
 	WatchedKeys   map[string]struct{}
 	WatchDirty    bool
+	RexVersion    int               // 0 = disabled, 1 = META lines enabled
+	RexMeta       *rex.Store        // nil until first REX.META SET/MSET
+	CmdMeta       map[string]string // transient per-command META, set by server, cleared after eval
 }
 
 func New() *ClientContext {

@@ -1,15 +1,17 @@
-package evaluator
+package handler
 
 import (
 	"errors"
-	"gocache/pkg/blocking"
-	"gocache/pkg/cache"
-	"gocache/pkg/resp"
 	"strconv"
 	"time"
+
+	"gocache/pkg/blocking"
+	"gocache/pkg/cache"
+	"gocache/pkg/command"
+	"gocache/pkg/resp"
 )
 
-func (b *BaseEvaluator) handleLpush(cmdCtx *CommandContext) Result {
+func HandleLpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
 	executeFn := func() interface{} {
@@ -34,14 +36,14 @@ func (b *BaseEvaluator) handleLpush(cmdCtx *CommandContext) Result {
 		}
 		return len(list)
 	}
-	result := dispatch(cmdCtx, executeFn)
+	result := command.Dispatch(cmdCtx, executeFn)
 	if result.Err == nil {
-		b.tryWakeBlockedClients(cmdCtx, key)
+		tryWakeBlockedClients(cmdCtx, key)
 	}
 	return result
 }
 
-func (b *BaseEvaluator) handleRpush(cmdCtx *CommandContext) Result {
+func HandleRpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
 	executeFn := func() interface{} {
@@ -62,14 +64,14 @@ func (b *BaseEvaluator) handleRpush(cmdCtx *CommandContext) Result {
 		}
 		return len(list)
 	}
-	result := dispatch(cmdCtx, executeFn)
+	result := command.Dispatch(cmdCtx, executeFn)
 	if result.Err == nil {
-		b.tryWakeBlockedClients(cmdCtx, key)
+		tryWakeBlockedClients(cmdCtx, key)
 	}
 	return result
 }
 
-func (b *BaseEvaluator) handleLpop(cmdCtx *CommandContext) Result {
+func HandleLpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -94,10 +96,10 @@ func (b *BaseEvaluator) handleLpop(cmdCtx *CommandContext) Result {
 		}
 		return val
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleRpop(cmdCtx *CommandContext) Result {
+func HandleRpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -122,10 +124,10 @@ func (b *BaseEvaluator) handleRpop(cmdCtx *CommandContext) Result {
 		}
 		return val
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleLlen(cmdCtx *CommandContext) Result {
+func HandleLlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -137,18 +139,18 @@ func (b *BaseEvaluator) handleLlen(cmdCtx *CommandContext) Result {
 		}
 		return len(entry.Value.([]string))
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleLrange(cmdCtx *CommandContext) Result {
+func HandleLrange(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	start, err := strconv.Atoi(cmdCtx.Args[1])
 	if err != nil {
-		return Result{Err: resp.ErrNotInteger}
+		return command.Result{Err: resp.ErrNotInteger}
 	}
 	stop, err := strconv.Atoi(cmdCtx.Args[2])
 	if err != nil {
-		return Result{Err: resp.ErrNotInteger}
+		return command.Result{Err: resp.ErrNotInteger}
 	}
 	executeFn := func() interface{} {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -178,30 +180,30 @@ func (b *BaseEvaluator) handleLrange(cmdCtx *CommandContext) Result {
 		}
 		return list[start : stop+1]
 	}
-	return dispatch(cmdCtx, executeFn)
+	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func (b *BaseEvaluator) handleBlpop(cmdCtx *CommandContext) Result {
-	return b.handleBlockingPop(cmdCtx, true)
+func HandleBlpop(cmdCtx *command.Context) command.Result {
+	return handleBlockingPop(cmdCtx, true)
 }
 
-func (b *BaseEvaluator) handleBrpop(cmdCtx *CommandContext) Result {
-	return b.handleBlockingPop(cmdCtx, false)
+func HandleBrpop(cmdCtx *command.Context) command.Result {
+	return handleBlockingPop(cmdCtx, false)
 }
 
 // handleBlockingPop implements the shared logic for BLPOP and BRPOP.
 // fromLeft=true pops from the head (BLPOP), fromLeft=false from the tail (BRPOP).
-func (b *BaseEvaluator) handleBlockingPop(cmdCtx *CommandContext, fromLeft bool) Result {
+func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	// Last arg is the timeout in seconds (float64); 0 means block indefinitely.
 	timeoutStr := cmdCtx.Args[len(cmdCtx.Args)-1]
 	timeoutSec, err := strconv.ParseFloat(timeoutStr, 64)
 	if err != nil || timeoutSec < 0 {
-		return Result{Err: errors.New("timeout is not a float or out of range")}
+		return command.Result{Err: errors.New("timeout is not a float or out of range")}
 	}
 	keys := cmdCtx.Args[:len(cmdCtx.Args)-1]
 
 	// Phase 1: attempt an immediate non-blocking pop.
-	result := dispatch(cmdCtx, func() interface{} {
+	result := command.Dispatch(cmdCtx, func() interface{} {
 		for _, key := range keys {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
@@ -244,11 +246,11 @@ func (b *BaseEvaluator) handleBlockingPop(cmdCtx *CommandContext, fromLeft bool)
 
 	// Phase 2: do not block inside a MULTI/EXEC batch.
 	if cmdCtx.InBatch {
-		return Result{Value: nil}
+		return command.Result{Value: nil}
 	}
 
 	if cmdCtx.BlockingRegistry == nil {
-		return Result{Value: nil}
+		return command.Result{Value: nil}
 	}
 
 	// Register interest and wait.
@@ -259,9 +261,9 @@ func (b *BaseEvaluator) handleBlockingPop(cmdCtx *CommandContext, fromLeft bool)
 		// Block indefinitely until woken or server shuts down.
 		select {
 		case wake := <-ch:
-			return Result{Value: []interface{}{wake.Key, wake.Value}}
+			return command.Result{Value: []interface{}{wake.Key, wake.Value}}
 		case <-cmdCtx.BlockingRegistry.Done():
-			return Result{Value: nil}
+			return command.Result{Value: nil}
 		}
 	}
 
@@ -269,23 +271,23 @@ func (b *BaseEvaluator) handleBlockingPop(cmdCtx *CommandContext, fromLeft bool)
 	defer timer.Stop()
 	select {
 	case wake := <-ch:
-		return Result{Value: []interface{}{wake.Key, wake.Value}}
+		return command.Result{Value: []interface{}{wake.Key, wake.Value}}
 	case <-timer.C:
-		return Result{Value: nil}
+		return command.Result{Value: nil}
 	case <-cmdCtx.BlockingRegistry.Done():
-		return Result{Value: nil}
+		return command.Result{Value: nil}
 	}
 }
 
 // tryWakeBlockedClients pops one element for each blocked client that is
 // waiting on key, sending it the result through the registry channel.
 // It must NOT be called while the engine lock is held by the caller.
-func (b *BaseEvaluator) tryWakeBlockedClients(cmdCtx *CommandContext, key string) {
-	if b.blockingRegistry == nil {
+func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
+	if cmdCtx.BlockingRegistry == nil {
 		return
 	}
 	for {
-		waiterCh, found := b.blockingRegistry.TryWake(key)
+		waiterCh, found := cmdCtx.BlockingRegistry.TryWake(key)
 		if !found {
 			return
 		}
