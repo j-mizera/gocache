@@ -14,7 +14,6 @@ import (
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/logger"
-	"gocache/pkg/plugin/hooks"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
 	resphandler "gocache/pkg/resp/handler"
@@ -27,123 +26,30 @@ import (
 // pluginCommandTimeout is the maximum time to wait for a plugin to respond.
 const pluginCommandTimeout = 10 * time.Second
 
-// commandSpecs defines argument count constraints for each command.
-var commandSpecs = map[string]command.Spec{
-	resp.CmdSet:          {Min: 2, Max: -1},
-	resp.CmdGet:          {Min: 1, Max: 1},
-	resp.CmdDelete:       {Min: 1, Max: -1},
-	resp.CmdExists:       {Min: 1, Max: 1},
-	resp.CmdExpire:       {Min: 2, Max: 2},
-	resp.CmdTTL:          {Min: 1, Max: 1},
-	resp.CmdLPush:        {Min: 2, Max: -1},
-	resp.CmdRPush:        {Min: 2, Max: -1},
-	resp.CmdLPop:         {Min: 1, Max: 1},
-	resp.CmdRPop:         {Min: 1, Max: 1},
-	resp.CmdLLen:         {Min: 1, Max: 1},
-	resp.CmdLRange:       {Min: 3, Max: 3},
-	resp.CmdBLPop:        {Min: 2, Max: -1},
-	resp.CmdBRPop:        {Min: 2, Max: -1},
-	resp.CmdHSet:         {Min: 3, Max: -1},
-	resp.CmdHGet:         {Min: 2, Max: 2},
-	resp.CmdHDel:         {Min: 2, Max: -1},
-	resp.CmdHExists:      {Min: 2, Max: 2},
-	resp.CmdHGetAll:      {Min: 1, Max: 1},
-	resp.CmdHKeys:        {Min: 1, Max: 1},
-	resp.CmdHVals:        {Min: 1, Max: 1},
-	resp.CmdHLen:         {Min: 1, Max: 1},
-	resp.CmdSAdd:         {Min: 2, Max: -1},
-	resp.CmdSRem:         {Min: 2, Max: -1},
-	resp.CmdSMembers:     {Min: 1, Max: 1},
-	resp.CmdSIsMember:    {Min: 2, Max: 2},
-	resp.CmdSCard:        {Min: 1, Max: 1},
-	resp.CmdSPop:         {Min: 1, Max: 1},
-	resp.CmdZAdd:         {Min: 3, Max: -1},
-	resp.CmdZRem:         {Min: 2, Max: -1},
-	resp.CmdZScore:       {Min: 2, Max: 2},
-	resp.CmdZCard:        {Min: 1, Max: 1},
-	resp.CmdZRange:       {Min: 3, Max: 4},
-	resp.CmdZRank:        {Min: 2, Max: 2},
-	resp.CmdZCount:       {Min: 3, Max: 3},
-	resp.CmdMulti:        {Min: 0, Max: 0},
-	resp.CmdExec:         {Min: 0, Max: 0},
-	resp.CmdDiscard:      {Min: 0, Max: 0},
-	resp.CmdSnapshot:     {Min: 0, Max: 0},
-	resp.CmdLoadSnapshot: {Min: 1, Max: 1},
-	resp.CmdDBSize:       {Min: 0, Max: 0},
-	resp.CmdInfo:         {Min: 0, Max: 1},
-	resp.CmdHello:        {Min: 1, Max: -1},
-
-	// Server/connection commands
-	resp.CmdPing:     {Min: 0, Max: 1},
-	resp.CmdEcho:     {Min: 1, Max: 1},
-	resp.CmdSelect:   {Min: 1, Max: 1},
-	resp.CmdFlushDB:  {Min: 0, Max: 0},
-	resp.CmdFlushAll: {Min: 0, Max: 0},
-	resp.CmdAuth:     {Min: 1, Max: 1},
-
-	// String counter commands
-	resp.CmdIncr:        {Min: 1, Max: 1},
-	resp.CmdDecr:        {Min: 1, Max: 1},
-	resp.CmdIncrBy:      {Min: 2, Max: 2},
-	resp.CmdDecrBy:      {Min: 2, Max: 2},
-	resp.CmdIncrByFloat: {Min: 2, Max: 2},
-	resp.CmdAppend:      {Min: 2, Max: 2},
-	resp.CmdStrlen:      {Min: 1, Max: 1},
-
-	// Multi-key commands
-	resp.CmdMGet: {Min: 1, Max: -1},
-	resp.CmdMSet: {Min: 2, Max: -1},
-
-	// SET variants and TTL commands
-	resp.CmdSetNX:   {Min: 2, Max: 2},
-	resp.CmdPExpire: {Min: 2, Max: 2},
-	resp.CmdPTTL:    {Min: 1, Max: 1},
-
-	// Set operations
-	resp.CmdSInter: {Min: 1, Max: -1},
-	resp.CmdSUnion: {Min: 1, Max: -1},
-	resp.CmdSDiff:  {Min: 1, Max: -1},
-
-	// Key management commands
-	resp.CmdType:      {Min: 1, Max: 1},
-	resp.CmdRename:    {Min: 2, Max: 2},
-	resp.CmdRenameNX:  {Min: 2, Max: 2},
-	resp.CmdKeys:      {Min: 1, Max: 1},
-	resp.CmdScan:      {Min: 1, Max: -1},
-	resp.CmdRandomKey: {Min: 0, Max: 0},
-
-	// Watch commands
-	resp.CmdWatch:   {Min: 1, Max: -1},
-	resp.CmdUnwatch: {Min: 0, Max: 0},
-
-	// Key introspection
-	resp.CmdObject: {Min: 1, Max: 2},
-
-	// REX metadata
-	resp.CmdRexMeta: {Min: 1, Max: -1},
-}
-
 // Evaluator is the command dispatch pipeline.
 type Evaluator interface {
 	Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result
 	RegisterHandler(op string, handler command.Handler)
 	SetPluginRouter(r *router.Router)
-	SetHookExecutor(e *hooks.Executor)
+	SetHookExecutor(e command.HookExecutor)
 	CoreCommandNames() []string
 }
 
-// BaseEvaluator is the pipeline implementation.
+// BaseEvaluator is the pipeline implementation. It owns no command-specific
+// knowledge — handlers and their argument specs are provided by external
+// packages (resp/handler, rex/handler) via command.Registration.
 type BaseEvaluator struct {
 	cache              *cache.Cache
 	engine             *engine.Engine
 	transactionManager *transaction.Manager
 	handlers           map[string]command.Handler
+	specs              map[string]command.Spec
 	snapshotFile       string
 	requirePass        string
 	blockingRegistry   *blocking.Registry
 	watchManager       *watch.Manager
 	pluginRouter       *router.Router
-	hookExecutor       *hooks.Executor
+	hookExecutor       command.HookExecutor
 }
 
 func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) Evaluator {
@@ -152,15 +58,24 @@ func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br 
 		engine:             e,
 		transactionManager: transaction.NewManager(),
 		handlers:           make(map[string]command.Handler),
+		specs:              make(map[string]command.Spec),
 		snapshotFile:       snapshotFile,
 		requirePass:        requirePass,
 		blockingRegistry:   br,
 		watchManager:       wm,
 	}
-	b.registerHandlers()
+	b.registerAll()
 	return b
 }
 
+// Register adds a single command handler and its argument spec.
+func (b *BaseEvaluator) Register(op string, reg command.Registration) {
+	op = strings.ToUpper(op)
+	b.handlers[op] = reg.Handler
+	b.specs[op] = reg.Spec
+}
+
+// RegisterHandler adds a handler without a spec (for dynamic/test commands).
 func (b *BaseEvaluator) RegisterHandler(op string, handler command.Handler) {
 	b.handlers[strings.ToUpper(op)] = handler
 }
@@ -169,7 +84,7 @@ func (b *BaseEvaluator) SetPluginRouter(r *router.Router) {
 	b.pluginRouter = r
 }
 
-func (b *BaseEvaluator) SetHookExecutor(e *hooks.Executor) {
+func (b *BaseEvaluator) SetHookExecutor(e command.HookExecutor) {
 	b.hookExecutor = e
 }
 
@@ -181,13 +96,15 @@ func (b *BaseEvaluator) CoreCommandNames() []string {
 	return names
 }
 
-func (b *BaseEvaluator) registerHandlers() {
-	// Register all RESP command handlers.
-	for name, handler := range resphandler.Handlers() {
-		b.handlers[name] = handler
+func (b *BaseEvaluator) registerAll() {
+	// RESP command handlers provide their own specs.
+	for name, reg := range resphandler.Registrations() {
+		b.Register(name, reg)
 	}
-	// Register REX metadata handler.
-	b.handlers[resp.CmdRexMeta] = rexhandler.HandleRexMeta
+	// REX command handlers provide their own specs.
+	for name, reg := range rexhandler.Registrations() {
+		b.Register(name, reg)
+	}
 }
 
 func (b *BaseEvaluator) Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result {
@@ -207,7 +124,7 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 
-	if spec, hasSpec := commandSpecs[op]; hasSpec {
+	if spec, hasSpec := b.specs[op]; hasSpec {
 		n := len(args)
 		if n < spec.Min || (spec.Max >= 0 && n > spec.Max) {
 			return command.Result{Value: resp.ErrArgs(strings.ToLower(op))}
@@ -243,9 +160,12 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 	}
 
 	// Build hook context with server-injected values.
-	var hookCtx map[string]string
+	var (
+		hookCtx map[string]string
+		startNs int64
+	)
 	if b.hookExecutor != nil && b.hookExecutor.HasAny() {
-		startNs := time.Now().UnixNano()
+		startNs = time.Now().UnixNano()
 		hookCtx = command.NewHookCtx()
 		hookCtx[command.StartNs] = strconv.FormatInt(startNs, 10)
 
@@ -255,6 +175,9 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		}
 
 		// Pre-hooks: fire before command execution.
+		// NOTE: context.Background() is used because Evaluate does not yet thread
+		// a per-request context through its signature. See roadmap for the
+		// context-propagation refactor.
 		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args, hookCtx); pre != nil {
 			if pre.Denied {
 				return command.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
@@ -267,7 +190,10 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 
 	// Post-hooks: fire after command execution.
 	if b.hookExecutor != nil && b.hookExecutor.HasAny() && hookCtx != nil {
-		elapsedNs := time.Now().UnixNano() - mustParseInt64(hookCtx[command.StartNs])
+		// Use the locally captured startNs -- not a round-trip through the map.
+		// A plugin could have deleted _start_ns from hookCtx during pre-hooks,
+		// and parsing back out of the map would silently yield 0 elapsed.
+		elapsedNs := time.Now().UnixNano() - startNs
 		hookCtx[command.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
 		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr, hookCtx)
@@ -305,9 +231,4 @@ func resultToHookStrings(r command.Result) (string, string) {
 		return "", ""
 	}
 	return fmt.Sprintf("%v", r.Value), ""
-}
-
-func mustParseInt64(s string) int64 {
-	v, _ := strconv.ParseInt(s, 10, 64)
-	return v
 }

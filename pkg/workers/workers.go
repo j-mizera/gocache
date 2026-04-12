@@ -23,11 +23,16 @@ type baseWorker struct {
 	interval     time.Duration
 	stopChan     chan struct{}
 	stopOnce     sync.Once
+	wg           sync.WaitGroup
 	intervalChan chan time.Duration
 }
 
+// Stop signals the worker to stop and waits for its goroutine to exit.
+// After Stop returns it is safe to run operations that would otherwise
+// race with the worker (e.g. a final snapshot on shutdown).
 func (w *baseWorker) Stop() {
 	w.stopOnce.Do(func() { close(w.stopChan) })
+	w.wg.Wait()
 }
 
 func (w *baseWorker) UpdateInterval(d time.Duration) {
@@ -69,7 +74,9 @@ func (w *SnapshotWorker) UpdateFile(file string) {
 
 func (w *SnapshotWorker) Start() {
 	ticker := time.NewTicker(w.interval)
+	w.wg.Add(1)
 	go func() {
+		defer w.wg.Done()
 		for {
 			select {
 			case <-ticker.C:
@@ -112,7 +119,9 @@ func NewCleanupWorker(c *cache.Cache, e *engine.Engine, interval time.Duration) 
 
 func (w *CleanupWorker) Start() {
 	ticker := time.NewTicker(w.interval)
+	w.wg.Add(1)
 	go func() {
+		defer w.wg.Done()
 		for {
 			select {
 			case <-ticker.C:

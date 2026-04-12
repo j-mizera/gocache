@@ -66,3 +66,11 @@ type Spec struct {
 	Min int
 	Max int
 }
+
+// Registration bundles a command handler with its argument spec.
+// Handler packages return maps of these so the evaluator pipeline can
+// validate args without hardcoding spec knowledge.
+type Registration struct {
+	Handler Handler
+	Spec    Spec
+}

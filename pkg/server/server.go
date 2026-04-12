@@ -17,7 +17,6 @@ import (
 	"gocache/pkg/engine"
 	"gocache/pkg/evaluator"
 	"gocache/pkg/logger"
-	"gocache/pkg/plugin/hooks"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
 	"gocache/pkg/rex"
@@ -64,7 +63,7 @@ func (srv *Server) SetPluginRouter(r *router.Router) {
 }
 
 // SetHookExecutor sets the hook executor on the evaluator.
-func (srv *Server) SetHookExecutor(e *hooks.Executor) {
+func (srv *Server) SetHookExecutor(e command.HookExecutor) {
 	srv.evaluator.SetHookExecutor(e)
 }
 
@@ -212,7 +211,8 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		op := strings.ToUpper(parts[0])
 
 		// META accumulation: when REXV is negotiated and the command is META,
-		// collect key-value into the per-command map and read the next value.
+		// collect key-value into the per-command map. META is RESP-compliant:
+		// it always produces a response (+OK on success, -ERR on failure).
 		if ctx.RexVersion > 0 && op == resp.CmdMeta {
 			key, value, err := rex.ParseMeta(parts[1:])
 			if err != nil {
@@ -231,6 +231,14 @@ func (srv *Server) handleConnection(conn net.Conn) {
 				cmdMeta = make(map[string]string)
 			}
 			cmdMeta[key] = value
+			if writeErr := writer.Write(resp.OK()); writeErr != nil {
+				return
+			}
+			if reader.Buffered() == 0 {
+				if flushErr := writer.Flush(); flushErr != nil {
+					return
+				}
+			}
 			continue
 		}
 

@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"gocache/pkg/cache"
@@ -12,10 +13,10 @@ import (
 )
 
 func TestHandler_Snapshot(t *testing.T) {
-	snapshotFile := "test_handler_snapshot.dat"
-	filename := "test_handler_snapshot_2.dat"
-	defer os.Remove(snapshotFile)
-	defer os.Remove(filename)
+	// Use a temp dir so the LOAD_SNAPSHOT path-traversal guard has a
+	// well-defined base directory.
+	dir := t.TempDir()
+	snapshotFile := filepath.Join(dir, "test_handler_snapshot.dat")
 
 	c1 := cache.New()
 	e1 := engine.New(c1)
@@ -45,16 +46,24 @@ func TestHandler_Snapshot(t *testing.T) {
 	if _, err := os.Stat(snapshotFile); os.IsNotExist(err) {
 		t.Fatalf("%s was not created", snapshotFile)
 	}
-	os.Rename(snapshotFile, filename)
 
-	// Load into fresh cache
+	// Load into fresh cache. Call HandleLoadSnapshot directly so we can set
+	// SnapshotFile (eval() uses a minimal command.Context without config).
 	c2 := cache.New()
 	e2 := engine.New(c2)
 	go e2.Run()
 	t.Cleanup(func() { e2.Stop() })
 	ctx2 := clientctx.New()
 
-	res = eval(t, c2, e2, ctx2, "LOAD_SNAPSHOT", []string{filename})
+	loadCtx := &command.Context{
+		Client:       ctx2,
+		Op:           "LOAD_SNAPSHOT",
+		Args:         []string{filepath.Base(snapshotFile)},
+		Engine:       e2,
+		Cache:        c2,
+		SnapshotFile: snapshotFile,
+	}
+	res = handler.HandleLoadSnapshot(loadCtx)
 	if res.Value != "OK" {
 		t.Fatalf("LOAD_SNAPSHOT: %v", res.Value)
 	}
@@ -62,5 +71,37 @@ func TestHandler_Snapshot(t *testing.T) {
 	res = eval(t, c2, e2, ctx2, "GET", []string{"snap"})
 	if res.Value != "data" {
 		t.Errorf("GET snap: expected data, got %v", res.Value)
+	}
+}
+
+func TestHandler_LoadSnapshot_PathTraversal(t *testing.T) {
+	// Verify that LOAD_SNAPSHOT rejects absolute paths, parent traversal,
+	// and subpaths that escape the base snapshot directory.
+	dir := t.TempDir()
+	baseSnapshot := filepath.Join(dir, "ok.snap")
+
+	c := cache.New()
+	e := engine.New(c)
+	go e.Run()
+	t.Cleanup(func() { e.Stop() })
+
+	bad := []string{
+		"/etc/passwd",
+		"../../etc/passwd",
+		"sub/../../escape",
+	}
+	for _, arg := range bad {
+		loadCtx := &command.Context{
+			Client:       clientctx.New(),
+			Op:           "LOAD_SNAPSHOT",
+			Args:         []string{arg},
+			Engine:       e,
+			Cache:        c,
+			SnapshotFile: baseSnapshot,
+		}
+		res := handler.HandleLoadSnapshot(loadCtx)
+		if res.Value == "OK" {
+			t.Errorf("path %q should have been rejected, got OK", arg)
+		}
 	}
 }

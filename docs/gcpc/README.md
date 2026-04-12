@@ -83,7 +83,7 @@ The correlation ID enables multiplexed dispatch -- multiple commands can be in-f
 
 Plugins can register commands in two namespace modes:
 
-- **Main namespace** (`namespaced: false`): Commands appear as standard Redis commands. Clients use them transparently (e.g., `PUBLISH`, `GEOADD`). Cannot shadow any of the 74 core commands.
+- **Main namespace** (`namespaced: false`): Commands appear as standard Redis commands. Clients use them transparently (e.g., `PUBLISH`, `GEOADD`). Cannot shadow any of the core commands.
 - **REX namespace** (`namespaced: true`): Commands are prefixed with the plugin name and a colon (e.g., `KAFKA:PRODUCE`). Used for plugin-specific operations with no Redis equivalent.
 
 ## Command Results
@@ -130,7 +130,7 @@ Each command carries a per-command context map (`map<string, string>`) that flow
 | `_start_ns` | Before pre-hooks | Command start timestamp (nanoseconds since epoch) |
 | `_elapsed_ns` | Before post-hooks | Command execution duration (nanoseconds) |
 
-These constants are available in the `cmdctx` package as `cmdctx.StartNs` and `cmdctx.ElapsedNs`.
+These constants are available in the `command` package as `command.StartNs` and `command.ElapsedNs`. Hook context helpers live alongside them: `command.NewHookCtx()`, `command.MergeHookCtx()`, and `command.FilterHookCtx()`.
 
 ### Namespace enforcement
 
@@ -145,6 +145,81 @@ This prevents plugins from reading each other's private state. To share data acr
 ### Wire format
 
 `HookRequestV1` carries the filtered context in a `map<string, string> context` field (field 7). `HookResponseV1` carries plugin-written values in a `map<string, string> context_values` field (field 4).
+
+## REX Metadata
+
+REX (RESP EXtensions) lets clients attach per-command or connection-scoped key-value metadata that flows to plugins through the hook context. This enables per-request auth tokens, multi-tenancy, and distributed trace context propagation.
+
+### Capability negotiation
+
+Clients opt into REX by negotiating the version in `HELLO`:
+
+```
+HELLO 3 AUTH user pass SETNAME myclient REXV 1
+```
+
+When `REXV 1` is negotiated, the server recognizes `META` lines as metadata directives that accumulate into the next command's context. Without negotiation, `META` is treated as an unknown command and REX has zero overhead.
+
+### Per-command metadata (stateless, preferred)
+
+`META` lines precede a command and carry a single key-value pair each. Each line gets a RESP `+OK` response (RESP-compliant request/response). On the next non-META command, accumulated metadata is attached, flows through pre-hooks and post-hooks, and is discarded.
+
+```
+META traceparent 00-abc123-def456-01
+META authorization Bearer eyJhbG...
+GET mykey
+```
+
+Values may contain spaces -- in binary RESP mode they're carried as bulk strings; in inline mode, arguments after the key are joined with spaces.
+
+### Connection-scoped defaults (sticky)
+
+`REX.META` is a standalone command for setting connection-level defaults that merge with per-command metadata on every request:
+
+| Subcommand | Description |
+|------------|-------------|
+| `REX.META SET <key> <value>` | Set a single key-value pair |
+| `REX.META MSET <k1> <v1> [<k2> <v2> ...]` | Set multiple pairs in one call |
+| `REX.META GET <key>` | Read a stored value |
+| `REX.META DEL <key>` | Remove a key |
+| `REX.META LIST` | Return all stored metadata |
+
+Defaults are stored in a thread-safe `rex.Store` attached to `ClientContext.RexMeta` (nil until first use). Works regardless of `REXV` negotiation.
+
+### Precedence
+
+Per-command `META` values override `REX.META` connection defaults for that single command:
+
+```
+per-command META  >  REX.META connection defaults  >  (absent)
+```
+
+### Reserved keys
+
+Keys starting with `_` or `shared.` are rejected at validation time -- those prefixes are reserved for server-injected and plugin-shared namespaces in the hook context.
+
+### Plugin visibility
+
+Merged metadata is injected into the hook context under the `shared.rex.` prefix:
+
+```
+shared.rex.auth.jwt      = "eyJhb..."
+shared.rex.tenant.id     = "team-a"
+shared.rex.traceparent   = "00-abc..."
+```
+
+All plugins see `shared.rex.*` keys through the existing `shared.` visibility rule in `command.FilterHookCtx()` -- no changes to the hook context filtering mechanism.
+
+### Implementation
+
+The logic lives in `pkg/rex/`:
+
+- `rex.Store` -- thread-safe connection-scoped metadata store
+- `rex.ParseMeta(args)` -- parses META command arguments into `(key, value)`
+- `rex.InjectIntoHookCtx(hookCtx, store, cmdMeta)` -- merges defaults + per-command metadata into the hook context with the `shared.rex.` prefix
+- `rex.ValidateKey(key)` -- enforces the reserved-prefix rules
+
+The `REX.META` handler lives in `pkg/rex/handler/handler.go` and is registered by the evaluator alongside core RESP handlers.
 
 ## Scope Negotiation
 
@@ -175,6 +250,7 @@ The full Protobuf schema is at `proto/gcpc/v1/gcpc.proto`.
 | Sequence | [Command Routing](design/sequence/sequence_plugin_command_routing.puml) | Plugin command dispatch over IPC |
 | Sequence | [Hook Flow](design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution with context propagation |
 | Sequence | [Hook Context Flow](design/sequence/sequence_hook_context.puml) | Context namespacing and filtering across multiple plugins |
+| Sequence | [REX Metadata](design/sequence/sequence_rex_metadata.puml) | HELLO REXV negotiation, META accumulation, hook context injection |
 | Sequence | [Scope Registration](design/sequence/sequence_scope_registration.puml) | Scope negotiation during registration |
 | Sequence | [Scope Enforcement](design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
 | State | [Plugin Lifecycle](design/state/state_plugin_lifecycle.puml) | Plugin FSM: Loaded -> Running -> Shutdown |

@@ -16,7 +16,7 @@ actor Client
 
     == Initialize Context ==
 
-    Evaluator -> Evaluator : hookCtx = cmdctx.New()\nhookCtx["_start_ns"] = now()
+    Evaluator -> Evaluator : hookCtx = command.NewHookCtx()\nhookCtx["_start_ns"] = now()
 
     == Pre-Hooks ==
 
@@ -31,7 +31,7 @@ actor Client
     deactivate PluginA
     PluginConn --> HookExec : Allow
 
-    hnote over HookExec : cmdctx.Merge(hookCtx, "auth", values)\nhookCtx now has auth.tenant_id
+    hnote over HookExec : command.MergeHookCtx(hookCtx, "auth", values)\nhookCtx now has auth.tenant_id
 
     HookExec --> Evaluator : PreHookResult{Denied=false, Context=hookCtx}
 
@@ -49,7 +49,7 @@ actor Client
     Evaluator -> HookExec : RunPostHooks("SET", args, "OK", "", hookCtx)
     HookExec -> HookReg : MatchPost("SET")
 
-    hnote over HookExec : cmdctx.Filter(hookCtx, "gobservability")\nreturns: {_start_ns, _elapsed_ns, shared.*}
+    hnote over HookExec : command.FilterHookCtx(hookCtx, "gobservability")\nreturns: {_start_ns, _elapsed_ns, shared.*}
 
     HookExec ->> PluginM : HookRequestV1 POST\n(fire-and-forget)\ncontext: {_start_ns, _elapsed_ns}
     note right : Non-critical: no wait.\nReads _elapsed_ns for latency histogram.

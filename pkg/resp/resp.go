@@ -26,6 +26,17 @@ const (
 	Set       = '~'
 )
 
+// Resource limits to reject malformed or malicious input before allocation.
+const (
+	// maxBulkStringBytes caps the size of a single bulk string.
+	// Prevents memory exhaustion via `$<huge>\r\n`.
+	maxBulkStringBytes = 512 * 1024 * 1024 // 512 MiB
+
+	// maxArrayElements caps the number of elements in an Array/Map/Set.
+	// Prevents memory exhaustion via `*<huge>\r\n` and downstream makes.
+	maxArrayElements = 1024 * 1024 // 1 M elements
+)
+
 type Value struct {
 	Type    byte
 	Str     string
@@ -136,6 +147,15 @@ func (r *Reader) readArray() (Value, error) {
 		return v, err
 	}
 
+	// Null array (RESP2): *-1\r\n
+	if n < 0 {
+		v.IsNull = true
+		return v, nil
+	}
+	if n > maxArrayElements {
+		return v, fmt.Errorf("resp: array too large: %d (max %d)", n, maxArrayElements)
+	}
+
 	v.Array = make([]Value, n)
 	for i := 0; i < n; i++ {
 		val, err := r.Read()
@@ -155,7 +175,14 @@ func (r *Reader) readBulkString() (Value, error) {
 	}
 
 	if n == -1 {
+		v.IsNull = true
 		return v, nil // Null Bulk String
+	}
+	if n < 0 {
+		return v, fmt.Errorf("resp: invalid bulk string length: %d", n)
+	}
+	if n > maxBulkStringBytes {
+		return v, fmt.Errorf("resp: bulk string too large: %d (max %d)", n, maxBulkStringBytes)
 	}
 
 	bulk := make([]byte, n)
@@ -233,6 +260,12 @@ func (r *Reader) readBulkError() (Value, error) {
 	if err != nil {
 		return v, err
 	}
+	if length < 0 {
+		return v, fmt.Errorf("resp: invalid bulk error length: %d", length)
+	}
+	if length > maxBulkStringBytes {
+		return v, fmt.Errorf("resp: bulk error too large: %d (max %d)", length, maxBulkStringBytes)
+	}
 	bulk := make([]byte, length)
 	_, err = io.ReadFull(r.reader, bulk)
 	if err != nil {
@@ -251,6 +284,13 @@ func (r *Reader) readMap() (Value, error) {
 	if err != nil {
 		return v, err
 	}
+	if count < 0 {
+		v.IsNull = true
+		return v, nil
+	}
+	if count > maxArrayElements/2 {
+		return v, fmt.Errorf("resp: map too large: %d (max %d)", count, maxArrayElements/2)
+	}
 	v.Array = make([]Value, count*2)
 	for i := 0; i < count*2; i++ {
 		val, err := r.Read()
@@ -267,6 +307,13 @@ func (r *Reader) readSet() (Value, error) {
 	count, _, err := r.readInteger()
 	if err != nil {
 		return v, err
+	}
+	if count < 0 {
+		v.IsNull = true
+		return v, nil
+	}
+	if count > maxArrayElements {
+		return v, fmt.Errorf("resp: set too large: %d (max %d)", count, maxArrayElements)
 	}
 	v.Array = make([]Value, count)
 	for i := 0; i < count; i++ {

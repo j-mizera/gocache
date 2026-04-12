@@ -12,7 +12,14 @@ import (
 	"gocache/pkg/transaction"
 )
 
-var handlers = handler.Handlers()
+// Build a plain handler map from registrations for test dispatch.
+var handlers = func() map[string]command.Handler {
+	m := make(map[string]command.Handler)
+	for name, reg := range handler.Registrations() {
+		m[name] = reg.Handler
+	}
+	return m
+}()
 
 func setup(t *testing.T) (*cache.Cache, *engine.Engine, *clientctx.ClientContext) {
 	t.Helper()

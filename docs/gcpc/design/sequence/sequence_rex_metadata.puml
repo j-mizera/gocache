@@ -1,0 +1,93 @@
+@startuml sequence_rex_metadata
+!include ../../../design/theme.iuml
+
+mainframe **sd** REX Metadata Flow: Negotiation, META lines, and hook context injection
+
+actor Client
+participant "Connection\nHandler" as Conn
+participant "ClientContext\n(per connection)" as CC
+participant "Evaluator" as Eval
+participant "rex package" as REX
+participant "Hook Executor" as Hook
+participant "Auth Plugin\n(pre-hook)" as Auth
+
+== Capability Negotiation ==
+
+Client -> Conn : HELLO 3 REXV 1
+Conn -> Eval : Evaluate("HELLO", ["3", "REXV", "1"])
+Eval -> CC : ProtoVersion = 3
+Eval -> CC : RexVersion = 1
+Eval --> Conn : {proto: 3, rexv: 1, ...}
+Conn --> Client : +map with rexv: 1
+
+== Optional: Connection-Scoped Defaults ==
+
+Client -> Conn : REX.META SET auth.jwt eyJhbG...
+Conn -> Eval : Evaluate("REX.META", ["SET", "auth.jwt", "..."])
+Eval -> REX : HandleRexMeta → store.Set(...)
+REX -> CC : lazy init RexMeta (rex.Store)
+Eval --> Conn : +OK
+Conn --> Client : +OK
+
+== Per-Command META (Stateless, Preferred) ==
+
+Client -> Conn : META traceparent 00-abc
+Conn -> REX : ParseMeta(["traceparent", "00-abc"])
+REX --> Conn : ("traceparent", "00-abc")
+Conn -> Conn : cmdMeta["traceparent"] = "00-abc"
+Conn --> Client : +OK (RESP-compliant)
+
+Client -> Conn : META tenant.id team-a
+Conn -> Conn : cmdMeta["tenant.id"] = "team-a"
+Conn --> Client : +OK
+
+Client -> Conn : GET mykey
+
+== Command Execution with Merged Metadata ==
+
+Conn -> CC : CmdMeta = cmdMeta
+Conn -> Eval : Evaluate("GET", ["mykey"])
+
+Eval -> Eval : hookCtx = command.NewHookCtx()
+Eval -> Eval : hookCtx["_start_ns"] = now()
+
+Eval -> REX : InjectIntoHookCtx(hookCtx, CC.RexMeta, CC.CmdMeta)
+note right of REX
+  Precedence:
+    per-command META > REX.META defaults
+  Prefix: "shared.rex.*"
+  Result keys in hookCtx:
+    shared.rex.auth.jwt = "eyJhbG..." (from RexMeta)
+    shared.rex.traceparent = "00-abc" (from CmdMeta)
+    shared.rex.tenant.id = "team-a" (from CmdMeta)
+end note
+
+== Hook Chain Sees REX Metadata ==
+
+Eval -> Hook : RunPreHooks("GET", args, hookCtx)
+Hook -> Auth : HookRequestV1\ncontext: {_start_ns, shared.rex.auth.jwt, shared.rex.traceparent, shared.rex.tenant.id}
+note right
+  Auth plugin sees shared.rex.*
+  via existing shared. visibility
+  in command.FilterHookCtx()
+end note
+Auth --> Hook : HookResponseV1 (allow)
+Hook --> Eval : allow
+
+Eval -> Eval : execute GET
+Eval --> Conn : Result{Value: "value"}
+Conn -> CC : CmdMeta = nil (cleared)
+Conn --> Client : $5\\r\\nvalue\\r\\n
+
+== Next Command Has No Per-Command Metadata ==
+
+Client -> Conn : GET otherkey
+note right : No META lines this time
+Conn -> Eval : Evaluate("GET", ["otherkey"])
+Eval -> REX : InjectIntoHookCtx(hookCtx, CC.RexMeta, nil)
+note right
+  Only connection defaults injected:
+    shared.rex.auth.jwt (from RexMeta)
+end note
+
+@enduml

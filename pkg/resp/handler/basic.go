@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,6 +12,12 @@ import (
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
+
+// constantTimeStringCompare returns true iff a == b, using a constant-time
+// algorithm that does not leak password length or content via timing.
+func constantTimeStringCompare(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
 
 // ErrInvalidDuration is returned when a duration argument cannot be parsed.
 var ErrInvalidDuration = errors.New("invalid duration")
@@ -58,7 +65,7 @@ func HandleAuth(cmdCtx *command.Context) command.Result {
 	if cmdCtx.RequirePass == "" {
 		return command.Result{Value: resp.MarshalError("ERR Client sent AUTH, but no password is set")}
 	}
-	if cmdCtx.Args[0] != cmdCtx.RequirePass {
+	if !constantTimeStringCompare(cmdCtx.Args[0], cmdCtx.RequirePass) {
 		return command.Result{Value: resp.MarshalError("WRONGPASS invalid username-password pair")}
 	}
 	cmdCtx.Client.Authenticated = true
@@ -384,20 +391,24 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 }
 
 // HandlePttl implements PTTL key.
-// Returns remaining TTL in milliseconds, -1 if no TTL, -2 if absent/expired.
+// Returns remaining TTL in milliseconds, -1 if the key exists but has no TTL,
+// -2 if the key does not exist or has expired.
 func HandlePttl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
-		ttl, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueAbsent || state == cache.ValueExpired {
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
-			}
+		if _, found := cmdCtx.Cache.RawGet(key); !found {
 			return int64(-2)
-		} else if ttl == 0 {
-			return int64(-1)
 		}
-		return ttl.Milliseconds()
+		ttl, state := cmdCtx.Cache.TTLInternal(key)
+		switch state {
+		case cache.ValueExpired:
+			cmdCtx.Cache.RawDelete(key)
+			return int64(-2)
+		case cache.ValueAbsent:
+			return int64(-1)
+		default:
+			return ttl.Milliseconds()
+		}
 	}
 	return command.Dispatch(cmdCtx, executeFn)
 }
@@ -486,18 +497,26 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 }
 
 // HandleTtl implements TTL key.
+// Returns remaining TTL in seconds, -1 if the key exists but has no TTL,
+// -2 if the key does not exist or has expired.
 func HandleTtl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() interface{} {
-		ttl, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueAbsent || state == cache.ValueExpired {
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
-			}
+		// Distinguish "key missing" (-2) from "key present with no TTL" (-1).
+		// TTLInternal returns ValueAbsent for both cases, so we must check
+		// key existence explicitly first.
+		if _, found := cmdCtx.Cache.RawGet(key); !found {
 			return int64(-2)
-		} else if ttl == 0 {
+		}
+		ttl, state := cmdCtx.Cache.TTLInternal(key)
+		switch state {
+		case cache.ValueExpired:
+			cmdCtx.Cache.RawDelete(key)
+			return int64(-2)
+		case cache.ValueAbsent:
+			// Key exists but has no TTL set.
 			return int64(-1)
-		} else {
+		default:
 			return int64(ttl.Seconds())
 		}
 	}
@@ -582,7 +601,7 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 				return command.Result{Value: resp.MarshalError("ERR syntax error")}
 			}
 			// AUTH username password -- username is ignored for now (single-user)
-			if cmdCtx.RequirePass != "" && args[2] != cmdCtx.RequirePass {
+			if cmdCtx.RequirePass != "" && !constantTimeStringCompare(args[2], cmdCtx.RequirePass) {
 				return command.Result{Value: resp.MarshalError("WRONGPASS invalid password")}
 			}
 			cmdCtx.Client.Authenticated = true

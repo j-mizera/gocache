@@ -3,6 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
+	"time"
+
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
@@ -15,10 +21,6 @@ import (
 	"gocache/pkg/version"
 	"gocache/pkg/watch"
 	"gocache/pkg/workers"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
@@ -45,12 +47,18 @@ func main() {
 	}
 
 	// Load configuration: CLI flags > env vars (GOCACHE_*) > config file > defaults
-	cfg, v, err := config.Load(pflag.CommandLine)
+	initialCfg, v, err := config.Load(pflag.CommandLine)
 	if err != nil {
 		// Initialize logger with default level for fatal message
 		logger.Init("info")
 		logger.Fatal().Err(err).Msg("failed to load configuration")
 	}
+
+	// Wrap the config in an atomic.Pointer so the fsnotify callback goroutine
+	// and the main goroutine can safely swap and read it without data races.
+	var cfgPtr atomic.Pointer[config.Config]
+	cfgPtr.Store(initialCfg)
+	cfg := initialCfg
 
 	// Initialize structured logging
 	logger.Init(cfg.Server.LogLevel)
@@ -90,7 +98,9 @@ func main() {
 	snapshotWorker.Start()
 	cleanupWorker.Start()
 
-	// Hot reload: watch config file for changes and apply live-reloadable fields
+	// Hot reload: watch config file for changes and apply live-reloadable fields.
+	// The callback runs in the fsnotify goroutine, so config swaps use
+	// atomic.Pointer to avoid races with the main goroutine.
 	v.WatchConfig()
 	v.OnConfigChange(func(e fsnotify.Event) {
 		newCfg, err := config.Reload(v)
@@ -100,7 +110,8 @@ func main() {
 		}
 		logger.Info().Str("file", e.Name).Msg("config reloaded")
 
-		if newCfg.Server.GetAddr() != cfg.Server.GetAddr() {
+		prev := cfgPtr.Load()
+		if newCfg.Server.GetAddr() != prev.Server.GetAddr() {
 			logger.Warn().Msg("server address/port changes require a restart")
 		}
 
@@ -112,7 +123,7 @@ func main() {
 			cache.ParseEvictionPolicy(newCfg.Memory.EvictionPolicy),
 		)
 
-		cfg = newCfg
+		cfgPtr.Store(newCfg)
 	})
 
 	// Initialize blocking registry for BLPOP/BRPOP
@@ -159,10 +170,10 @@ func main() {
 	select {
 	case sig := <-sigChan:
 		logger.Info().Str("signal", sig.String()).Msg("received signal")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfg, blockingRegistry, pluginManager)
+		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager)
 	case err := <-serverErrChan:
 		logger.Error().Err(err).Msg("server error")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfg, blockingRegistry, pluginManager)
+		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager)
 		os.Exit(1)
 	}
 }

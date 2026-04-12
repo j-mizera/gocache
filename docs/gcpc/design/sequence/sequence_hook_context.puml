@@ -11,7 +11,7 @@ participant "Metrics Plugin\n(non-critical, pri=100)" as Metrics
 
 == Context Initialization ==
 
-Eval -> Eval : ctx = cmdctx.New()
+Eval -> Eval : ctx = command.NewHookCtx()
 note right : ctx = {}
 
 Eval -> Eval : ctx["_start_ns"] = "1712700000000000000"
@@ -23,7 +23,7 @@ Exec -> Auth : HookRequestV1\ncontext: {_start_ns}
 note right : Filter: _ keys only\n(no plugin data yet)
 Auth --> Exec : HookResponseV1\ncontext_values: {\n  tenant_id: "acme",\n  shared.user: "john"\n}
 
-Exec -> Exec : cmdctx.Merge(ctx, "auth", values)
+Exec -> Exec : command.MergeHookCtx(ctx, "auth", values)
 note right : ctx = {\n  _start_ns: "171...",\n  auth.tenant_id: "acme",\n  shared.user: "john"\n}
 
 == Pre-Hook: RateLimiter (priority 2) ==
@@ -32,7 +32,7 @@ Exec -> RL : HookRequestV1\ncontext: {\n  _start_ns,\n  shared.user: "john"\n}
 note right : Filter: _ keys + shared.*\n(ratelimiter.* = none)\n(auth.* = hidden)
 RL --> Exec : HookResponseV1\ncontext_values: {\n  remaining: "42"\n}
 
-Exec -> Exec : cmdctx.Merge(ctx, "ratelimiter", values)
+Exec -> Exec : command.MergeHookCtx(ctx, "ratelimiter", values)
 note right : ctx = {\n  _start_ns: "171...",\n  auth.tenant_id: "acme",\n  shared.user: "john",\n  ratelimiter.remaining: "42"\n}
 
 == Command Execution ==

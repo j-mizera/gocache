@@ -116,7 +116,11 @@ PING, ECHO, SELECT, QUIT, HELLO, AUTH, DBSIZE, INFO, FLUSHDB, FLUSHALL
 
 SNAPSHOT, LOAD_SNAPSHOT
 
-**Total: 74 commands**
+### REX Metadata (1)
+
+REX.META (SET/MSET/GET/DEL/LIST) -- connection-scoped metadata defaults. See the [GCPC REX section](../gcpc/README.md#rex-metadata) for the full protocol including `HELLO ... REXV 1` negotiation and per-command `META` directives.
+
+**Total: 75 commands**
 
 ## Protocol Support
 
