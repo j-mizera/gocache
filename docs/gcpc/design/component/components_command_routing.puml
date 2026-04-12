@@ -3,8 +3,8 @@
 
 frame "Plugin Command Registration & Routing" as F {
 
-    rectangle "Evaluator (pkg/evaluator)" as eval {
-        component [Handler Map\n(69 core commands)] as CoreHandlers <<map[string]CommandHandler>>
+    rectangle "Evaluator Pipeline (pkg/evaluator)" as eval {
+        component [Handler Map] as CoreHandlers <<map[string]command.Handler\n- RESP handlers from pkg/resp/handler\n- REX.META from pkg/rex/handler>>
         component [Plugin Router\nFallback] as Fallback <<if handler not found>>
     }
 
@@ -34,7 +34,7 @@ frame "Plugin Command Registration & Routing" as F {
     RouteTable --> REX : Try direct,\nthen split "PLUGIN:CMD"
 
     ' -- Registration --
-    Shadow ..> CoreHandlers : Validates no overlap\nwith 69 core commands
+    Shadow ..> CoreHandlers : Validates no overlap\nwith core commands
     Shadow ..> RouteTable : Validates no duplicate\nacross plugins
 
     ' -- IPC --

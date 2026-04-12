@@ -53,10 +53,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Unit tests
-        run: go test -race -count=1 ./pkg/cache/... ./pkg/evaluator/... ./pkg/resp/... ./pkg/plugin/... ./pkg/blocking/... ./pkg/clientctx/... ./pkg/config/... ./pkg/engine/... ./pkg/persistence/... ./pkg/transaction/... ./pkg/watch/... ./pkg/workers/...
+        run: go test -race -count=1 ./pkg/...
 
       - name: Integration tests
-        run: go test -race -count=1 -v -run 'TestIT_' ./pkg/server/...
+        run: go test -race -count=1 -v -run 'TestIT_|TestServer_|TestHandler_' ./pkg/server/...
 
       - name: Full coverage
         run: |
@@ -104,3 +104,25 @@ jobs:
             echo "::error::Generated proto code is out of date. Run 'task proto' and commit."
             exit 1
           fi
+
+  merge-gate:
+    name: PR Ready
+    runs-on: ubuntu-latest
+    needs: [lint, build, test, proto-check]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          results=(
+            "${{ needs.lint.result }}"
+            "${{ needs.build.result }}"
+            "${{ needs.test.result }}"
+            "${{ needs.proto-check.result }}"
+          )
+          for r in "${results[@]}"; do
+            if [[ "$r" != "success" ]]; then
+              echo "::error::Required job failed with result: $r"
+              exit 1
+            fi
+          done
+          echo "All required checks passed."

@@ -2,7 +2,7 @@ package rex
 
 // Prefix is the hook context key prefix for REX metadata.
 // All REX metadata is injected under "shared.rex." so that all plugins
-// can see it via the existing shared.* visibility in cmdctx.Filter().
+// can see it via the existing shared.* visibility in command.FilterHookCtx().
 const Prefix = "shared.rex."
 
 // InjectIntoHookCtx merges connection-scoped defaults and per-command

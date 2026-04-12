@@ -12,15 +12,8 @@ import (
 	gcpc "gocache/proto/gcpc/v1"
 )
 
-// PreHookResult reports whether a pre-hook chain denied the command
-// and carries the accumulated hook context.
-type PreHookResult struct {
-	Denied     bool
-	DenyReason string
-	Context    map[string]string // accumulated context from pre-hooks
-}
-
 // Executor dispatches hooks to plugins over IPC.
+// It satisfies the command.HookExecutor interface.
 type Executor struct {
 	registry *Registry
 	timeout  time.Duration // deadline for critical (blocking) hooks
@@ -46,7 +39,7 @@ func (e *Executor) HasAny() bool {
 //   - On critical hook timeout/error: fail-open (log, continue).
 //   - Context values from critical pre-hook responses are accumulated
 //     and namespaced by plugin name.
-func (e *Executor) RunPreHooks(ctx context.Context, command string, args []string, hookCtx map[string]string) *PreHookResult {
+func (e *Executor) RunPreHooks(ctx context.Context, command string, args []string, hookCtx map[string]string) *cmd.PreHookResult {
 	matches := e.registry.MatchPre(command)
 	if len(matches) == 0 {
 		return nil
@@ -72,13 +65,13 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 			continue
 		}
 		if result.Deny {
-			return &PreHookResult{Denied: true, DenyReason: result.DenyReason, Context: hookCtx}
+			return &cmd.PreHookResult{Denied: true, DenyReason: result.DenyReason, Context: hookCtx}
 		}
 		// Merge context values from the response, namespaced.
 		cmd.MergeHookCtx(hookCtx, h.PluginName, result.ContextValues)
 	}
 
-	return &PreHookResult{Denied: false, Context: hookCtx}
+	return &cmd.PreHookResult{Denied: false, Context: hookCtx}
 }
 
 // RunPostHooks fires all matching post-hooks for the command.

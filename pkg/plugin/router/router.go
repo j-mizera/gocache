@@ -44,11 +44,12 @@ type PluginRoute struct {
 // Multiple goroutines can send requests concurrently; responses are
 // correlated by request_id. Used by both the command router and hook executor.
 type PluginConn struct {
-	mu      sync.Mutex // serializes writes
-	conn    *transport.Conn
-	pending sync.Map // map[requestID]chan *gcpc.EnvelopeV1
-	done    chan struct{}
-	Name    string // plugin name for logging
+	mu        sync.Mutex // serializes writes
+	conn      *transport.Conn
+	pending   sync.Map // map[requestID]chan *gcpc.EnvelopeV1
+	done      chan struct{}
+	closeOnce sync.Once
+	Name      string // plugin name for logging
 }
 
 func NewPluginConn(name string, conn *transport.Conn) *PluginConn {
@@ -149,13 +150,16 @@ func (pc *PluginConn) drainPending() {
 	})
 }
 
-// Close signals the readLoop to stop.
+// Close signals the readLoop to stop and closes the underlying transport.
+// Closing the transport is required to unblock a readLoop that is parked
+// in io.ReadFull. Safe to call multiple times.
 func (pc *PluginConn) Close() {
-	select {
-	case <-pc.done:
-	default:
+	pc.closeOnce.Do(func() {
 		close(pc.done)
-	}
+		if pc.conn != nil {
+			_ = pc.conn.Close()
+		}
+	})
 }
 
 // Done returns a channel that is closed when the connection is shut down.

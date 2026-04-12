@@ -197,4 +197,66 @@ func TestEvaluator_Hello(t *testing.T) {
 			t.Errorf("expected NOPROTO in error, got %q", v.Str)
 		}
 	})
+
+	t.Run("HELLO 3 REXV 1 enables REX", func(t *testing.T) {
+		_, _, ctx := setup(t)
+		res := eval(t, c, e, ctx, "HELLO", []string{"3", "REXV", "1"})
+		if res.Err != nil {
+			t.Fatalf("HELLO REXV 1 failed: %v", res.Err)
+		}
+		info, ok := res.Value.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected map, got %T", res.Value)
+		}
+		if info["rexv"] != 1 {
+			t.Errorf("expected rexv=1 in response, got %v", info["rexv"])
+		}
+		if ctx.RexVersion != 1 {
+			t.Errorf("expected RexVersion=1 on context, got %d", ctx.RexVersion)
+		}
+	})
+
+	t.Run("HELLO without REXV omits rexv field", func(t *testing.T) {
+		_, _, ctx := setup(t)
+		res := eval(t, c, e, ctx, "HELLO", []string{"3"})
+		info := res.Value.(map[string]interface{})
+		if _, exists := info["rexv"]; exists {
+			t.Errorf("expected no rexv field when REXV not negotiated, got %v", info["rexv"])
+		}
+		if ctx.RexVersion != 0 {
+			t.Errorf("expected RexVersion=0, got %d", ctx.RexVersion)
+		}
+	})
+
+	t.Run("HELLO REXV 2 returns unsupported", func(t *testing.T) {
+		_, _, ctx := setup(t)
+		res := eval(t, c, e, ctx, "HELLO", []string{"3", "REXV", "2"})
+		v, ok := res.Value.(resp.Value)
+		if !ok || v.Type != resp.Error {
+			t.Fatalf("expected error for REXV 2, got %v", res.Value)
+		}
+		if !strings.Contains(v.Str, "unsupported") {
+			t.Errorf("expected 'unsupported' in error, got %q", v.Str)
+		}
+	})
+
+	t.Run("HELLO REXV invalid returns error", func(t *testing.T) {
+		_, _, ctx := setup(t)
+		res := eval(t, c, e, ctx, "HELLO", []string{"3", "REXV", "abc"})
+		v, ok := res.Value.(resp.Value)
+		if !ok || v.Type != resp.Error {
+			t.Fatalf("expected error for invalid REXV, got %v", res.Value)
+		}
+	})
+
+	t.Run("HELLO SETNAME ignored, REXV still parsed", func(t *testing.T) {
+		_, _, ctx := setup(t)
+		res := eval(t, c, e, ctx, "HELLO", []string{"3", "SETNAME", "myclient", "REXV", "1"})
+		if res.Err != nil {
+			t.Fatalf("HELLO SETNAME REXV failed: %v", res.Err)
+		}
+		if ctx.RexVersion != 1 {
+			t.Errorf("expected RexVersion=1, got %d", ctx.RexVersion)
+		}
+	})
 }

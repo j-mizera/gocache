@@ -1,7 +1,7 @@
 @startuml components_hook_context
 !include ../../../design/theme.iuml
 
-frame "Hook Context System (cmdctx)" as F {
+frame "Hook Context System (pkg/command)" as F {
 
     rectangle "Context Layers" as layers {
         component [Server Context\n("_" prefix)] as server_ctx <<written by server\nreadable by all>>
@@ -15,9 +15,9 @@ frame "Hook Context System (cmdctx)" as F {
     }
 
     rectangle "Lifecycle" as lifecycle {
-        component [cmdctx.New()] as new_ctx <<creates empty map>>
-        component [cmdctx.Merge()] as merge <<namespaces + merges\npre-hook response values>>
-        component [cmdctx.Filter()] as filter <<returns visible subset\nfor target plugin>>
+        component [command.NewHookCtx()] as new_ctx <<creates empty map>>
+        component [command.MergeHookCtx()] as merge <<namespaces + merges\npre-hook response values>>
+        component [command.FilterHookCtx()] as filter <<returns visible subset\nfor target plugin>>
     }
 
     rectangle "Flow" as flow {

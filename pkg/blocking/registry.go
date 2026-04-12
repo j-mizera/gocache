@@ -15,9 +15,10 @@ type waiter struct {
 
 // Registry tracks goroutines that are blocking on one or more list keys.
 type Registry struct {
-	mu      sync.Mutex
-	waiters map[string][]*waiter
-	done    chan struct{}
+	mu           sync.Mutex
+	waiters      map[string][]*waiter
+	done         chan struct{}
+	shutdownOnce sync.Once
 }
 
 // NewRegistry creates an empty Registry ready for use.
@@ -98,6 +99,7 @@ func (r *Registry) TryWake(key string) (chan WakeResult, bool) {
 }
 
 // Shutdown closes the done channel, unblocking all waiting goroutines.
+// Safe to call multiple times.
 func (r *Registry) Shutdown() {
-	close(r.done)
+	r.shutdownOnce.Do(func() { close(r.done) })
 }

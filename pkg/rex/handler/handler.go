@@ -8,6 +8,13 @@ import (
 	"gocache/pkg/rex"
 )
 
+// Registrations returns REX command handlers with their argument specs.
+func Registrations() map[string]command.Registration {
+	return map[string]command.Registration{
+		resp.CmdRexMeta: {Handler: HandleRexMeta, Spec: command.Spec{Min: 1, Max: -1}},
+	}
+}
+
 // HandleRexMeta handles the REX.META command for connection-scoped metadata.
 //
 // Subcommands:
@@ -35,7 +42,7 @@ func HandleRexMeta(cmdCtx *command.Context) command.Result {
 
 	case "MSET":
 		if len(cmdCtx.Args) < 3 || (len(cmdCtx.Args)-1)%2 != 0 {
-			return command.Result{Value: resp.MarshalError("ERR wrong number of arguments for REX.META MSET")}
+			return command.Result{Value: resp.ErrArgs("rex.meta mset")}
 		}
 		store := ensureRexStore(cmdCtx)
 		pairs := cmdCtx.Args[1:]
