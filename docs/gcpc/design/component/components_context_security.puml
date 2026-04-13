@@ -1,0 +1,62 @@
+@startuml components_context_security
+!include ../../../design/theme.iuml
+
+mainframe **component** Context Security Model — 4-Tier Namespace + Secrets
+
+rectangle "Context Bag (map[string]string)" as ctx {
+
+    rectangle "Server Tier" as server #LightBlue {
+        component [_start_ns = "1234"] as s1
+        component [_operation_id = "cmd_42"] as s2
+        component [_secret.session = "tok"] as s3 #Pink
+    }
+
+    rectangle "Plugin-Private: auth" as auth #LightGreen {
+        component [auth.cache_hit = "true"] as a1
+        component [auth.secret.api_key = "k"] as a2 #Pink
+    }
+
+    rectangle "Plugin-Private: gobservability" as gobs #LightGreen {
+        component [gobservability.span_id = "x"] as g1
+        component [gobservability.secret.internal = "i"] as g2 #Pink
+    }
+
+    rectangle "Shared" as shared #LightYellow {
+        component [shared.username = "john"] as sh1
+        component [shared.traceparent = "00-abc"] as sh2
+        component [shared.secret.accountId = "789"] as sh3 #Pink
+        component [shared.secret.jwt = "eyJ..."] as sh4 #Pink
+    }
+}
+
+rectangle "FilterForPlugin(ctx, \"auth\")" as filterAuth {
+    component [Sees: _*, auth.*, shared.*] as fAuth
+    component [Hidden: gobservability.*] as fAuthHide #LightGray
+}
+
+rectangle "RedactSecrets(ctx)" as redact {
+    component [Keeps: _start_ns, _operation_id\nauth.cache_hit, shared.username\nshared.traceparent, gobservability.span_id] as rKeep
+    component [Strips: _secret.*, *.secret.*] as rStrip #Pink
+}
+
+rectangle "OTEL Export (gobservability plugin)" as otel {
+    component [Custom Properties:\nusername=john\ntraceparent=00-abc] as otelProps
+    component [NEVER exported:\naccountId, jwt,\nsession, api_key] as otelRedact #Pink
+}
+
+ctx --> filterAuth : visibility filtering
+ctx --> redact : secret redaction
+redact --> otel : safe for export
+
+note bottom of ctx
+  **Secret Detection Rule:**
+  IsSecret(key) = true if key contains ".secret."
+  OR starts with "secret." OR starts with "_secret."
+
+  Works in ALL namespaces:
+  _secret.X ← server secret
+  auth.secret.X ← plugin secret
+  shared.secret.X ← shared secret
+end note
+
+@enduml

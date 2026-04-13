@@ -7,6 +7,7 @@ const (
 	StartNs      = apicommand.StartNs
 	ElapsedNs    = apicommand.ElapsedNs
 	SharedPrefix = apicommand.SharedPrefix
+	OperationID  = apicommand.OperationID
 )
 
 var (
