@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gocache/pkg/pluginsdk"
+	"gocache/sdk/pluginsdk"
 )
 
 type dummyPlugin struct{}

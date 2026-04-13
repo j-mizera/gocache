@@ -8,10 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 	"gocache/pkg/logger"
-	"gocache/pkg/plugin/protocol"
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
 )
 
 var (
@@ -319,7 +318,7 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 	}
 
 	requestID := NextRequestID()
-	env := protocol.NewCommandRequest(route.Command, args, requestID, metadata)
+	env := gcpc.NewCommandRequest(route.Command, args, requestID, metadata)
 
 	respCh, err := pc.Send(ctx, env, requestID)
 	if err != nil {
@@ -338,7 +337,7 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 		if cmdResp == nil {
 			return nil, ErrPluginDown
 		}
-		return protocol.InterfaceFromResult(cmdResp.Result), nil
+		return gcpc.InterfaceFromResult(cmdResp.Result), nil
 	case <-ctx.Done():
 		pc.pending.Delete(requestID)
 		return nil, ErrPluginTimeout

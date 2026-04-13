@@ -9,7 +9,7 @@ import (
 	"os"
 	"sync"
 
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -99,7 +99,6 @@ type Listener struct {
 // NewListener creates a Unix domain socket listener at the given path.
 // Any stale socket file is removed before binding.
 func NewListener(sockPath string) (*Listener, error) {
-	// Remove stale socket file if it exists.
 	if err := os.Remove(sockPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("remove stale socket: %w", err)
 	}

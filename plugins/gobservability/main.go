@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"gocache/pkg/command"
-	"gocache/pkg/pluginsdk"
+	"gocache/api/command"
+	"gocache/sdk/pluginsdk"
 )
 
 const (
@@ -24,6 +24,7 @@ type gobservabilityPlugin struct {
 	collector *Collector
 	server    *http.Server
 	session   *pluginsdk.Session
+	tracer    *Tracer
 }
 
 // Plugin interface.
@@ -37,7 +38,12 @@ func (p *gobservabilityPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (p *gobservabilityPlugin) OnShutdown(ctx context.Context) error {
-	log.Println("gobservability: shutting down metrics server")
+	log.Println("gobservability: shutting down")
+	if p.tracer != nil {
+		if err := p.tracer.Shutdown(ctx); err != nil {
+			log.Printf("gobservability: tracer shutdown error: %v", err)
+		}
+	}
 	return p.server.Shutdown(ctx)
 }
 
@@ -61,6 +67,15 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 
 	isError := req.ResultError != ""
 	p.collector.Record(req.Command, elapsedNs, isError)
+
+	// Create OTEL span if tracer is enabled.
+	if p.tracer != nil {
+		var startNs uint64
+		if v, ok := req.Context[command.StartNs]; ok {
+			startNs, _ = strconv.ParseUint(v, 10, 64)
+		}
+		p.tracer.RecordCommand(req.Command, req.Args, elapsedNs, startNs, isError, req.ResultError, req.Metadata)
+	}
 
 	return nil
 }
@@ -87,6 +102,21 @@ func main() {
 
 	plugin := &gobservabilityPlugin{
 		collector: collector,
+	}
+
+	// Initialize OTEL tracer if enabled.
+	if otlpEndpoint := os.Getenv("GOBSERVABILITY_OTLP_ENDPOINT"); otlpEndpoint != "" {
+		serviceName := os.Getenv("OTEL_SERVICE_NAME")
+		if serviceName == "" {
+			serviceName = "gocache"
+		}
+		tracer, err := NewTracer(otlpEndpoint, serviceName)
+		if err != nil {
+			log.Printf("gobservability: failed to initialize OTEL tracer: %v", err)
+		} else {
+			plugin.tracer = tracer
+			log.Printf("gobservability: OTEL tracing enabled, exporting to %s", otlpEndpoint)
+		}
 	}
 
 	mux := http.NewServeMux()

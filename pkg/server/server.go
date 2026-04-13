@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gocache/api/events"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -40,6 +41,7 @@ type Server struct {
 	watchManager     *watch.Manager
 	startTime        time.Time
 	activeConns      atomic.Int64
+	emitter          events.Emitter
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
@@ -53,6 +55,7 @@ func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePas
 		blockingRegistry: br,
 		watchManager:     wm,
 		startTime:        time.Now(),
+		emitter:          events.NoopEmitter{},
 	}
 }
 
@@ -69,6 +72,17 @@ func (srv *Server) SetPluginRouter(r *router.Router) {
 // SetHookExecutor sets the hook executor on the evaluator.
 func (srv *Server) SetHookExecutor(e command.HookExecutor) {
 	srv.evaluator.SetHookExecutor(e)
+}
+
+// SetEmitter sets the event emitter on both the server and evaluator.
+func (srv *Server) SetEmitter(e events.Emitter) {
+	srv.emitter = e
+	srv.evaluator.SetEmitter(e)
+}
+
+// EmitEvent emits an event through the server's emitter.
+func (srv *Server) EmitEvent(evt events.Event) {
+	srv.emitter.Emit(evt)
 }
 
 // ServerStateProvider methods — used by the plugin manager for server query responses.
@@ -171,6 +185,11 @@ func (srv *Server) handleConnection(conn net.Conn) {
 	srv.activeConns.Add(1)
 	defer srv.activeConns.Add(-1)
 
+	remoteAddr := conn.RemoteAddr().String()
+	connStart := time.Now()
+
+	srv.emitter.Emit(events.NewConnectionOpen(remoteAddr))
+
 	ctx := clientctx.New()
 
 	defer func() {
@@ -179,6 +198,7 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		}
 		conn.Close()
 		srv.connectionWg.Done()
+		srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())))
 	}()
 
 	reader := resp.NewReader(conn)
@@ -271,6 +291,7 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		// Auth gate: block commands until authenticated
 		if srv.requirePass != "" && !ctx.Authenticated {
 			if op != "AUTH" && op != "HELLO" {
+				srv.emitter.Emit(events.NewAuthFailed(remoteAddr, op))
 				if err := writer.Write(resp.MarshalError("NOAUTH Authentication required.")); err != nil {
 					return
 				}

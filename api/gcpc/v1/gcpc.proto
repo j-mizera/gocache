@@ -1,6 +1,6 @@
 syntax = "proto3";
 package gcpc.v1;
-option go_package = "gocache/proto/gcpc/v1";
+option go_package = "gocache/api/gcpc/v1";
 
 // EnvelopeV1 wraps every message on the wire.
 // Framing: [4-byte big-endian length][serialized EnvelopeV1]
@@ -20,6 +20,8 @@ message EnvelopeV1 {
     HookResponseV1   hook_response   = 51;
     ServerQueryV1         server_query          = 60;
     ServerQueryResponseV1 server_query_response = 61;
+    EventSubscribeV1      event_subscribe       = 70;
+    EventV1               event                 = 71;
   }
 }
 
@@ -158,4 +160,104 @@ message ServerQueryResponseV1 {
   string              request_id = 1;
   map<string, string> data       = 2; // topic-specific key-value data
   string              error      = 3; // non-empty if query failed
+}
+
+// EventSubscribeV1 is sent by a plugin to subscribe to server events.
+// Can be sent multiple times to update the subscription.
+message EventSubscribeV1 {
+  repeated string types = 1; // event types to subscribe to (e.g. "command.post", "log.entry")
+}
+
+// EventV1 is sent by the server to subscribed plugins (fire-and-forget).
+// Each event type has its own strongly-typed message in the oneof.
+message EventV1 {
+  string type       = 1; // event type string for subscription routing
+  uint64 timestamp  = 2; // nanoseconds since epoch
+  oneof data {
+    CommandPreEventV1       command_pre        = 10;
+    CommandPostEventV1      command_post       = 11;
+    ConnectionOpenEventV1   connection_open    = 12;
+    ConnectionCloseEventV1  connection_close   = 13;
+    ServerStartEventV1      server_start       = 14;
+    ServerShutdownEventV1   server_shutdown    = 15;
+    PluginRegisteredEventV1 plugin_registered  = 16;
+    PluginCrashedEventV1    plugin_crashed     = 17;
+    PluginRestartedEventV1  plugin_restarted   = 18;
+    ConfigReloadedEventV1   config_reloaded    = 19;
+    AuthFailedEventV1       auth_failed        = 20;
+    CacheEvictionEventV1    cache_eviction     = 21;
+    LogEntryEventV1         log_entry          = 22;
+  }
+}
+
+message CommandPreEventV1 {
+  string          command  = 1;
+  repeated string args     = 2;
+  map<string, string> metadata = 3; // REX metadata (bare keys) if present
+}
+
+message CommandPostEventV1 {
+  string          command    = 1;
+  repeated string args       = 2;
+  uint64          elapsed_ns = 3;
+  string          result     = 4; // serialized result value
+  string          error      = 5; // error string if any
+  map<string, string> metadata = 6; // REX metadata (bare keys) if present
+}
+
+message ConnectionOpenEventV1 {
+  string remote_addr = 1;
+}
+
+message ConnectionCloseEventV1 {
+  string remote_addr = 1;
+  uint64 duration_ns = 2;
+}
+
+message ServerStartEventV1 {
+  string addr    = 1;
+  string version = 2;
+}
+
+message ServerShutdownEventV1 {
+  string reason = 1;
+}
+
+message PluginRegisteredEventV1 {
+  string name     = 1;
+  string version  = 2;
+  bool   critical = 3;
+}
+
+message PluginCrashedEventV1 {
+  string name     = 1;
+  bool   critical = 2;
+  string error    = 3;
+}
+
+message PluginRestartedEventV1 {
+  string name          = 1;
+  bool   critical      = 2;
+  int32  restart_count = 3;
+}
+
+message ConfigReloadedEventV1 {
+  string file = 1;
+}
+
+message AuthFailedEventV1 {
+  string remote_addr = 1;
+  string command     = 2;
+}
+
+message CacheEvictionEventV1 {
+  string key    = 1;
+  string reason = 2; // "lru", "memory"
+}
+
+message LogEntryEventV1 {
+  string              level   = 1; // "debug", "info", "warn", "error", "fatal"
+  string              message = 2;
+  string              caller  = 3; // source file:line
+  map<string, string> fields  = 4; // structured log fields
 }

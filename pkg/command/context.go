@@ -1,11 +1,11 @@
-// Package command provides shared types for command handling in GoCache.
+// Package command provides server-side command types for GoCache.
 //
-// This package defines the handler function signature, execution context,
-// result type, and dispatch helper used by all command handler packages
-// (resp/handler, rex).
+// Shared types (Result, Spec) are re-exported from api/command.
+// This package adds server-only types: Handler, Context, Dispatch, Registration.
 package command
 
 import (
+	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -14,14 +14,12 @@ import (
 	"gocache/pkg/watch"
 )
 
+// Re-export shared types from api/command so existing importers don't break.
+type Result = apicommand.Result
+type Spec = apicommand.Spec
+
 // Handler is a function that handles a single cache command.
 type Handler func(ctx *Context) Result
-
-// Result holds the return value or error from a command handler.
-type Result struct {
-	Value interface{}
-	Err   error
-}
 
 // Context carries all dependencies needed to execute a command.
 type Context struct {
@@ -58,13 +56,6 @@ func Dispatch(ctx *Context, fn func() interface{}) Result {
 		return Result{Err: err}
 	}
 	return Result{Value: res}
-}
-
-// Spec defines the minimum and maximum number of arguments a command
-// accepts (not counting the command name itself). Max == -1 means unlimited.
-type Spec struct {
-	Min int
-	Max int
 }
 
 // Registration bundles a command handler with its argument spec.

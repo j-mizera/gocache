@@ -7,9 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"gocache/pkg/plugin/protocol"
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 )
 
 // testPipe creates a connected pair of transport.Conn for testing.
@@ -206,7 +205,7 @@ func TestRouteSuccess(t *testing.T) {
 		}
 		// Send response.
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
-		resp := protocol.NewCommandResponse(req.RequestId, result)
+		resp := gcpc.NewCommandResponse(req.RequestId, result)
 		if err := clientConn.Send(resp); err != nil {
 			t.Errorf("plugin send: %v", err)
 		}
@@ -299,7 +298,7 @@ func TestRouteConcurrent(t *testing.T) {
 				continue
 			}
 			result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: req.RequestId}}
-			_ = clientConn.Send(protocol.NewCommandResponse(req.RequestId, result))
+			_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result))
 		}
 	}()
 
@@ -369,7 +368,7 @@ func TestRouteMetadataForwarded(t *testing.T) {
 			}
 		}
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
-		resp := protocol.NewCommandResponse(req.RequestId, result)
+		resp := gcpc.NewCommandResponse(req.RequestId, result)
 		_ = clientConn.Send(resp)
 	}()
 
@@ -419,7 +418,7 @@ func TestRouteNilMetadata(t *testing.T) {
 			t.Errorf("expected empty metadata, got %v", req.Metadata)
 		}
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
-		_ = clientConn.Send(protocol.NewCommandResponse(req.RequestId, result))
+		_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
