@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 )
 
 // PluginState represents the current lifecycle state of a plugin.

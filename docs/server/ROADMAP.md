@@ -84,10 +84,19 @@ Plugin-to-server introspection via `ServerQueryV1` / `ServerQueryResponseV1` mes
 - `/readyz` — readiness: queries health + plugins, checks critical plugin states
 - Nil-session guard during plugin startup
 
+### OpenTelemetry Tracing (Gobservability Plugin) -- DONE
+
+Zero OTEL in core. The gobservability plugin creates spans from post-hook data:
+- Parses W3C `traceparent` from `req.Metadata` (bare keys via GCPC metadata field)
+- Reconstructs accurate timing from `_start_ns` / `_elapsed_ns` hook context
+- Child spans under client traces when traceparent present, root spans otherwise
+- OTLP HTTP export via `GOBSERVABILITY_OTLP_ENDPOINT` env var
+- Prometheus metrics + OTEL traces coexist in the same plugin
+
 ### Observability — Remaining
 
-- OpenTelemetry tracing via REX META context propagation (span per command, parent spans from client trace context)
-- Upgrade metrics plugin with OTEL trace export
+- Event system (Linux kernel notifier chains pattern) for connection/lifecycle/config/auth/eviction/log events
+- OTEL log bridge via event subscription (correlate logs with traces)
 - Custom metrics aggregation
 
 ## Phase 4: Production Hardening

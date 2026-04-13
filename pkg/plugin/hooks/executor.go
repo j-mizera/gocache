@@ -6,12 +6,11 @@ import (
 	"strings"
 	"time"
 
+	gcpc "gocache/api/gcpc/v1"
 	cmd "gocache/pkg/command"
 	"gocache/pkg/logger"
-	"gocache/pkg/plugin/protocol"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/rex"
-	gcpc "gocache/proto/gcpc/v1"
 )
 
 // Executor dispatches hooks to plugins over IPC.
@@ -53,7 +52,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 	for _, h := range matches {
 		if !h.Critical {
 			reqID := router.NextRequestID()
-			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
+			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -93,7 +92,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 	for _, h := range matches {
 		if !h.Critical {
 			reqID := router.NextRequestID()
-			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
+			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -128,7 +127,7 @@ func extractRexMetadata(hookCtx map[string]string) map[string]string {
 // sendCriticalHook sends a hook request and waits for the response (blocking).
 func (e *Executor) sendCriticalHook(ctx context.Context, h *HookEntry, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string, filteredCtx map[string]string, metadata map[string]string) (*gcpc.HookResponseV1, error) {
 	reqID := router.NextRequestID()
-	env := protocol.NewHookRequest(reqID, phase, command, args, resultValue, resultError, filteredCtx, metadata)
+	env := gcpc.NewHookRequest(reqID, phase, command, args, resultValue, resultError, filteredCtx, metadata)
 
 	hookCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()

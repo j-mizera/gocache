@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 
-	"gocache/pkg/logger"
-	"gocache/pkg/plugin/protocol"
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 )
 
 // Plugin is the interface plugin authors implement for lifecycle-only plugins
@@ -73,6 +73,17 @@ type QueryPlugin interface {
 	Plugin
 	// SetSession provides access to the Session for querying the server.
 	SetSession(s *Session)
+}
+
+// EventPlugin is an optional interface for plugins that subscribe to server events.
+type EventPlugin interface {
+	Plugin
+	// EventTypes returns the event types this plugin subscribes to.
+	EventTypes() []string
+	// HandleEvent is called when a subscribed event fires.
+	// The EventV1 proto carries strongly-typed data in a oneof field.
+	// Called concurrently — must be goroutine-safe.
+	HandleEvent(ctx context.Context, evt *gcpc.EventV1)
 }
 
 // HookPhase indicates when a hook fires relative to command execution.
@@ -145,6 +156,7 @@ func Run(ctx context.Context, p Plugin) error {
 	hp, isHookPlugin := p.(HookPlugin)
 	sp, isScopePlugin := p.(ScopePlugin)
 	qp, isQueryPlugin := p.(QueryPlugin)
+	ep, isEventPlugin := p.(EventPlugin)
 
 	// Build registration message.
 	var cmdDecls []*gcpc.CommandDeclV1
@@ -190,7 +202,7 @@ func Run(ctx context.Context, p Plugin) error {
 		RequestedScopes: requestedScopes,
 	}
 	env := &gcpc.EnvelopeV1{
-		Version: protocol.ProtocolVersion,
+		Version: gcpc.ProtocolVersion,
 		Payload: &gcpc.EnvelopeV1_Register{Register: reg},
 	}
 	if err := tc.Send(env); err != nil {
@@ -210,7 +222,7 @@ func Run(ctx context.Context, p Plugin) error {
 		return fmt.Errorf("registration rejected: %s", ack.Reason)
 	}
 	if len(ack.GrantedScopes) > 0 {
-		logger.Info().Strs("scopes", ack.GrantedScopes).Msg("granted scopes")
+		log.Printf("[pluginsdk] granted scopes: %s", strings.Join(ack.GrantedScopes, ", "))
 	}
 	// Log denied scopes so the plugin author knows which features will be unavailable.
 	if isScopePlugin {
@@ -225,7 +237,7 @@ func Run(ctx context.Context, p Plugin) error {
 			}
 		}
 		if len(denied) > 0 {
-			logger.Warn().Strs("denied", denied).Msg("some requested scopes were denied — features requiring these scopes will return errors")
+			log.Printf("[pluginsdk] WARNING: scopes denied: %s — features requiring these scopes will return errors", strings.Join(denied, ", "))
 		}
 	}
 
@@ -233,6 +245,13 @@ func Run(ctx context.Context, p Plugin) error {
 	session := newSession(tc)
 	if isQueryPlugin {
 		qp.SetSession(session)
+	}
+
+	// Subscribe to events if the plugin implements EventPlugin.
+	if isEventPlugin {
+		if err := tc.Send(gcpc.NewEventSubscribe(ep.EventTypes())); err != nil {
+			return fmt.Errorf("send event subscribe: %w", err)
+		}
 	}
 
 	// Enter message loop.
@@ -259,7 +278,7 @@ func Run(ctx context.Context, p Plugin) error {
 			if hErr != nil {
 				status = hErr.Error()
 			}
-			if err := tc.Send(protocol.NewHealthResponse(ok, status)); err != nil {
+			if err := tc.Send(gcpc.NewHealthResponse(ok, status)); err != nil {
 				return fmt.Errorf("send health response: %w", err)
 			}
 
@@ -270,7 +289,7 @@ func Run(ctx context.Context, p Plugin) error {
 			_ = p.OnShutdown(sdCtx)
 			cancel()
 
-			if err := tc.Send(protocol.NewShutdownAck()); err != nil {
+			if err := tc.Send(gcpc.NewShutdownAck()); err != nil {
 				return fmt.Errorf("send shutdown ack: %w", err)
 			}
 			return nil
@@ -284,15 +303,21 @@ func Run(ctx context.Context, p Plugin) error {
 				result := cp.HandleCommand(ctx, req.Command, req.Args, req.Metadata)
 				var protoResult *gcpc.ResultV1
 				if result != nil {
-					protoResult = protocol.ResultFromInterface(result.Value)
+					protoResult = gcpc.ResultFromInterface(result.Value)
 				} else {
-					protoResult = protocol.ResultFromInterface(nil)
+					protoResult = gcpc.ResultFromInterface(nil)
 				}
-				resp := protocol.NewCommandResponse(req.RequestId, protoResult)
+				resp := gcpc.NewCommandResponse(req.RequestId, protoResult)
 				if err := tc.Send(resp); err != nil {
-					logger.Error().Err(err).Str("command", req.Command).Msg("failed to send command response")
+					log.Printf("[pluginsdk] ERROR: failed to send command response for %s: %v", req.Command, err)
 				}
 			}()
+
+		case *gcpc.EnvelopeV1_Event:
+			if isEventPlugin {
+				evt := env.GetEvent()
+				go ep.HandleEvent(ctx, evt)
+			}
 
 		case *gcpc.EnvelopeV1_ServerQueryResponse:
 			resp := env.GetServerQueryResponse()
@@ -322,9 +347,9 @@ func Run(ctx context.Context, p Plugin) error {
 					denyReason = result.DenyReason
 					ctxValues = result.ContextValues
 				}
-				resp := protocol.NewHookResponse(req.RequestId, deny, denyReason, ctxValues)
+				resp := gcpc.NewHookResponse(req.RequestId, deny, denyReason, ctxValues)
 				if err := tc.Send(resp); err != nil {
-					logger.Error().Err(err).Str("command", req.Command).Msg("failed to send hook response")
+					log.Printf("[pluginsdk] ERROR: failed to send hook response for %s: %v", req.Command, err)
 				}
 			}()
 		}

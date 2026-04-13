@@ -2,7 +2,7 @@ package transport
 
 import (
 	"encoding/binary"
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
 	"net"
 	"sync"
 	"testing"
@@ -67,7 +67,6 @@ func TestRecv_FrameTooLarge(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	// Write a header claiming a huge payload.
 	go func() {
 		header := make([]byte, 4)
 		binary.BigEndian.PutUint32(header, MaxFrameSize+1)
@@ -85,8 +84,6 @@ func TestSend_FrameTooLarge(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	// Create an envelope with a payload larger than MaxFrameSize.
-	// We'll use a Register with a very long name.
 	bigName := make([]byte, MaxFrameSize+1)
 	for i := range bigName {
 		bigName[i] = 'a'
@@ -98,7 +95,6 @@ func TestSend_FrameTooLarge(t *testing.T) {
 		},
 	}
 
-	// Verify the marshaled size actually exceeds the limit.
 	data, _ := proto.Marshal(env)
 	if len(data) <= MaxFrameSize {
 		t.Skip("test envelope not large enough")
@@ -118,7 +114,6 @@ func TestConcurrentSends(t *testing.T) {
 	const n = 50
 	var wg sync.WaitGroup
 
-	// Concurrent sends from client.
 	for i := range n {
 		wg.Add(1)
 		go func(id uint64) {
@@ -133,10 +128,9 @@ func TestConcurrentSends(t *testing.T) {
 		}(uint64(i))
 	}
 
-	// Read all on server side.
 	go func() {
 		wg.Wait()
-		client.Close() // signal EOF after all sends complete
+		client.Close()
 	}()
 
 	count := 0
@@ -161,7 +155,6 @@ func TestListener_AcceptAndCleanup(t *testing.T) {
 		t.Fatalf("new listener: %v", err)
 	}
 
-	// Connect a client.
 	go func() {
 		conn, err := net.Dial("unix", sockPath)
 		if err != nil {

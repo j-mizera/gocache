@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
+	gcpc "gocache/api/gcpc/v1"
 	"gocache/pkg/plugin/router"
-	gcpc "gocache/proto/gcpc/v1"
 )
 
 // Phase indicates when a hook fires relative to command execution.

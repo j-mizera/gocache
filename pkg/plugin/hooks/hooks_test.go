@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"gocache/pkg/plugin/protocol"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 	"gocache/pkg/plugin/router"
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
 )
 
 func testPipe() (*transport.Conn, *transport.Conn) {
@@ -188,7 +187,7 @@ func TestExecutorPreHookDeny(t *testing.T) {
 		if req.Command != "SET" {
 			t.Errorf("expected SET, got %s", req.Command)
 		}
-		resp := protocol.NewHookResponse(req.RequestId, true, "permission denied", nil)
+		resp := gcpc.NewHookResponse(req.RequestId, true, "permission denied", nil)
 		if err := clientConn.Send(resp); err != nil {
 			t.Errorf("plugin send: %v", err)
 		}
@@ -227,7 +226,7 @@ func TestExecutorPreHookAllow(t *testing.T) {
 	go func() {
 		env, _ := clientConn.Recv()
 		req := env.GetHookRequest()
-		resp := protocol.NewHookResponse(req.RequestId, false, "", nil)
+		resp := gcpc.NewHookResponse(req.RequestId, false, "", nil)
 		_ = clientConn.Send(resp)
 	}()
 
@@ -321,7 +320,7 @@ func TestExecutorPostHook(t *testing.T) {
 		if req.ResultValue != "OK" {
 			t.Errorf("expected result 'OK', got %q", req.ResultValue)
 		}
-		resp := protocol.NewHookResponse(req.RequestId, false, "", nil)
+		resp := gcpc.NewHookResponse(req.RequestId, false, "", nil)
 		_ = clientConn.Send(resp)
 	}()
 

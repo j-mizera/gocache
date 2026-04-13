@@ -25,6 +25,8 @@ tasks:
     sources:
       - cmd/server/**/*.go
       - pkg/**/*.go
+      - api/**/*.go
+      - sdk/**/*.go
     generates:
       - bin/gocache-server
 
@@ -41,6 +43,7 @@ tasks:
     sources:
       - cmd/cli/**/*.go
       - pkg/**/*.go
+      - api/**/*.go
     generates:
       - bin/gocache-cli
 
@@ -89,7 +92,7 @@ tasks:
   proto:
     desc: Regenerate protobuf Go code
     cmds:
-      - PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative proto/gcpc/v1/gcpc.proto
+      - PATH=$PATH:$(go env GOPATH)/bin protoc --go_out=. --go_opt=paths=source_relative api/gcpc/v1/gcpc.proto
 
   clean:
     desc: Clean build artifacts

@@ -96,12 +96,12 @@ jobs:
         run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 
       - name: Regenerate proto
-        run: protoc --go_out=. --go_opt=paths=source_relative proto/gcpc/v1/gcpc.proto
+        run: protoc --go_out=. --go_opt=paths=source_relative api/gcpc/v1/gcpc.proto
 
       - name: Check for drift
         run: |
-          if ! git diff --exit-code proto/gcpc/v1/gcpc.pb.go; then
-            echo "::error::Generated proto code is out of date. Run 'task proto' and commit."
+          if ! git diff --exit-code api/gcpc/v1/gcpc.pb.go; then
+            echo "::error::Generated proto code is out of date. Run 'go generate ./api/gcpc/v1/' and commit."
             exit 1
           fi
 

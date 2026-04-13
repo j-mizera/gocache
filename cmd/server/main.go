@@ -9,10 +9,12 @@ import (
 	"syscall"
 	"time"
 
+	"gocache/api/events"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
 	"gocache/pkg/engine"
+	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logger"
 	"gocache/pkg/persistence"
 	"gocache/pkg/plugin/hooks"
@@ -98,6 +100,9 @@ func main() {
 	snapshotWorker.Start()
 	cleanupWorker.Start()
 
+	// Initialize server-wide event bus (before hot reload callback which captures it).
+	eventBus := serverEvents.NewBus()
+
 	// Hot reload: watch config file for changes and apply live-reloadable fields.
 	// The callback runs in the fsnotify goroutine, so config swaps use
 	// atomic.Pointer to avoid races with the main goroutine.
@@ -109,6 +114,7 @@ func main() {
 			return
 		}
 		logger.Info().Str("file", e.Name).Msg("config reloaded")
+		eventBus.Emit(events.NewConfigReloaded(e.Name))
 
 		prev := cfgPtr.Load()
 		if newCfg.Server.GetAddr() != prev.Server.GetAddr() {
@@ -138,6 +144,7 @@ func main() {
 
 	// Initialize the server
 	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Persistence.SnapshotFile, cfg.Server.RequirePass, blockingRegistry, watchManager)
+	srv.SetEmitter(eventBus)
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -150,6 +157,7 @@ func main() {
 		if err := pluginManager.Start(ctx); err != nil {
 			logger.Fatal().Err(err).Msg("failed to start plugin manager")
 		}
+		pluginManager.SetEventBus(eventBus)
 		srv.SetPluginRouter(pluginManager.Router())
 		srv.SetHookExecutor(hooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
 	}
@@ -189,6 +197,7 @@ func handleShutdown(
 	pluginManager *pluginmgr.Manager,
 ) {
 	logger.Info().Msg("starting graceful shutdown sequence")
+	srv.EmitEvent(events.NewServerShutdown("signal"))
 
 	// Unblock all waiting BLPOP/BRPOP clients first so their connections can close.
 	blockingRegistry.Shutdown()

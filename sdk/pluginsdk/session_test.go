@@ -6,9 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"gocache/pkg/plugin/protocol"
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 )
 
 func TestSession_QueryServer(t *testing.T) {
@@ -35,7 +34,7 @@ func TestSession_QueryServer(t *testing.T) {
 		if query.Topic != "health" {
 			t.Errorf("expected topic 'health', got %q", query.Topic)
 		}
-		resp := protocol.NewServerQueryResponse(query.RequestId,
+		resp := gcpc.NewServerQueryResponse(query.RequestId,
 			map[string]string{"status": "ok", "uptime_ns": "1000000"},
 			"")
 		if err := serverConn.Send(resp); err != nil {
@@ -78,7 +77,7 @@ func TestSession_QueryServer_Error(t *testing.T) {
 	go func() {
 		env, _ := serverConn.Recv()
 		query := env.GetServerQuery()
-		resp := protocol.NewServerQueryResponse(query.RequestId, nil, "permission denied: missing scope \"server:query:health\"")
+		resp := gcpc.NewServerQueryResponse(query.RequestId, nil, "permission denied: missing scope \"server:query:health\"")
 		_ = serverConn.Send(resp)
 	}()
 

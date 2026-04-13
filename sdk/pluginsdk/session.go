@@ -7,9 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gocache/pkg/plugin/protocol"
-	"gocache/pkg/plugin/transport"
-	gcpc "gocache/proto/gcpc/v1"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/transport"
 )
 
 // Session provides query capabilities over the plugin's GCPC connection.
@@ -32,7 +31,7 @@ func (s *Session) QueryServer(ctx context.Context, topic string) (map[string]str
 	s.pending.Store(id, ch)
 	defer s.pending.Delete(id)
 
-	if err := s.conn.Send(protocol.NewServerQuery(id, topic)); err != nil {
+	if err := s.conn.Send(gcpc.NewServerQuery(id, topic)); err != nil {
 		return nil, fmt.Errorf("send server query: %w", err)
 	}
 

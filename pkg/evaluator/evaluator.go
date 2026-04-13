@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"gocache/api/events"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -32,6 +33,7 @@ type Evaluator interface {
 	RegisterHandler(op string, handler command.Handler)
 	SetPluginRouter(r *router.Router)
 	SetHookExecutor(e command.HookExecutor)
+	SetEmitter(e events.Emitter)
 	CoreCommandNames() []string
 }
 
@@ -50,6 +52,7 @@ type BaseEvaluator struct {
 	watchManager       *watch.Manager
 	pluginRouter       *router.Router
 	hookExecutor       command.HookExecutor
+	emitter            events.Emitter
 }
 
 func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) Evaluator {
@@ -86,6 +89,10 @@ func (b *BaseEvaluator) SetPluginRouter(r *router.Router) {
 
 func (b *BaseEvaluator) SetHookExecutor(e command.HookExecutor) {
 	b.hookExecutor = e
+}
+
+func (b *BaseEvaluator) SetEmitter(e events.Emitter) {
+	b.emitter = e
 }
 
 func (b *BaseEvaluator) CoreCommandNames() []string {
@@ -144,6 +151,11 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		}
 	}
 
+	// Emit command.pre event.
+	if b.emitter != nil {
+		b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)))
+	}
+
 	cmdCtx := &command.Context{
 		Client:           ctx,
 		Op:               op,
@@ -197,6 +209,16 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		hookCtx[command.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
 		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr, hookCtx)
+	}
+
+	// Emit command.post event.
+	if b.emitter != nil {
+		var elapsedNs uint64
+		if startNs > 0 {
+			elapsedNs = uint64(time.Now().UnixNano() - startNs)
+		}
+		resultVal, resultErr := resultToHookStrings(result)
+		b.emitter.Emit(events.NewCommandPost(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)))
 	}
 
 	return result
