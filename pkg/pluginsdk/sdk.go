@@ -39,8 +39,9 @@ type CommandPlugin interface {
 	// Called once during registration.
 	Commands() []CommandDecl
 	// HandleCommand is called when a client invokes a plugin command.
+	// metadata carries REX metadata with bare keys (no shared.rex. prefix), nil when absent.
 	// Called concurrently from multiple goroutines — must be goroutine-safe.
-	HandleCommand(ctx context.Context, cmd string, args []string) *CommandResult
+	HandleCommand(ctx context.Context, cmd string, args []string, metadata map[string]string) *CommandResult
 }
 
 // HookPlugin extends Plugin with hook registration and handling.
@@ -64,6 +65,14 @@ type ScopePlugin interface {
 	// Scopes returns the scopes this plugin requests (e.g. "read", "write", "hook:pre", "keys:prefix:*").
 	// Called once during registration.
 	Scopes() []string
+}
+
+// QueryPlugin is an optional interface for plugins that need to query server state.
+// SetSession is called once after registration, before the message loop starts.
+type QueryPlugin interface {
+	Plugin
+	// SetSession provides access to the Session for querying the server.
+	SetSession(s *Session)
 }
 
 // HookPhase indicates when a hook fires relative to command execution.
@@ -104,6 +113,7 @@ type HookRequest struct {
 	ResultValue string            // post-hook only
 	ResultError string            // post-hook only
 	Context     map[string]string // accumulated context from server + own namespace + shared
+	Metadata    map[string]string // REX metadata with bare keys (no shared.rex. prefix)
 }
 
 // HookResponse is the plugin's response to a hook invocation.
@@ -134,6 +144,7 @@ func Run(ctx context.Context, p Plugin) error {
 	cp, isCommandPlugin := p.(CommandPlugin)
 	hp, isHookPlugin := p.(HookPlugin)
 	sp, isScopePlugin := p.(ScopePlugin)
+	qp, isQueryPlugin := p.(QueryPlugin)
 
 	// Build registration message.
 	var cmdDecls []*gcpc.CommandDeclV1
@@ -201,6 +212,28 @@ func Run(ctx context.Context, p Plugin) error {
 	if len(ack.GrantedScopes) > 0 {
 		logger.Info().Strs("scopes", ack.GrantedScopes).Msg("granted scopes")
 	}
+	// Log denied scopes so the plugin author knows which features will be unavailable.
+	if isScopePlugin {
+		grantedSet := make(map[string]struct{}, len(ack.GrantedScopes))
+		for _, s := range ack.GrantedScopes {
+			grantedSet[s] = struct{}{}
+		}
+		var denied []string
+		for _, s := range sp.Scopes() {
+			if _, ok := grantedSet[s]; !ok {
+				denied = append(denied, s)
+			}
+		}
+		if len(denied) > 0 {
+			logger.Warn().Strs("denied", denied).Msg("some requested scopes were denied — features requiring these scopes will return errors")
+		}
+	}
+
+	// Set up session for server queries.
+	session := newSession(tc)
+	if isQueryPlugin {
+		qp.SetSession(session)
+	}
 
 	// Enter message loop.
 	for {
@@ -248,7 +281,7 @@ func Run(ctx context.Context, p Plugin) error {
 			}
 			req := env.GetCommandRequest()
 			go func() {
-				result := cp.HandleCommand(ctx, req.Command, req.Args)
+				result := cp.HandleCommand(ctx, req.Command, req.Args, req.Metadata)
 				var protoResult *gcpc.ResultV1
 				if result != nil {
 					protoResult = protocol.ResultFromInterface(result.Value)
@@ -260,6 +293,10 @@ func Run(ctx context.Context, p Plugin) error {
 					logger.Error().Err(err).Str("command", req.Command).Msg("failed to send command response")
 				}
 			}()
+
+		case *gcpc.EnvelopeV1_ServerQueryResponse:
+			resp := env.GetServerQueryResponse()
+			session.dispatch(resp)
 
 		case *gcpc.EnvelopeV1_HookRequest:
 			if !isHookPlugin {
@@ -274,6 +311,7 @@ func Run(ctx context.Context, p Plugin) error {
 					ResultValue: req.ResultValue,
 					ResultError: req.ResultError,
 					Context:     req.Context,
+					Metadata:    req.Metadata,
 				}
 				result := hp.HandleHook(ctx, hookReq)
 				deny := false

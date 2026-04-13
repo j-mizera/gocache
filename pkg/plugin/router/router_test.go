@@ -215,7 +215,7 @@ func TestRouteSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	val, err := r.Route(ctx, "ECHO", []string{"hello"})
+	val, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -241,13 +241,13 @@ func TestRouteArgValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Too few args.
-	_, err := r.Route(ctx, "EXACT", []string{"one"})
+	_, err := r.Route(ctx, "EXACT", []string{"one"}, nil)
 	if err == nil {
 		t.Error("expected arg validation error for too few args")
 	}
 
 	// Too many args.
-	_, err = r.Route(ctx, "EXACT", []string{"one", "two", "three"})
+	_, err = r.Route(ctx, "EXACT", []string{"one", "two", "three"}, nil)
 	if err == nil {
 		t.Error("expected arg validation error for too many args")
 	}
@@ -268,7 +268,7 @@ func TestRouteTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := r.Route(ctx, "SLOW", nil)
+	_, err := r.Route(ctx, "SLOW", nil, nil)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -313,7 +313,7 @@ func TestRouteConcurrent(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, err := r.Route(ctx, "PING", nil)
+			_, err := r.Route(ctx, "PING", nil, nil)
 			if err != nil {
 				errs <- err
 			}
@@ -327,6 +327,110 @@ func TestRouteConcurrent(t *testing.T) {
 		t.Errorf("concurrent Route error: %v", err)
 	}
 
+	clientConn.Close()
+}
+
+func TestRouteMetadataForwarded(t *testing.T) {
+	r := NewRouter([]string{"GET"})
+	serverConn, clientConn := testPipe()
+	defer serverConn.Close()
+
+	decls := []*gcpc.CommandDeclV1{
+		{Name: "ECHO", MinArgs: 1, MaxArgs: 1},
+	}
+	if err := r.RegisterPlugin("echo", serverConn, decls); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plugin side: verify metadata arrives, send response.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		env, err := clientConn.Recv()
+		if err != nil {
+			t.Errorf("plugin recv: %v", err)
+			return
+		}
+		req := env.GetCommandRequest()
+		if req == nil {
+			t.Error("expected CommandRequest")
+			return
+		}
+		// Verify metadata.
+		if req.Metadata == nil {
+			t.Error("expected metadata to be non-nil")
+		} else {
+			if req.Metadata["traceparent"] != "00-abc-def-01" {
+				t.Errorf("expected traceparent '00-abc-def-01', got %q", req.Metadata["traceparent"])
+			}
+			if req.Metadata["tenant"] != "acme" {
+				t.Errorf("expected tenant 'acme', got %q", req.Metadata["tenant"])
+			}
+		}
+		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
+		resp := protocol.NewCommandResponse(req.RequestId, result)
+		_ = clientConn.Send(resp)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	metadata := map[string]string{
+		"traceparent": "00-abc-def-01",
+		"tenant":      "acme",
+	}
+	val, err := r.Route(ctx, "ECHO", []string{"hello"}, metadata)
+	if err != nil {
+		t.Fatalf("Route error: %v", err)
+	}
+	if val != "hello" {
+		t.Errorf("expected 'hello', got %v", val)
+	}
+
+	wg.Wait()
+	clientConn.Close()
+}
+
+func TestRouteNilMetadata(t *testing.T) {
+	r := NewRouter([]string{"GET"})
+	serverConn, clientConn := testPipe()
+	defer serverConn.Close()
+
+	decls := []*gcpc.CommandDeclV1{
+		{Name: "ECHO", MinArgs: 1, MaxArgs: 1},
+	}
+	if err := r.RegisterPlugin("echo", serverConn, decls); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plugin side: verify metadata is nil/empty.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		env, err := clientConn.Recv()
+		if err != nil {
+			t.Errorf("plugin recv: %v", err)
+			return
+		}
+		req := env.GetCommandRequest()
+		if len(req.Metadata) != 0 {
+			t.Errorf("expected empty metadata, got %v", req.Metadata)
+		}
+		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
+		_ = clientConn.Send(protocol.NewCommandResponse(req.RequestId, result))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
+	if err != nil {
+		t.Fatalf("Route error: %v", err)
+	}
+
+	wg.Wait()
 	clientConn.Close()
 }
 

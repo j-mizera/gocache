@@ -302,7 +302,8 @@ func (r *Router) HasCommand(op string) bool {
 
 // Route dispatches a command to the owning plugin and waits for the response.
 // Returns the result as an interface{} compatible with evaluator.Result.Value.
-func (r *Router) Route(ctx context.Context, op string, args []string) (interface{}, error) {
+// metadata carries REX metadata with bare keys (no shared.rex. prefix).
+func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string) (interface{}, error) {
 	r.mu.RLock()
 	route, pc, found := r.lookup(op)
 	r.mu.RUnlock()
@@ -318,7 +319,7 @@ func (r *Router) Route(ctx context.Context, op string, args []string) (interface
 	}
 
 	requestID := NextRequestID()
-	env := protocol.NewCommandRequest(route.Command, args, requestID)
+	env := protocol.NewCommandRequest(route.Command, args, requestID, metadata)
 
 	respCh, err := pc.Send(ctx, env, requestID)
 	if err != nil {

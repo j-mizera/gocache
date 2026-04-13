@@ -23,6 +23,7 @@ const (
 type gobservabilityPlugin struct {
 	collector *Collector
 	server    *http.Server
+	session   *pluginsdk.Session
 }
 
 // Plugin interface.
@@ -64,10 +65,16 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 	return nil
 }
 
+// QueryPlugin interface.
+
+func (p *gobservabilityPlugin) SetSession(s *pluginsdk.Session) {
+	p.session = s
+}
+
 // ScopePlugin interface.
 
 func (p *gobservabilityPlugin) Scopes() []string {
-	return []string{"hook:post"}
+	return []string{"hook:post", "server:query:health", "server:query:plugins"}
 }
 
 func main() {
@@ -78,8 +85,14 @@ func main() {
 
 	collector := NewCollector()
 
+	plugin := &gobservabilityPlugin{
+		collector: collector,
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", metricsHandler(collector, pluginName, pluginVersion))
+	mux.Handle("/healthz", healthzHandler(plugin))
+	mux.Handle("/readyz", readyzHandler(plugin))
 
 	httpServer := &http.Server{
 		Addr:         port,
@@ -95,10 +108,7 @@ func main() {
 		}
 	}()
 
-	plugin := &gobservabilityPlugin{
-		collector: collector,
-		server:    httpServer,
-	}
+	plugin.server = httpServer
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

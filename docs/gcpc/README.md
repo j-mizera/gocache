@@ -55,14 +55,14 @@ The correlation ID enables multiplexed dispatch -- multiple commands can be in-f
 
 | Message | Direction | Purpose |
 |---------|-----------|---------|
-| CommandRequest | Server -> Plugin | Dispatch a client command (name, args, request ID) |
+| CommandRequest | Server -> Plugin | Dispatch a client command (name, args, request ID, metadata) |
 | CommandResponse | Plugin -> Server | Result as a recursive RESP-like value tree |
 
 ### Hooks (field numbers 50-51)
 
 | Message | Direction | Purpose |
 |---------|-----------|---------|
-| HookRequest | Server -> Plugin | Pre/post hook invocation with command context |
+| HookRequest | Server -> Plugin | Pre/post hook invocation with command context and metadata |
 | HookResponse | Plugin -> Server | Allow/deny decision (pre-hooks) or acknowledgement (post-hooks) |
 
 ## Registration Handshake
@@ -146,6 +146,18 @@ This prevents plugins from reading each other's private state. To share data acr
 
 `HookRequestV1` carries the filtered context in a `map<string, string> context` field (field 7). `HookResponseV1` carries plugin-written values in a `map<string, string> context_values` field (field 4).
 
+### Dedicated metadata field
+
+In addition to the `shared.rex.*` keys in the hook context, both `CommandRequestV1` and `HookRequestV1` carry a dedicated `map<string, string> metadata` field with bare keys (no `shared.rex.` prefix). This gives plugins cleaner access to REX metadata without parsing prefixed context keys.
+
+| Message | Field | Keys | Example |
+|---------|-------|------|---------|
+| CommandRequestV1 | `metadata` (field 4) | Bare keys | `{"traceparent": "00-abc", "tenant": "acme"}` |
+| HookRequestV1 | `metadata` (field 8) | Bare keys | `{"traceparent": "00-abc", "tenant": "acme"}` |
+| HookRequestV1 | `context` (field 7) | Prefixed | `{"shared.rex.traceparent": "00-abc", ...}` |
+
+The `context` field continues to carry `shared.rex.*` keys for backward compatibility. The `metadata` field is the preferred access path for new plugin code. Both fields are nil/empty when no REX metadata exists (zero wire overhead).
+
 ## REX Metadata
 
 REX (RESP EXtensions) lets clients attach per-command or connection-scoped key-value metadata that flows to plugins through the hook context. This enables per-request auth tokens, multi-tenancy, and distributed trace context propagation.
@@ -217,9 +229,12 @@ The logic lives in `pkg/rex/`:
 - `rex.Store` -- thread-safe connection-scoped metadata store
 - `rex.ParseMeta(args)` -- parses META command arguments into `(key, value)`
 - `rex.InjectIntoHookCtx(hookCtx, store, cmdMeta)` -- merges defaults + per-command metadata into the hook context with the `shared.rex.` prefix
+- `rex.BuildMetadata(store, cmdMeta)` -- merges defaults + per-command metadata into a bare-key map for the GCPC `metadata` field (returns nil when empty)
 - `rex.ValidateKey(key)` -- enforces the reserved-prefix rules
 
 The `REX.META` handler lives in `pkg/rex/handler/handler.go` and is registered by the evaluator alongside core RESP handlers.
+
+The hook executor extracts `shared.rex.*` keys from the hook context into the dedicated `metadata` field on `HookRequestV1` (prefix-stripped). The command router receives bare-key metadata from the evaluator and forwards it on `CommandRequestV1`.
 
 ## Scope Negotiation
 

@@ -1,6 +1,8 @@
 @startuml components_ipc
 !include ../../../design/theme.iuml
 
+skinparam nodesep 200
+
 frame "GoCache Server-Plugin IPC" as F {
 
     rectangle "Server Process" as server {
@@ -11,8 +13,8 @@ frame "GoCache Server-Plugin IPC" as F {
         }
 
         rectangle "Plugin Management" as mgmt {
-            component [Plugin Manager] as PluginMgr <<Lifecycle>>
             component [Hook Registry] as HookReg <<Pattern + Priority>>
+            component [Plugin Manager] as PluginMgr <<Lifecycle>>
         }
 
         rectangle "Shared Connection" as shared {
@@ -37,8 +39,8 @@ frame "GoCache Server-Plugin IPC" as F {
     }
 
     ' -- Server side --
-    CmdRouter --> PluginConn : CommandRequestV1
-    HookExec --> PluginConn : HookRequestV1
+    CmdRouter --> PluginConn : CommandRequestV1\n(+ metadata)
+    HookExec --> PluginConn : HookRequestV1\n(+ context + metadata)
     PluginMgr --> PluginConn : Health/Shutdown
     HookExec --> HookReg : MatchPre / MatchPost
 

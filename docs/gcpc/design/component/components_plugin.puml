@@ -29,15 +29,15 @@ frame "GoCache Plugin Process Internals" as F {
     ' -- Relations --
     TransConn --> MsgLoop : EnvelopeV1 stream
 
-    MsgLoop --> CmdGo : CommandRequestV1\n(goroutine per request)
-    MsgLoop --> HookGo : HookRequestV1\n(goroutine per hook)
+    MsgLoop --> CmdGo : CommandRequestV1\n(+ metadata, goroutine per request)
+    MsgLoop --> HookGo : HookRequestV1\n(+ context + metadata, goroutine per hook)
     MsgLoop --> TransConn : HealthResponseV1\nShutdownAckV1
 
     CmdGo --> CmdPlugin : Dispatch
     HookGo --> HkPlugin : Dispatch
 
-    CmdPlugin --> UserCode : Implements
-    HkPlugin --> UserCode : Implements
+    CmdPlugin --> UserCode : HandleCommand(ctx, cmd, args, metadata)
+    HkPlugin --> UserCode : HandleHook(ctx, req)\nreq.Metadata has bare keys
 
     CmdGo --> TransConn : CommandResponseV1
     HookGo --> TransConn : HookResponseV1

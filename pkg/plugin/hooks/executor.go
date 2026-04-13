@@ -3,12 +3,14 @@ package hooks
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	cmd "gocache/pkg/command"
 	"gocache/pkg/logger"
 	"gocache/pkg/plugin/protocol"
 	"gocache/pkg/plugin/router"
+	"gocache/pkg/rex"
 	gcpc "gocache/proto/gcpc/v1"
 )
 
@@ -45,11 +47,13 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 		return nil
 	}
 
+	metadata := extractRexMetadata(hookCtx)
+
 	// Fire non-critical hooks async (fire-and-forget).
 	for _, h := range matches {
 		if !h.Critical {
 			reqID := router.NextRequestID()
-			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName))
+			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -59,7 +63,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 		if !h.Critical {
 			continue
 		}
-		result, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName))
+		result, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 		if err != nil {
 			logger.Warn().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical pre-hook failed, allowing command")
 			continue
@@ -83,11 +87,13 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 		return
 	}
 
+	metadata := extractRexMetadata(hookCtx)
+
 	// Fire non-critical hooks async.
 	for _, h := range matches {
 		if !h.Critical {
 			reqID := router.NextRequestID()
-			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName))
+			env := protocol.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -97,17 +103,32 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 		if !h.Critical {
 			continue
 		}
-		_, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName))
+		_, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 		if err != nil {
 			logger.Warn().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical post-hook failed")
 		}
 	}
 }
 
+// extractRexMetadata extracts shared.rex.* keys from a hook context map
+// and returns them with bare keys (prefix stripped). Returns nil if none found.
+func extractRexMetadata(hookCtx map[string]string) map[string]string {
+	var m map[string]string
+	for k, v := range hookCtx {
+		if strings.HasPrefix(k, rex.Prefix) {
+			if m == nil {
+				m = make(map[string]string)
+			}
+			m[k[len(rex.Prefix):]] = v
+		}
+	}
+	return m
+}
+
 // sendCriticalHook sends a hook request and waits for the response (blocking).
-func (e *Executor) sendCriticalHook(ctx context.Context, h *HookEntry, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string, filteredCtx map[string]string) (*gcpc.HookResponseV1, error) {
+func (e *Executor) sendCriticalHook(ctx context.Context, h *HookEntry, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string, filteredCtx map[string]string, metadata map[string]string) (*gcpc.HookResponseV1, error) {
 	reqID := router.NextRequestID()
-	env := protocol.NewHookRequest(reqID, phase, command, args, resultValue, resultError, filteredCtx)
+	env := protocol.NewHookRequest(reqID, phase, command, args, resultValue, resultError, filteredCtx, metadata)
 
 	hookCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()

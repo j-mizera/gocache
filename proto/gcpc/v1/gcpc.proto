@@ -18,6 +18,8 @@ message EnvelopeV1 {
     CommandResponseV1 command_response = 41;
     HookRequestV1    hook_request    = 50;
     HookResponseV1   hook_response   = 51;
+    ServerQueryV1         server_query          = 60;
+    ServerQueryResponseV1 server_query_response = 61;
   }
 }
 
@@ -85,6 +87,7 @@ message CommandRequestV1 {
   string          command    = 1; // resolved command name (e.g. "PUBLISH")
   repeated string args       = 2; // command arguments as strings
   string          request_id = 3; // correlation ID for multiplexed responses
+  map<string, string> metadata = 4; // REX metadata (bare keys, no shared.rex. prefix)
 }
 
 // CommandResponseV1 is the plugin's response to a CommandRequestV1.
@@ -102,6 +105,7 @@ message HookRequestV1 {
   string          result_value = 5; // post-hook only: serialized result
   string          result_error = 6; // post-hook only: error string if any
   map<string, string> context  = 7; // accumulated hook context (server + own namespace + shared)
+  map<string, string> metadata = 8; // REX metadata (bare keys, no shared.rex. prefix)
 }
 
 // HookResponseV1 is the plugin's response to a HookRequestV1.
@@ -141,4 +145,17 @@ message ResultMapV1 {
 message ResultEntryV1 {
   string   key   = 1;
   ResultV1 value = 2;
+}
+
+// ServerQueryV1 is sent by a plugin to query server state.
+message ServerQueryV1 {
+  string request_id = 1; // correlation ID for response matching
+  string topic      = 2; // query topic: "health", "plugins", "stats"
+}
+
+// ServerQueryResponseV1 is the server's response to a ServerQueryV1.
+message ServerQueryResponseV1 {
+  string              request_id = 1;
+  map<string, string> data       = 2; // topic-specific key-value data
+  string              error      = 3; // non-empty if query failed
 }

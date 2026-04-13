@@ -19,6 +19,11 @@ func TestParseScope(t *testing.T) {
 		{"uppercase normalized", "READ", ScopeRead, false},
 		{"mixed case", "Hook:Pre", ScopeHookPre, false},
 		{"trimmed", "  write  ", ScopeWrite, false},
+		{"server:query", "server:query", ScopeServerQuery, false},
+		{"server:query:health", "server:query:health", ScopeServerQueryHealth, false},
+		{"server:query:plugins", "server:query:plugins", ScopeServerQueryPlugins, false},
+		{"server:query:stats", "server:query:stats", ScopeServerQueryStats, false},
+		{"server:query:custom future topic", "server:query:custom", Scope("server:query:custom"), false},
 		{"empty", "", "", true},
 		{"unknown", "execute", "", true},
 		{"keys empty pattern", "keys:", "", true},
@@ -93,6 +98,17 @@ func TestImplies(t *testing.T) {
 		{"hook:pre same", ScopeHookPre, ScopeHookPre, true},
 		{"hook:post same", ScopeHookPost, ScopeHookPost, true},
 		{"hook:pre != hook:post", ScopeHookPre, ScopeHookPost, false},
+		// server:query scope hierarchy
+		{"admin implies server:query", ScopeAdmin, ScopeServerQuery, true},
+		{"admin implies server:query:health", ScopeAdmin, ScopeServerQueryHealth, true},
+		{"server:query implies server:query:health", ScopeServerQuery, ScopeServerQueryHealth, true},
+		{"server:query implies server:query:plugins", ScopeServerQuery, ScopeServerQueryPlugins, true},
+		{"server:query implies server:query:stats", ScopeServerQuery, ScopeServerQueryStats, true},
+		{"server:query:health same", ScopeServerQueryHealth, ScopeServerQueryHealth, true},
+		{"server:query:health does not imply server:query:stats", ScopeServerQueryHealth, ScopeServerQueryStats, false},
+		{"read does not imply server:query", ScopeRead, ScopeServerQuery, false},
+		{"hook:post does not imply server:query", ScopeHookPost, ScopeServerQuery, false},
+		{"server:query:health does not imply server:query", ScopeServerQueryHealth, ScopeServerQuery, false},
 	}
 
 	for _, tt := range tests {

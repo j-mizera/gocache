@@ -52,7 +52,8 @@ actor Client
             alt Unknown command (not in core handlers)
                 Evaluator -> CmdRouter : HasCommand(op)?
                 alt Plugin command found
-                    CmdRouter -> CmdRouter : Route via IPC\n(CommandRequestV1)
+                    Evaluator -> Evaluator : metadata = rex.BuildMetadata(...)
+                    CmdRouter -> CmdRouter : Route via IPC\n(CommandRequestV1 + metadata)
                     CmdRouter --> Evaluator : Result from plugin
                 else Not found
                     Evaluator --> ConnHandler : Result{ErrUnknown}

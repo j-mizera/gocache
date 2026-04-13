@@ -40,8 +40,8 @@ frame "Plugin Command Registration & Routing" as F {
     ' -- IPC --
     RouteTable --> PC1 : "PUBLISH" -> pubsub
     RouteTable --> PC2 : "KAFKA:PRODUCE" -> kafka
-    PC1 --> P1 : CommandRequestV1\n(Unix socket)
-    PC2 --> P2 : CommandRequestV1\n(Unix socket)
+    PC1 --> P1 : CommandRequestV1\n(+ metadata, Unix socket)
+    PC2 --> P2 : CommandRequestV1\n(+ metadata, Unix socket)
 
     note bottom of RouteTable
       **Main namespace** (no prefix):
