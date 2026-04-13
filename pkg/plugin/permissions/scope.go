@@ -120,7 +120,7 @@ func Implies(have, need Scope) bool {
 	}
 	// Prefix matching: server:query implies server:query:health, etc.
 	h, n := string(have), string(need)
-	if strings.HasSuffix(h, ":") == false && strings.HasPrefix(n, h+":") {
+	if !strings.HasSuffix(h, ":") && strings.HasPrefix(n, h+":") {
 		return true
 	}
 	return false
