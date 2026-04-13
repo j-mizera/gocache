@@ -38,7 +38,7 @@ jobs:
           PLUGIN_NAMES=""
 
           # Shared code changes affect all artifacts
-          if echo "$CHANGED" | grep -qE '^(pkg/|proto/|go\.(mod|sum))'; then
+          if echo "$CHANGED" | grep -qE '^(pkg/|api/|sdk/|go\.(mod|sum))'; then
             SERVER=true
             CLI=true
             PLUGINS=true
