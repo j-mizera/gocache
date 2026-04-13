@@ -1,0 +1,57 @@
+@startuml components_operations
+!include ../../../design/theme.iuml
+
+mainframe **component** Operations System Architecture
+
+frame "api/ (shared, zero internal deps)" as api {
+    rectangle "api/operations" as apiOps {
+        component [Operation] as OpStruct <<ID, Type, ParentID\nStartTime, EndTime, Status\nContext map[string]string>>
+        component [Type Constants] as OpTypes <<command, connection\ncleanup, snapshot\nstartup, config_reload\nplugin_start, plugin_stop>>
+        component [ID Generator] as IDGen <<per-type atomic counter\ncmd_1, conn_2, cleanup_3>>
+    }
+
+    rectangle "api/context" as apiCtx {
+        component [FilterForPlugin()] as Filter <<visibility filtering>>
+        component [MergeFromPlugin()] as Merge <<auto-prefix non-shared>>
+        component [RedactSecrets()] as Redact <<strips *.secret.*>>
+        component [IsSecret()] as Secret <<detects secret keys>>
+    }
+
+    rectangle "api/events" as apiEvents {
+        component [Event Types] as EvtTypes <<operation.start\noperation.complete>>
+        component [Emitter interface] as Emitter
+    }
+}
+
+frame "pkg/ (server internals)" as pkg {
+    rectangle "pkg/operations" as pkgOps {
+        component [Tracker] as Tracker <<active operation registry\nStart/Complete/Fail/Get>>
+    }
+
+    rectangle "pkg/events" as pkgEvents {
+        component [Bus] as Bus <<server-wide event bus>>
+    }
+}
+
+' Relations
+Tracker --> OpStruct : creates & manages
+OpStruct --> Filter : ContextSnapshot uses
+OpStruct --> Merge : EnrichMany uses
+OpStruct --> Redact : ContextSnapshot(redacted=true)
+Bus ..|> Emitter : implements
+Tracker ..> EvtTypes : operations emit\nstart/complete events
+
+note bottom of apiCtx
+  **4-Tier Context Security Model**
+
+  | Prefix | Visible to | Exported |
+  | _ | All plugins | Yes |
+  | <plugin>. | Owner only | N/A |
+  | shared. | All plugins | Yes |
+  | *.secret.* | Per namespace | **Never** |
+
+  Secret marker works in ALL tiers:
+  _secret.X, auth.secret.X, shared.secret.X
+end note
+
+@enduml
