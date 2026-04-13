@@ -22,17 +22,18 @@ actor "Redis Client" as Client
     Router -> Router : lookup("PUBLISH")\nroutes["PUBLISH"] -> PluginRoute{pubsub}
     Router --> Eval : true
 
-    Eval -> Router : Route(ctx, "PUBLISH", ["mychan", "hello"])
+    Eval -> Eval : metadata = rex.BuildMetadata(\n  client.RexMeta, client.CmdMeta)
+    Eval -> Router : Route(ctx, "PUBLISH", ["mychan", "hello"], metadata)
 
     Router -> Router : Validate arg count\nmin=2, max=2 -> OK
 
     Router -> Router : requestID = "req-42"
-    Router -> PC : Send(CommandRequestV1{\n  command: "PUBLISH",\n  args: ["mychan", "hello"],\n  request_id: "req-42"\n})
+    Router -> PC : Send(CommandRequestV1{\n  command: "PUBLISH",\n  args: ["mychan", "hello"],\n  request_id: "req-42",\n  metadata: {traceparent: "...", tenant: "..."}\n})
 
     PC -> Plugin : EnvelopeV1 over Unix socket
     activate Plugin
 
-    Plugin -> Plugin : HandleCommand(ctx, "PUBLISH", args)\n(goroutine)
+    Plugin -> Plugin : HandleCommand(ctx, "PUBLISH", args, metadata)\n(goroutine)
 
     Plugin --> PC : CommandResponseV1{\n  request_id: "req-42",\n  result: Integer(2)\n}
     deactivate Plugin
@@ -63,13 +64,16 @@ actor "Redis Client" as Client
     Router -> Router : lookup("KAFKA:PRODUCE")\nDirect match in routes map
     Router --> Eval : true
 
-    Eval -> Router : Route(ctx, "KAFKA:PRODUCE", args)
+    Eval -> Eval : metadata = rex.BuildMetadata(...)
+    Eval -> Router : Route(ctx, "KAFKA:PRODUCE", args, metadata)
     note right
       REX commands are stored with
       full key "KAFKA:PRODUCE" in
       the routes map during registration.
       No runtime parsing needed if
       direct lookup succeeds.
+      metadata carries bare-key REX
+      metadata (nil when absent).
     end note
 
     Router --> Eval : Result from kafka plugin

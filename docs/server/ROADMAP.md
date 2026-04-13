@@ -21,9 +21,7 @@
 - 6-step graceful shutdown
 - Integration test suite (32 tests across 7 files)
 
-## Phase 2: Plugin Framework -- IN PROGRESS
-
-### Done
+## Phase 2: Plugin Framework -- COMPLETE
 
 - GCPC v1 protocol: Protobuf over Unix domain sockets, length-prefixed framing
 - IPC transport: write-mutex concurrency, stale socket cleanup
@@ -33,13 +31,10 @@
 - Hook system: pre/post command interception, priority-based execution, critical hooks can deny
 - Permission/scope system: hierarchical scopes (admin > write > read), key namespace isolation, hook filtering
 - Plugin SDK: Plugin, CommandPlugin, HookPlugin, ScopePlugin interfaces
+- Gobservability metrics plugin: Prometheus `/metrics` endpoint, command counters, latency histograms
+- Hook context system: three-layer namespacing (server `_`, plugin-private, `shared.`)
 
-### Next
-
-- Metrics plugin (non-critical): Prometheus `/metrics` endpoint with command counters, latency histograms, memory usage
-- Plugin-to-server cache read-back (allows plugins to query cache state)
-
-## Phase 3: REX Metadata + Observability
+## Phase 3: REX Metadata + Observability -- IN PROGRESS
 
 ### REX META -- Per-Request Metadata -- DONE
 
@@ -64,10 +59,34 @@ Implementation:
 - Metadata injected into hook context under `shared.rex.` prefix — all plugins see it via existing `shared.` visibility
 - Standard Redis clients unaffected (never send META, never negotiate REXV)
 
-### Observability
+### GCPC Metadata Forwarding -- DONE
+
+- `map<string, string> metadata` field on `CommandRequestV1` (field 4) and `HookRequestV1` (field 8)
+- Bare keys (no `shared.rex.` prefix) for clean plugin access
+- `rex.BuildMetadata()` merges connection defaults + per-command overrides
+- Command router and hook executor forward metadata to plugins
+- Plugin SDK: `HandleCommand(ctx, cmd, args, metadata)` and `HookRequest.Metadata`
+- Backward compatible: nil when no REX metadata, zero wire overhead
+
+### Server Query Mechanism (GCPC) -- DONE
+
+Plugin-to-server introspection via `ServerQueryV1` / `ServerQueryResponseV1` messages (field 60/61). General-purpose channel for plugins to query core state.
+
+- Query topics: `"health"` (status, uptime, connections), `"plugins"` (state, critical), `"stats"` (keys, memory)
+- Hierarchical scopes: `server:query` (wildcard) → `server:query:health`, `server:query:plugins`, `server:query:stats`
+- Prefix-based `Implies()` — `server:query` grants all subtopics, `admin` grants all
+- Plugin SDK: `Session.QueryServer(ctx, topic)` with async response correlation
+- `ServerStateProvider` interface decouples plugin manager from server/cache internals
+
+### Health Check Endpoints (Gobservability Plugin) -- DONE
+
+- `/healthz` — liveness: queries server health topic, returns 200/503 JSON
+- `/readyz` — readiness: queries health + plugins, checks critical plugin states
+- Nil-session guard during plugin startup
+
+### Observability — Remaining
 
 - OpenTelemetry tracing via REX META context propagation (span per command, parent spans from client trace context)
-- Health check HTTP endpoint (`/healthz`, `/readyz`)
 - Upgrade metrics plugin with OTEL trace export
 - Custom metrics aggregation
 

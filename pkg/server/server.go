@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gocache/pkg/blocking"
@@ -37,6 +38,8 @@ type Server struct {
 	requirePass      string
 	blockingRegistry *blocking.Registry
 	watchManager     *watch.Manager
+	startTime        time.Time
+	activeConns      atomic.Int64
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
@@ -49,6 +52,7 @@ func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePas
 		requirePass:      requirePass,
 		blockingRegistry: br,
 		watchManager:     wm,
+		startTime:        time.Now(),
 	}
 }
 
@@ -66,6 +70,20 @@ func (srv *Server) SetPluginRouter(r *router.Router) {
 func (srv *Server) SetHookExecutor(e command.HookExecutor) {
 	srv.evaluator.SetHookExecutor(e)
 }
+
+// ServerStateProvider methods — used by the plugin manager for server query responses.
+
+func (srv *Server) IsShuttingDown() bool {
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+	return srv.isShuttingDown
+}
+
+func (srv *Server) StartTime() time.Time   { return srv.startTime }
+func (srv *Server) ActiveConnections() int { return int(srv.activeConns.Load()) }
+func (srv *Server) CacheKeys() int         { return srv.cache.Len() }
+func (srv *Server) CacheUsedBytes() int64  { return srv.cache.UsedBytes() }
+func (srv *Server) CacheMaxBytes() int64   { return srv.cache.MaxBytes() }
 
 // Start begins accepting connections and blocks until shutdown
 func (srv *Server) Start(ctx context.Context) error {
@@ -150,6 +168,9 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 }
 
 func (srv *Server) handleConnection(conn net.Conn) {
+	srv.activeConns.Add(1)
+	defer srv.activeConns.Add(-1)
+
 	ctx := clientctx.New()
 
 	defer func() {

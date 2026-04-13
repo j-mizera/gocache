@@ -28,6 +28,7 @@ type Manager struct {
 	router        *router.Router
 	hookRegistry  *hooks.Registry
 	scopeRegistry *permissions.Registry
+	queryRegistry *QueryRegistry
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
@@ -36,13 +37,17 @@ type Manager struct {
 // NewManager creates a plugin manager with the given configuration.
 // coreCommands is the list of command names handled by the core evaluator;
 // plugin commands that shadow these will be rejected during registration.
-func NewManager(cfg plugin.PluginsConfig, coreCommands []string) *Manager {
+func NewManager(cfg plugin.PluginsConfig, coreCommands []string, stateProvider ServerStateProvider) *Manager {
+	reg := NewRegistry()
+	qr := NewQueryRegistry()
+	RegisterBuiltinHandlers(qr, reg, stateProvider)
 	return &Manager{
 		cfg:           cfg,
-		registry:      NewRegistry(),
+		registry:      reg,
 		router:        router.NewRouter(coreCommands),
 		hookRegistry:  hooks.NewRegistry(),
 		scopeRegistry: permissions.NewRegistry(),
+		queryRegistry: qr,
 	}
 }
 
@@ -59,6 +64,11 @@ func (m *Manager) HookRegistry() *hooks.Registry {
 // ScopeRegistry returns the scope registry for permission enforcement.
 func (m *Manager) ScopeRegistry() *permissions.Registry {
 	return m.scopeRegistry
+}
+
+// QueryRegistry returns the query registry for registering custom topics.
+func (m *Manager) QueryRegistry() *QueryRegistry {
+	return m.queryRegistry
 }
 
 // Start discovers plugins, opens the IPC listener, launches plugin processes,
@@ -356,9 +366,16 @@ func (m *Manager) validateScopes(pluginName string, requested []string) ([]permi
 
 	granted, denied := permissions.ValidateRequest(requestedScopes, allowed)
 	if len(denied) > 0 {
-		return nil, fmt.Errorf("scopes denied: %v", permissions.ScopeStrings(denied))
+		logger.Warn().Str("plugin", pluginName).Strs("denied", permissions.ScopeStrings(denied)).
+			Msg("some requested scopes were denied — plugin will operate with reduced capabilities")
 	}
 
+	// Always return what was granted, even if some were denied.
+	// Plugins degrade gracefully at runtime when they hit a scope they don't have.
+	if len(granted) == 0 {
+		// Grant at least the defaults so the plugin can function minimally.
+		return allowed, nil
+	}
 	return granted, nil
 }
 
@@ -438,6 +455,20 @@ func (m *Manager) readLoop(inst *PluginInstance) {
 			logger.Info().Str("plugin", inst.Name).Msg("plugin acknowledged shutdown")
 			m.registry.SetState(inst.Name, StateShutdown)
 			return
+		case *gcpcv1.EnvelopeV1_ServerQuery:
+			query := env.GetServerQuery()
+			requiredScope := permissions.ScopeForTopic(query.Topic)
+			if !m.scopeRegistry.HasScope(inst.Name, requiredScope) {
+				_ = inst.Conn.Send(protocol.NewServerQueryResponse(query.RequestId, nil,
+					fmt.Sprintf("permission denied: missing scope %q", requiredScope)))
+				continue
+			}
+			data, qErr := m.queryRegistry.Handle(query.Topic)
+			errMsg := ""
+			if qErr != nil {
+				errMsg = qErr.Error()
+			}
+			_ = inst.Conn.Send(protocol.NewServerQueryResponse(query.RequestId, data, errMsg))
 		default:
 			logger.Debug().Str("plugin", inst.Name).Msg("unexpected message from plugin")
 		}

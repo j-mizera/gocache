@@ -24,7 +24,9 @@ actor Client
     HookExec -> HookReg : MatchPre("SET")
     HookReg --> HookExec : [Auth(crit, pri=1)]\nsorted by priority
 
-    HookExec -> PluginConn : Send HookRequestV1 (PRE)\ncontext: {_start_ns}
+    HookExec -> HookExec : metadata = extractRexMetadata(hookCtx)\n{traceparent: "...", tenant: "..."}
+
+    HookExec -> PluginConn : Send HookRequestV1 (PRE)\ncontext: {_start_ns, shared.rex.*}\nmetadata: {traceparent, tenant}
     PluginConn -> PluginA : HookRequestV1\n(request_id=req-1)
     activate PluginA
     PluginA --> PluginConn : HookResponseV1\n(deny=false,\ncontext_values: {tenant_id: "acme"})
@@ -51,8 +53,8 @@ actor Client
 
     hnote over HookExec : command.FilterHookCtx(hookCtx, "gobservability")\nreturns: {_start_ns, _elapsed_ns, shared.*}
 
-    HookExec ->> PluginM : HookRequestV1 POST\n(fire-and-forget)\ncontext: {_start_ns, _elapsed_ns}
-    note right : Non-critical: no wait.\nReads _elapsed_ns for latency histogram.
+    HookExec ->> PluginM : HookRequestV1 POST\n(fire-and-forget)\ncontext: {_start_ns, _elapsed_ns, shared.rex.*}\nmetadata: {traceparent, tenant}
+    note right : Non-critical: no wait.\nReads _elapsed_ns for latency histogram.\nmetadata has bare keys for easy access.
 
     == Response ==
 

@@ -359,6 +359,58 @@ func TestExecutorPreHookTimeout(t *testing.T) {
 	}
 }
 
+func TestExtractRexMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		hookCtx map[string]string
+		want    map[string]string
+	}{
+		{
+			name:    "nil context",
+			hookCtx: nil,
+			want:    nil,
+		},
+		{
+			name:    "no rex keys",
+			hookCtx: map[string]string{"_start_ns": "123", "auth.token": "abc"},
+			want:    nil,
+		},
+		{
+			name: "rex keys extracted with prefix stripped",
+			hookCtx: map[string]string{
+				"_start_ns":              "123",
+				"shared.rex.traceparent": "00-abc-def-01",
+				"shared.rex.tenant":      "acme",
+				"shared.other":           "ignored",
+			},
+			want: map[string]string{
+				"traceparent": "00-abc-def-01",
+				"tenant":      "acme",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRexMetadata(tt.hookCtx)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("expected %d entries, got %d: %v", len(tt.want), len(got), got)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("key %q: expected %q, got %q", k, v, got[k])
+				}
+			}
+		})
+	}
+}
+
 func TestExecutorNoMatchReturnsNil(t *testing.T) {
 	reg := NewRegistry()
 	s, c := testPipe()

@@ -118,7 +118,7 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 	if !ok {
 		// Fall through to plugin router for plugin-provided commands.
 		if b.pluginRouter != nil && b.pluginRouter.HasCommand(op) {
-			return b.routeToPlugin(op, args)
+			return b.routeToPlugin(ctx, op, args)
 		}
 		logger.Debug().Str("command", op).Msg("unknown command")
 		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
@@ -203,11 +203,13 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 }
 
 // routeToPlugin dispatches a command to a plugin via the router.
-func (b *BaseEvaluator) routeToPlugin(op string, args []string) command.Result {
+func (b *BaseEvaluator) routeToPlugin(client *clientctx.ClientContext, op string, args []string) command.Result {
+	metadata := rex.BuildMetadata(client.RexMeta, client.CmdMeta)
+
 	ctx, cancel := context.WithTimeout(context.Background(), pluginCommandTimeout)
 	defer cancel()
 
-	val, err := b.pluginRouter.Route(ctx, op, args)
+	val, err := b.pluginRouter.Route(ctx, op, args, metadata)
 	if err != nil {
 		if errors.Is(err, router.ErrPluginTimeout) {
 			return command.Result{Value: resp.MarshalError("ERR plugin timeout")}

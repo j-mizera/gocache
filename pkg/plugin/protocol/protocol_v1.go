@@ -93,7 +93,7 @@ func NewShutdownAck() *gcpc.EnvelopeV1 {
 	}
 }
 
-func NewHookRequest(requestID string, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string, ctx map[string]string) *gcpc.EnvelopeV1 {
+func NewHookRequest(requestID string, phase gcpc.HookPhaseV1, command string, args []string, resultValue, resultError string, ctx map[string]string, metadata map[string]string) *gcpc.EnvelopeV1 {
 	return &gcpc.EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      id(),
@@ -106,6 +106,7 @@ func NewHookRequest(requestID string, phase gcpc.HookPhaseV1, command string, ar
 				ResultValue: resultValue,
 				ResultError: resultError,
 				Context:     ctx,
+				Metadata:    metadata,
 			},
 		},
 	}
@@ -126,7 +127,7 @@ func NewHookResponse(requestID string, deny bool, denyReason string, contextValu
 	}
 }
 
-func NewCommandRequest(command string, args []string, requestID string) *gcpc.EnvelopeV1 {
+func NewCommandRequest(command string, args []string, requestID string, metadata map[string]string) *gcpc.EnvelopeV1 {
 	return &gcpc.EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      id(),
@@ -135,6 +136,7 @@ func NewCommandRequest(command string, args []string, requestID string) *gcpc.En
 				Command:   command,
 				Args:      args,
 				RequestId: requestID,
+				Metadata:  metadata,
 			},
 		},
 	}
@@ -148,6 +150,33 @@ func NewCommandResponse(requestID string, result *gcpc.ResultV1) *gcpc.EnvelopeV
 			CommandResponse: &gcpc.CommandResponseV1{
 				RequestId: requestID,
 				Result:    result,
+			},
+		},
+	}
+}
+
+func NewServerQuery(requestID, topic string) *gcpc.EnvelopeV1 {
+	return &gcpc.EnvelopeV1{
+		Version: ProtocolVersion,
+		Id:      id(),
+		Payload: &gcpc.EnvelopeV1_ServerQuery{
+			ServerQuery: &gcpc.ServerQueryV1{
+				RequestId: requestID,
+				Topic:     topic,
+			},
+		},
+	}
+}
+
+func NewServerQueryResponse(requestID string, data map[string]string, errMsg string) *gcpc.EnvelopeV1 {
+	return &gcpc.EnvelopeV1{
+		Version: ProtocolVersion,
+		Id:      id(),
+		Payload: &gcpc.EnvelopeV1_ServerQueryResponse{
+			ServerQueryResponse: &gcpc.ServerQueryResponseV1{
+				RequestId: requestID,
+				Data:      data,
+				Error:     errMsg,
 			},
 		},
 	}

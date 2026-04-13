@@ -146,7 +146,7 @@ func main() {
 	// Initialize plugin system (optional — disabled by default)
 	var pluginManager *pluginmgr.Manager
 	if cfg.Plugins.Enabled {
-		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames())
+		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
 		if err := pluginManager.Start(ctx); err != nil {
 			logger.Fatal().Err(err).Msg("failed to start plugin manager")
 		}

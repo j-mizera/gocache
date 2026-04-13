@@ -65,11 +65,14 @@ end note
 == Hook Chain Sees REX Metadata ==
 
 Eval -> Hook : RunPreHooks("GET", args, hookCtx)
-Hook -> Auth : HookRequestV1\ncontext: {_start_ns, shared.rex.auth.jwt, shared.rex.traceparent, shared.rex.tenant.id}
+Hook -> Hook : metadata = extractRexMetadata(hookCtx)\n{auth.jwt: "eyJhbG...", traceparent: "00-abc", tenant.id: "team-a"}
+Hook -> Auth : HookRequestV1\ncontext: {_start_ns, shared.rex.auth.jwt,\n  shared.rex.traceparent, shared.rex.tenant.id}\nmetadata: {auth.jwt, traceparent, tenant.id}
 note right
-  Auth plugin sees shared.rex.*
-  via existing shared. visibility
-  in command.FilterHookCtx()
+  **context** field: prefixed keys via
+  existing shared.* visibility
+  (backward compatible).
+  **metadata** field: bare keys for
+  clean access (preferred).
 end note
 Auth --> Hook : HookResponseV1 (allow)
 Hook --> Eval : allow

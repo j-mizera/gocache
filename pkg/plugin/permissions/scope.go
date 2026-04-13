@@ -15,6 +15,12 @@ const (
 	ScopeAdmin    Scope = "admin"
 	ScopeHookPre  Scope = "hook:pre"
 	ScopeHookPost Scope = "hook:post"
+
+	// Server query scopes — server:query is a wildcard for all subtopics.
+	ScopeServerQuery        Scope = "server:query"
+	ScopeServerQueryHealth  Scope = "server:query:health"
+	ScopeServerQueryPlugins Scope = "server:query:plugins"
+	ScopeServerQueryStats   Scope = "server:query:stats"
 )
 
 const keysPrefix = "keys:"
@@ -27,6 +33,16 @@ const (
 	OpWrite
 	OpAdmin
 )
+
+// isServerQueryScope returns true if the scope is any server:query variant.
+func isServerQueryScope(s Scope) bool {
+	return s == ScopeServerQuery || strings.HasPrefix(string(s), "server:query:")
+}
+
+// ScopeForTopic returns the required scope for a server query topic.
+func ScopeForTopic(topic string) Scope {
+	return Scope("server:query:" + topic)
+}
 
 // IsKeyScope returns true if the scope is a key namespace restriction.
 func IsKeyScope(s Scope) bool {
@@ -50,7 +66,13 @@ func ParseScope(s string) (Scope, error) {
 	}
 
 	switch Scope(s) {
-	case ScopeRead, ScopeWrite, ScopeAdmin, ScopeHookPre, ScopeHookPost:
+	case ScopeRead, ScopeWrite, ScopeAdmin, ScopeHookPre, ScopeHookPost,
+		ScopeServerQuery, ScopeServerQueryHealth, ScopeServerQueryPlugins, ScopeServerQueryStats:
+		return Scope(s), nil
+	}
+
+	// Accept future server:query:<topic> scopes without hardcoding every topic.
+	if strings.HasPrefix(s, "server:query:") && len(s) > len("server:query:") {
 		return Scope(s), nil
 	}
 
@@ -83,16 +105,23 @@ func ParseScopes(ss []string) ([]Scope, error) {
 }
 
 // Implies returns true if having `have` satisfies the requirement for `need`.
-// Hierarchy: admin > write > read. Hook and key scopes are independent.
+// Hierarchy: admin > write > read. Admin also implies server:query.
+// Prefix scopes: server:query implies all server:query:* subtopics.
+// Hook and key scopes are independent.
 func Implies(have, need Scope) bool {
 	if have == need {
 		return true
 	}
 	switch have {
 	case ScopeAdmin:
-		return need == ScopeWrite || need == ScopeRead
+		return need == ScopeWrite || need == ScopeRead || isServerQueryScope(need)
 	case ScopeWrite:
 		return need == ScopeRead
+	}
+	// Prefix matching: server:query implies server:query:health, etc.
+	h, n := string(have), string(need)
+	if !strings.HasSuffix(h, ":") && strings.HasPrefix(n, h+":") {
+		return true
 	}
 	return false
 }
