@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"gocache/api/logger"
 	"gocache/pkg/cache"
-	"gocache/pkg/logger"
 )
 
 func init() {

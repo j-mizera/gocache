@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
+	apilogger "gocache/api/logger"
 	"gocache/api/transport"
 )
 
@@ -172,6 +171,9 @@ type HookResponse struct {
 // If the plugin implements CommandPlugin, its commands are registered.
 // If the plugin implements HookPlugin, its hooks are registered.
 func Run(ctx context.Context, p Plugin) error {
+	// Create a logger for this plugin, writing to stdout.
+	pluginLog := apilogger.New(os.Stdout, p.Name(), "debug")
+
 	sockPath := os.Getenv("GOCACHE_PLUGIN_SOCK")
 	if sockPath == "" {
 		return errors.New("GOCACHE_PLUGIN_SOCK not set")
@@ -270,7 +272,7 @@ func Run(ctx context.Context, p Plugin) error {
 		return fmt.Errorf("registration rejected: %s", ack.Reason)
 	}
 	if len(ack.GrantedScopes) > 0 {
-		log.Printf("[pluginsdk] granted scopes: %s", strings.Join(ack.GrantedScopes, ", "))
+		pluginLog.Info().Strs("scopes", ack.GrantedScopes).Msg("granted scopes")
 	}
 	// Log denied scopes so the plugin author knows which features will be unavailable.
 	if isScopePlugin {
@@ -285,7 +287,7 @@ func Run(ctx context.Context, p Plugin) error {
 			}
 		}
 		if len(denied) > 0 {
-			log.Printf("[pluginsdk] WARNING: scopes denied: %s — features requiring these scopes will return errors", strings.Join(denied, ", "))
+			pluginLog.Warn().Strs("denied", denied).Msg("scopes denied — features requiring these scopes will return errors")
 		}
 	}
 
@@ -357,7 +359,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewCommandResponse(req.RequestId, protoResult)
 				if err := tc.Send(resp); err != nil {
-					log.Printf("[pluginsdk] ERROR: failed to send command response for %s: %v", req.Command, err)
+					pluginLog.Error().Err(err).Str("command", req.Command).Msg("failed to send command response")
 				}
 			}()
 
@@ -382,7 +384,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewOperationHookResponse(req.RequestId, ctxValues)
 				if err := tc.Send(resp); err != nil {
-					log.Printf("[pluginsdk] ERROR: failed to send operation hook response: %v", err)
+					pluginLog.Error().Err(err).Msg("failed to send operation hook response")
 				}
 			} else {
 				// Complete phase: fire-and-forget.
@@ -425,7 +427,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewHookResponse(req.RequestId, deny, denyReason, ctxValues)
 				if err := tc.Send(resp); err != nil {
-					log.Printf("[pluginsdk] ERROR: failed to send hook response for %s: %v", req.Command, err)
+					pluginLog.Error().Err(err).Str("command", req.Command).Msg("failed to send hook response")
 				}
 			}()
 		}

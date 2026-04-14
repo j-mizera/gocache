@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	apiEvents "gocache/api/events"
-	"gocache/pkg/logger"
+	"gocache/api/logger"
 )
 
 // Handler is a function that processes an event. Must be non-blocking.

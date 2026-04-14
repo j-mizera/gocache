@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	apilogger "gocache/api/logger"
 	"gocache/sdk/pluginsdk"
 )
 
-type dummyPlugin struct{}
+type dummyPlugin struct {
+	log *apilogger.Logger
+}
 
 func (d *dummyPlugin) Name() string    { return "dummy" }
 func (d *dummyPlugin) Version() string { return "0.1.0" }
@@ -21,16 +23,18 @@ func (d *dummyPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (d *dummyPlugin) OnShutdown(_ context.Context) error {
-	log.Println("dummy plugin shutting down")
+	d.log.Info().Msg("shutting down")
 	return nil
 }
 
 func main() {
+	plog := apilogger.New(os.Stdout, "dummy", "debug")
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	if err := pluginsdk.Run(ctx, &dummyPlugin{}); err != nil {
-		log.Printf("dummy plugin error: %v", err)
+	if err := pluginsdk.Run(ctx, &dummyPlugin{log: plog}); err != nil {
+		plog.Error().Err(err).Msg("plugin error")
 		os.Exit(1)
 	}
 }

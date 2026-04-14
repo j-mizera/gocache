@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"gocache/api/command"
+	apilogger "gocache/api/logger"
 	"gocache/sdk/pluginsdk"
 )
 
@@ -25,6 +25,7 @@ type gobservabilityPlugin struct {
 	server    *http.Server
 	session   *pluginsdk.Session
 	tracer    *Tracer
+	log       *apilogger.Logger
 }
 
 // Plugin interface.
@@ -38,10 +39,10 @@ func (p *gobservabilityPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (p *gobservabilityPlugin) OnShutdown(ctx context.Context) error {
-	log.Println("gobservability: shutting down")
+	p.log.Info().Msg("shutting down")
 	if p.tracer != nil {
 		if err := p.tracer.Shutdown(ctx); err != nil {
-			log.Printf("gobservability: tracer shutdown error: %v", err)
+			p.log.Error().Err(err).Msg("tracer shutdown error")
 		}
 	}
 	return p.server.Shutdown(ctx)
@@ -98,10 +99,13 @@ func main() {
 		port = defaultPort
 	}
 
+	plog := apilogger.New(os.Stdout, pluginName, "debug")
+
 	collector := NewCollector()
 
 	plugin := &gobservabilityPlugin{
 		collector: collector,
+		log:       plog,
 	}
 
 	// Initialize OTEL tracer if enabled.
@@ -112,10 +116,10 @@ func main() {
 		}
 		tracer, err := NewTracer(otlpEndpoint, serviceName)
 		if err != nil {
-			log.Printf("gobservability: failed to initialize OTEL tracer: %v", err)
+			plog.Error().Err(err).Msg("failed to initialize OTEL tracer")
 		} else {
 			plugin.tracer = tracer
-			log.Printf("gobservability: OTEL tracing enabled, exporting to %s", otlpEndpoint)
+			plog.Info().Str("endpoint", otlpEndpoint).Msg("OTEL tracing enabled")
 		}
 	}
 
@@ -132,9 +136,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("gobservability: metrics server listening on %s", port)
+		plog.Info().Str("addr", port).Msg("metrics server listening")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("gobservability: metrics server error: %v", err)
+			plog.Error().Err(err).Msg("metrics server error")
 		}
 	}()
 
@@ -144,7 +148,7 @@ func main() {
 	defer cancel()
 
 	if err := pluginsdk.Run(ctx, plugin); err != nil {
-		log.Printf("gobservability: plugin error: %v", err)
+		plog.Error().Err(err).Msg("plugin error")
 		os.Exit(1)
 	}
 }

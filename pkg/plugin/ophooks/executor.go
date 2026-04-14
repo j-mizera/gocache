@@ -7,8 +7,8 @@ import (
 
 	opctx "gocache/api/context"
 	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/logger"
 	ops "gocache/api/operations"
-	"gocache/pkg/logger"
 	"gocache/pkg/plugin/router"
 )
 

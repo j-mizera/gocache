@@ -10,15 +10,17 @@ import (
 	"time"
 
 	"gocache/api/events"
+	"gocache/api/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
-	"gocache/pkg/logger"
+	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
+	"gocache/pkg/plugin/ophooks"
 	"gocache/pkg/server"
 	"gocache/pkg/version"
 	"gocache/pkg/watch"
@@ -142,9 +144,13 @@ func main() {
 	cacheInstance.OnMutate = watchManager.NotifyMutation
 	cacheInstance.OnMutateAll = watchManager.NotifyAll
 
+	// Initialize operation tracker.
+	tracker := serverOps.NewTracker()
+
 	// Initialize the server
 	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Persistence.SnapshotFile, cfg.Server.RequirePass, blockingRegistry, watchManager)
 	srv.SetEmitter(eventBus)
+	srv.SetTracker(tracker)
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -160,7 +166,14 @@ func main() {
 		pluginManager.SetEventBus(eventBus)
 		srv.SetPluginRouter(pluginManager.Router())
 		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
+		srv.SetOpHookExecutor(ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout))
 	}
+
+	// Wire tracker and emitter to workers so background tasks become operations.
+	snapshotWorker.SetTracker(tracker)
+	snapshotWorker.SetEmitter(eventBus)
+	cleanupWorker.SetTracker(tracker)
+	cleanupWorker.SetEmitter(eventBus)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)

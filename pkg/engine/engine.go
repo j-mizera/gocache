@@ -1,8 +1,8 @@
 package engine
 
 import (
+	"gocache/api/logger"
 	"gocache/pkg/cache"
-	"gocache/pkg/logger"
 	"sync"
 )
 

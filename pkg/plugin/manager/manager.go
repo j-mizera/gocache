@@ -11,9 +11,9 @@ import (
 
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
+	"gocache/api/logger"
 	"gocache/api/transport"
 	serverEvents "gocache/pkg/events"
-	"gocache/pkg/logger"
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/cmdhooks"
 	"gocache/pkg/plugin/ophooks"

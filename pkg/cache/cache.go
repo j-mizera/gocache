@@ -3,7 +3,7 @@ package cache
 import (
 	"container/list"
 	"errors"
-	"gocache/pkg/logger"
+	"gocache/api/logger"
 	"strings"
 	"sync"
 	"time"
