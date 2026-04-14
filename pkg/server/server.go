@@ -12,13 +12,15 @@ import (
 	"time"
 
 	"gocache/api/events"
+	"gocache/api/logger"
+	ops "gocache/api/operations"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/evaluator"
-	"gocache/pkg/logger"
+	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
 	"gocache/pkg/rex"
@@ -42,6 +44,8 @@ type Server struct {
 	startTime        time.Time
 	activeConns      atomic.Int64
 	emitter          events.Emitter
+	tracker          *serverOps.Tracker
+	opHookExecutor   evaluator.OpHookExecutor
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
@@ -78,6 +82,18 @@ func (srv *Server) SetHookExecutor(e command.HookExecutor) {
 func (srv *Server) SetEmitter(e events.Emitter) {
 	srv.emitter = e
 	srv.evaluator.SetEmitter(e)
+}
+
+// SetTracker sets the operation tracker on both the server and evaluator.
+func (srv *Server) SetTracker(t *serverOps.Tracker) {
+	srv.tracker = t
+	srv.evaluator.SetTracker(t)
+}
+
+// SetOpHookExecutor sets the operation hook executor on both the server and evaluator.
+func (srv *Server) SetOpHookExecutor(e evaluator.OpHookExecutor) {
+	srv.opHookExecutor = e
+	srv.evaluator.SetOpHookExecutor(e)
 }
 
 // EmitEvent emits an event through the server's emitter.
@@ -188,9 +204,23 @@ func (srv *Server) handleConnection(conn net.Conn) {
 	remoteAddr := conn.RemoteAddr().String()
 	connStart := time.Now()
 
-	srv.emitter.Emit(events.NewConnectionOpen(remoteAddr))
+	// Create connection operation if tracker is set.
+	var connOp *ops.Operation
+	if srv.tracker != nil {
+		connOp = srv.tracker.Start(ops.TypeConnection, "")
+		connOp.Enrich("_remote_addr", remoteAddr)
+		if srv.opHookExecutor != nil {
+			srv.opHookExecutor.RunStartHooks(context.Background(), connOp)
+		}
+		srv.emitter.Emit(events.NewConnectionOpen(remoteAddr).WithOperationID(connOp.ID))
+	} else {
+		srv.emitter.Emit(events.NewConnectionOpen(remoteAddr))
+	}
 
 	ctx := clientctx.New()
+	if connOp != nil {
+		ctx.OperationID = connOp.ID
+	}
 
 	defer func() {
 		if srv.watchManager != nil {
@@ -198,7 +228,16 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		}
 		conn.Close()
 		srv.connectionWg.Done()
-		srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())))
+		if connOp != nil {
+			connOp.Complete()
+			if srv.opHookExecutor != nil {
+				srv.opHookExecutor.RunCompleteHooks(connOp)
+			}
+			srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())).WithOperationID(connOp.ID))
+			srv.tracker.Complete(connOp.ID)
+		} else {
+			srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())))
+		}
 	}()
 
 	reader := resp.NewReader(conn)

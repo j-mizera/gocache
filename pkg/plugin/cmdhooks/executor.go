@@ -7,8 +7,8 @@ import (
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/logger"
 	cmd "gocache/pkg/command"
-	"gocache/pkg/logger"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/rex"
 )

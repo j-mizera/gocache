@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/logger"
 	"gocache/api/transport"
-	"gocache/pkg/logger"
 )
 
 var (
