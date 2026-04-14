@@ -180,6 +180,36 @@ func NewServerQueryResponse(requestID string, data map[string]string, errMsg str
 	}
 }
 
+func NewOperationHookRequest(requestID, opID, opType, parentID, phase string, ctx map[string]string) *EnvelopeV1 {
+	return &EnvelopeV1{
+		Version: ProtocolVersion,
+		Id:      envelopeID(),
+		Payload: &EnvelopeV1_OperationHookRequest{
+			OperationHookRequest: &OperationHookRequestV1{
+				RequestId:     requestID,
+				OperationId:   opID,
+				OperationType: opType,
+				ParentId:      parentID,
+				Phase:         phase,
+				Context:       ctx,
+			},
+		},
+	}
+}
+
+func NewOperationHookResponse(requestID string, contextValues map[string]string) *EnvelopeV1 {
+	return &EnvelopeV1{
+		Version: ProtocolVersion,
+		Id:      envelopeID(),
+		Payload: &EnvelopeV1_OperationHookResponse{
+			OperationHookResponse: &OperationHookResponseV1{
+				RequestId:     requestID,
+				ContextValues: contextValues,
+			},
+		},
+	}
+}
+
 // ResultFromInterface converts a Go value to a proto ResultV1.
 // Supported types: string, int, int64, float64, nil, error,
 // []interface{}, []string, map[string]string, map[string]interface{}.

@@ -22,6 +22,7 @@ type ClientContext struct {
 	RexVersion    int               // 0 = disabled, 1 = META lines enabled
 	RexMeta       *rex.Store        // nil until first REX.META SET/MSET
 	CmdMeta       map[string]string // transient per-command META, set by server, cleared after eval
+	OperationID   string            // parent operation ID (connection operation), set by server
 }
 
 func New() *ClientContext {

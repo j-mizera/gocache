@@ -17,7 +17,7 @@ import (
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logger"
 	"gocache/pkg/persistence"
-	"gocache/pkg/plugin/hooks"
+	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/server"
 	"gocache/pkg/version"
@@ -159,7 +159,7 @@ func main() {
 		}
 		pluginManager.SetEventBus(eventBus)
 		srv.SetPluginRouter(pluginManager.Router())
-		srv.SetHookExecutor(hooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
+		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
 	}
 
 	sigChan := make(chan os.Signal, 1)

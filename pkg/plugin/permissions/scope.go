@@ -20,6 +20,7 @@ const (
 	ScopeServerQueryPlugins = scope.ScopeServerQueryPlugins
 	ScopeServerQueryStats   = scope.ScopeServerQueryStats
 	ScopeEvents             = scope.ScopeEvents
+	ScopeOperationHook      = scope.ScopeOperationHook
 
 	OpRead  = scope.OpRead
 	OpWrite = scope.OpWrite

@@ -86,6 +86,39 @@ type EventPlugin interface {
 	HandleEvent(ctx context.Context, evt *gcpc.EventV1)
 }
 
+// OperationHookPlugin extends Plugin with operation lifecycle hooks.
+// Plugins implementing this interface are called synchronously when operations
+// start (to enrich context) and asynchronously when operations complete.
+type OperationHookPlugin interface {
+	Plugin
+	// OperationHooks returns the operation types this plugin hooks into.
+	OperationHooks() []OperationHookDecl
+	// HandleOperationHook is called when a matching operation starts or completes.
+	// For start phase: response ContextValues are merged into the operation context.
+	// For complete phase: response is ignored (fire-and-forget).
+	HandleOperationHook(ctx context.Context, req *OperationHookRequest) *OperationHookResponse
+}
+
+// OperationHookDecl declares an operation hook.
+type OperationHookDecl struct {
+	Type     string // operation type to match, "*" for all
+	Priority int    // lower = fires first
+}
+
+// OperationHookRequest carries operation data to the plugin handler.
+type OperationHookRequest struct {
+	OperationID   string
+	OperationType string
+	ParentID      string
+	Phase         string            // "start" or "complete"
+	Context       map[string]string // filtered for this plugin's visibility
+}
+
+// OperationHookResponse is the plugin's response to an operation start hook.
+type OperationHookResponse struct {
+	ContextValues map[string]string // values to merge into operation context
+}
+
 // HookPhase indicates when a hook fires relative to command execution.
 type HookPhase int
 
@@ -157,6 +190,7 @@ func Run(ctx context.Context, p Plugin) error {
 	sp, isScopePlugin := p.(ScopePlugin)
 	qp, isQueryPlugin := p.(QueryPlugin)
 	ep, isEventPlugin := p.(EventPlugin)
+	ohp, isOperationHookPlugin := p.(OperationHookPlugin)
 
 	// Build registration message.
 	var cmdDecls []*gcpc.CommandDeclV1
@@ -192,6 +226,19 @@ func Run(ctx context.Context, p Plugin) error {
 		requestedScopes = sp.Scopes()
 	}
 
+	// Build operation hook declarations.
+	var opHookDecls []*gcpc.OperationHookDeclV1
+	if isOperationHookPlugin {
+		decls := ohp.OperationHooks()
+		opHookDecls = make([]*gcpc.OperationHookDeclV1, len(decls))
+		for i, d := range decls {
+			opHookDecls[i] = &gcpc.OperationHookDeclV1{
+				Type:     d.Type,
+				Priority: int32(d.Priority),
+			}
+		}
+	}
+
 	// Send registration.
 	reg := &gcpc.RegisterV1{
 		Name:            p.Name(),
@@ -200,6 +247,7 @@ func Run(ctx context.Context, p Plugin) error {
 		Commands:        cmdDecls,
 		Hooks:           hookDecls,
 		RequestedScopes: requestedScopes,
+		OperationHooks:  opHookDecls,
 	}
 	env := &gcpc.EnvelopeV1{
 		Version: gcpc.ProtocolVersion,
@@ -312,6 +360,34 @@ func Run(ctx context.Context, p Plugin) error {
 					log.Printf("[pluginsdk] ERROR: failed to send command response for %s: %v", req.Command, err)
 				}
 			}()
+
+		case *gcpc.EnvelopeV1_OperationHookRequest:
+			if !isOperationHookPlugin {
+				continue
+			}
+			req := env.GetOperationHookRequest()
+			hookReq := &OperationHookRequest{
+				OperationID:   req.OperationId,
+				OperationType: req.OperationType,
+				ParentID:      req.ParentId,
+				Phase:         req.Phase,
+				Context:       req.Context,
+			}
+			if req.Phase == "start" {
+				// Start phase: synchronous — server is waiting for response.
+				result := ohp.HandleOperationHook(ctx, hookReq)
+				var ctxValues map[string]string
+				if result != nil {
+					ctxValues = result.ContextValues
+				}
+				resp := gcpc.NewOperationHookResponse(req.RequestId, ctxValues)
+				if err := tc.Send(resp); err != nil {
+					log.Printf("[pluginsdk] ERROR: failed to send operation hook response: %v", err)
+				}
+			} else {
+				// Complete phase: fire-and-forget.
+				go ohp.HandleOperationHook(ctx, hookReq)
+			}
 
 		case *gcpc.EnvelopeV1_Event:
 			if isEventPlugin {

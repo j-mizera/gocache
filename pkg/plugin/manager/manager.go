@@ -15,7 +15,8 @@ import (
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logger"
 	"gocache/pkg/plugin"
-	"gocache/pkg/plugin/hooks"
+	"gocache/pkg/plugin/cmdhooks"
+	"gocache/pkg/plugin/ophooks"
 	"gocache/pkg/plugin/permissions"
 	"gocache/pkg/plugin/router"
 
@@ -25,17 +26,18 @@ import (
 // Manager handles plugin lifecycle: discovery, fork/exec, registration,
 // health monitoring, restart, and graceful shutdown.
 type Manager struct {
-	cfg           plugin.PluginsConfig
-	listener      *transport.Listener
-	registry      *Registry
-	router        *router.Router
-	hookRegistry  *hooks.Registry
-	scopeRegistry *permissions.Registry
-	queryRegistry *QueryRegistry
-	eventBus      *serverEvents.Bus
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
+	cfg            plugin.PluginsConfig
+	listener       *transport.Listener
+	registry       *Registry
+	router         *router.Router
+	hookRegistry   *cmdhooks.Registry
+	opHookRegistry *ophooks.Registry
+	scopeRegistry  *permissions.Registry
+	queryRegistry  *QueryRegistry
+	eventBus       *serverEvents.Bus
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
 }
 
 // NewManager creates a plugin manager with the given configuration.
@@ -46,12 +48,13 @@ func NewManager(cfg plugin.PluginsConfig, coreCommands []string, stateProvider S
 	qr := NewQueryRegistry()
 	RegisterBuiltinHandlers(qr, reg, stateProvider)
 	return &Manager{
-		cfg:           cfg,
-		registry:      reg,
-		router:        router.NewRouter(coreCommands),
-		hookRegistry:  hooks.NewRegistry(),
-		scopeRegistry: permissions.NewRegistry(),
-		queryRegistry: qr,
+		cfg:            cfg,
+		registry:       reg,
+		router:         router.NewRouter(coreCommands),
+		hookRegistry:   cmdhooks.NewRegistry(),
+		opHookRegistry: ophooks.NewRegistry(),
+		scopeRegistry:  permissions.NewRegistry(),
+		queryRegistry:  qr,
 	}
 }
 
@@ -60,9 +63,14 @@ func (m *Manager) Router() *router.Router {
 	return m.router
 }
 
-// HookRegistry returns the hook registry for constructing the hook executor.
-func (m *Manager) HookRegistry() *hooks.Registry {
+// HookRegistry returns the command hook registry for constructing the hook executor.
+func (m *Manager) HookRegistry() *cmdhooks.Registry {
 	return m.hookRegistry
+}
+
+// OpHookRegistry returns the operation hook registry for constructing the operation hook executor.
+func (m *Manager) OpHookRegistry() *ophooks.Registry {
+	return m.opHookRegistry
 }
 
 // ScopeRegistry returns the scope registry for permission enforcement.
@@ -327,6 +335,27 @@ func (m *Manager) handleConnection(conn *transport.Conn) {
 		}
 	}
 
+	// Register operation hooks if the plugin has the operation:hook scope.
+	if len(reg.OperationHooks) > 0 && m.scopeRegistry.HasScope(reg.Name, permissions.ScopeOperationHook) {
+		pc := m.router.GetPluginConn(reg.Name)
+		if pc == nil {
+			pc = router.NewPluginConn(reg.Name, conn)
+		}
+		patterns := make([]string, len(reg.OperationHooks))
+		for i, oh := range reg.OperationHooks {
+			patterns[i] = oh.Type
+		}
+		// Use the priority from the first operation hook declaration (all share plugin priority).
+		priority := int(reg.Priority)
+		if len(reg.OperationHooks) > 0 && reg.OperationHooks[0].Priority != 0 {
+			priority = int(reg.OperationHooks[0].Priority)
+		}
+		m.opHookRegistry.Register(reg.Name, priority, pc, patterns)
+	} else if len(reg.OperationHooks) > 0 {
+		logger.Warn().Str("plugin", reg.Name).Int("dropped", len(reg.OperationHooks)).
+			Msg("operation hooks dropped due to missing 'operation:hook' scope")
+	}
+
 	m.registry.SetState(reg.Name, StateRegistered)
 
 	grantedStrings := permissions.ScopeStrings(grantedScopes)
@@ -454,6 +483,7 @@ func (m *Manager) readLoop(inst *PluginInstance) {
 				logger.Warn().Str("plugin", inst.Name).Err(err).Msg("plugin connection lost")
 				m.router.UnregisterPlugin(inst.Name)
 				m.hookRegistry.Unregister(inst.Name)
+				m.opHookRegistry.Unregister(inst.Name)
 				m.scopeRegistry.Unregister(inst.Name)
 				if m.eventBus != nil {
 					m.eventBus.Unsubscribe("plugin:" + inst.Name)
@@ -528,6 +558,7 @@ func (m *Manager) handlePluginExit(inst *PluginInstance) {
 	// Unregister commands, hooks, scopes, and event subscriptions.
 	m.router.UnregisterPlugin(inst.Name)
 	m.hookRegistry.Unregister(inst.Name)
+	m.opHookRegistry.Unregister(inst.Name)
 	m.scopeRegistry.Unregister(inst.Name)
 	if m.eventBus != nil {
 		m.eventBus.Unsubscribe("plugin:" + inst.Name)
