@@ -22,6 +22,8 @@ message EnvelopeV1 {
     ServerQueryResponseV1 server_query_response = 61;
     EventSubscribeV1      event_subscribe       = 70;
     EventV1               event                 = 71;
+    OperationHookRequestV1  operation_hook_request  = 80;
+    OperationHookResponseV1 operation_hook_response = 81;
   }
 }
 
@@ -34,6 +36,7 @@ message RegisterV1 {
   int32 priority = 5;                  // plugin priority (lower = higher priority)
   repeated HookDeclV1 hooks = 6;      // hooks this plugin wants to intercept
   repeated string requested_scopes = 7; // scopes the plugin requests (e.g. "read", "write", "hook:pre", "keys:prefix:*")
+  repeated OperationHookDeclV1 operation_hooks = 8; // operation hooks this plugin provides
 }
 
 // CommandDeclV1 declares a single command a plugin can handle.
@@ -171,22 +174,25 @@ message EventSubscribeV1 {
 // EventV1 is sent by the server to subscribed plugins (fire-and-forget).
 // Each event type has its own strongly-typed message in the oneof.
 message EventV1 {
-  string type       = 1; // event type string for subscription routing
-  uint64 timestamp  = 2; // nanoseconds since epoch
+  string type         = 1; // event type string for subscription routing
+  uint64 timestamp    = 2; // nanoseconds since epoch
+  string operation_id = 3; // which operation emitted this event (empty if none)
   oneof data {
-    CommandPreEventV1       command_pre        = 10;
-    CommandPostEventV1      command_post       = 11;
-    ConnectionOpenEventV1   connection_open    = 12;
-    ConnectionCloseEventV1  connection_close   = 13;
-    ServerStartEventV1      server_start       = 14;
-    ServerShutdownEventV1   server_shutdown    = 15;
-    PluginRegisteredEventV1 plugin_registered  = 16;
-    PluginCrashedEventV1    plugin_crashed     = 17;
-    PluginRestartedEventV1  plugin_restarted   = 18;
-    ConfigReloadedEventV1   config_reloaded    = 19;
-    AuthFailedEventV1       auth_failed        = 20;
-    CacheEvictionEventV1    cache_eviction     = 21;
-    LogEntryEventV1         log_entry          = 22;
+    CommandPreEventV1        command_pre        = 10;
+    CommandPostEventV1       command_post       = 11;
+    ConnectionOpenEventV1    connection_open    = 12;
+    ConnectionCloseEventV1   connection_close   = 13;
+    ServerStartEventV1       server_start       = 14;
+    ServerShutdownEventV1    server_shutdown    = 15;
+    PluginRegisteredEventV1  plugin_registered  = 16;
+    PluginCrashedEventV1     plugin_crashed     = 17;
+    PluginRestartedEventV1   plugin_restarted   = 18;
+    ConfigReloadedEventV1    config_reloaded    = 19;
+    AuthFailedEventV1        auth_failed        = 20;
+    CacheEvictionEventV1     cache_eviction     = 21;
+    LogEntryEventV1          log_entry          = 22;
+    OperationStartEventV1    operation_start    = 23;
+    OperationCompleteEventV1 operation_complete = 24;
   }
 }
 
@@ -260,4 +266,48 @@ message LogEntryEventV1 {
   string              message = 2;
   string              caller  = 3; // source file:line
   map<string, string> fields  = 4; // structured log fields
+}
+
+// --- Operation Events ---
+
+message OperationStartEventV1 {
+  string              id        = 1;
+  string              type      = 2; // "command", "connection", "cleanup", etc.
+  string              parent_id = 3;
+  map<string, string> context   = 4; // initial context at start
+}
+
+message OperationCompleteEventV1 {
+  string              id          = 1;
+  string              type        = 2;
+  uint64              elapsed_ns  = 3;
+  string              status      = 4; // "completed" or "failed"
+  string              fail_reason = 5;
+  map<string, string> context     = 6; // final enriched context
+}
+
+// --- Operation Hooks ---
+
+// OperationHookDeclV1 declares an operation hook in the plugin registration.
+message OperationHookDeclV1 {
+  string type     = 1; // operation type to match, "*" for all
+  int32  priority = 2; // lower = fires first
+}
+
+// OperationHookRequestV1 is sent by the server when an operation starts or completes.
+// Start phase: synchronous — server waits for response with context enrichment.
+// Complete phase: fire-and-forget — response is ignored.
+message OperationHookRequestV1 {
+  string              request_id     = 1;
+  string              operation_id   = 2;
+  string              operation_type = 3;
+  string              parent_id      = 4;
+  string              phase          = 5; // "start" or "complete"
+  map<string, string> context        = 6; // filtered for this plugin's visibility
+}
+
+// OperationHookResponseV1 is the plugin's response to an operation start hook.
+message OperationHookResponseV1 {
+  string              request_id     = 1;
+  map<string, string> context_values = 2; // values to merge into operation context
 }

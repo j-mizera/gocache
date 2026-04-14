@@ -29,6 +29,9 @@ const (
 
 	// Event subscription scope.
 	ScopeEvents Scope = "events"
+
+	// Operation hook scope.
+	ScopeOperationHook Scope = "operation:hook"
 )
 
 const keysPrefix = "keys:"
@@ -76,7 +79,7 @@ func ParseScope(s string) (Scope, error) {
 	switch Scope(s) {
 	case ScopeRead, ScopeWrite, ScopeAdmin, ScopeHookPre, ScopeHookPost,
 		ScopeServerQuery, ScopeServerQueryHealth, ScopeServerQueryPlugins, ScopeServerQueryStats,
-		ScopeEvents:
+		ScopeEvents, ScopeOperationHook:
 		return Scope(s), nil
 	}
 
@@ -122,7 +125,7 @@ func Implies(have, need Scope) bool {
 	}
 	switch have {
 	case ScopeAdmin:
-		return need == ScopeWrite || need == ScopeRead || need == ScopeEvents || isServerQueryScope(need)
+		return need == ScopeWrite || need == ScopeRead || need == ScopeEvents || need == ScopeOperationHook || isServerQueryScope(need)
 	case ScopeWrite:
 		return need == ScopeRead
 	}

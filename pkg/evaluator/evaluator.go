@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"gocache/api/events"
+	ops "gocache/api/operations"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/logger"
+	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
 	resphandler "gocache/pkg/resp/handler"
@@ -27,6 +29,14 @@ import (
 // pluginCommandTimeout is the maximum time to wait for a plugin to respond.
 const pluginCommandTimeout = 10 * time.Second
 
+// OpHookExecutor is the interface the evaluator uses to dispatch operation hooks.
+// Defined here to avoid an import cycle with pkg/plugin/ophooks.
+type OpHookExecutor interface {
+	HasAny() bool
+	RunStartHooks(ctx context.Context, op *ops.Operation)
+	RunCompleteHooks(op *ops.Operation)
+}
+
 // Evaluator is the command dispatch pipeline.
 type Evaluator interface {
 	Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result
@@ -34,6 +44,8 @@ type Evaluator interface {
 	SetPluginRouter(r *router.Router)
 	SetHookExecutor(e command.HookExecutor)
 	SetEmitter(e events.Emitter)
+	SetTracker(t *serverOps.Tracker)
+	SetOpHookExecutor(e OpHookExecutor)
 	CoreCommandNames() []string
 }
 
@@ -53,6 +65,8 @@ type BaseEvaluator struct {
 	pluginRouter       *router.Router
 	hookExecutor       command.HookExecutor
 	emitter            events.Emitter
+	tracker            *serverOps.Tracker
+	opHookExecutor     OpHookExecutor
 }
 
 func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) Evaluator {
@@ -93,6 +107,14 @@ func (b *BaseEvaluator) SetHookExecutor(e command.HookExecutor) {
 
 func (b *BaseEvaluator) SetEmitter(e events.Emitter) {
 	b.emitter = e
+}
+
+func (b *BaseEvaluator) SetTracker(t *serverOps.Tracker) {
+	b.tracker = t
+}
+
+func (b *BaseEvaluator) SetOpHookExecutor(e OpHookExecutor) {
+	b.opHookExecutor = e
 }
 
 func (b *BaseEvaluator) CoreCommandNames() []string {
@@ -151,8 +173,54 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		}
 	}
 
-	// Emit command.pre event.
-	if b.emitter != nil {
+	// --- Operation lifecycle ---
+	// When tracker is set, create a command operation that subsumes hookCtx.
+	// When tracker is nil, fall back to the existing hookCtx construction.
+	var (
+		cmdOp   *ops.Operation
+		hookCtx map[string]string
+		startNs int64
+	)
+
+	if b.tracker != nil {
+		// Determine parent operation ID from the connection context.
+		parentID := ""
+		if ctx.OperationID != "" {
+			parentID = ctx.OperationID
+		}
+		cmdOp = b.tracker.Start(ops.TypeCommand, parentID)
+		startNs = cmdOp.StartTime.UnixNano()
+
+		// Inject server context into operation.
+		cmdOp.Enrich(command.StartNs, strconv.FormatInt(startNs, 10))
+		cmdOp.Enrich(command.OperationID, cmdOp.ID)
+		cmdOp.Enrich("_command", op)
+		cmdOp.Enrich("_arg_count", strconv.Itoa(len(args)))
+
+		// Inject REX metadata into operation context.
+		if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
+			metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
+			for k, v := range metadata {
+				cmdOp.Enrich(rex.Prefix+k, v)
+			}
+		}
+
+		// Fire operation start hooks (synchronous — enriches context before work).
+		if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
+			b.opHookExecutor.RunStartHooks(context.Background(), cmdOp)
+		}
+
+		// Emit operation.start event.
+		if b.emitter != nil {
+			b.emitter.Emit(events.NewOperationStart(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, cmdOp.ContextSnapshot(false)))
+		}
+
+		// Emit command.pre event with operation_id.
+		if b.emitter != nil {
+			b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+		}
+	} else if b.emitter != nil {
+		// No tracker — emit command.pre event without operation_id.
 		b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)))
 	}
 
@@ -171,48 +239,85 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		EvalFn:           b.evaluateInternal,
 	}
 
-	// Build hook context with server-injected values.
-	var (
-		hookCtx map[string]string
-		startNs int64
-	)
-	if b.hookExecutor != nil && b.hookExecutor.HasAny() {
-		startNs = time.Now().UnixNano()
-		hookCtx = command.NewHookCtx()
-		hookCtx[command.StartNs] = strconv.FormatInt(startNs, 10)
-
-		// Inject REX metadata into hook context (connection defaults + per-command).
-		if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
-			rex.InjectIntoHookCtx(hookCtx, ctx.RexMeta, ctx.CmdMeta)
+	// --- Command hooks (pre) ---
+	// Hook context is derived from operation context (if available) or built standalone.
+	hasHooks := b.hookExecutor != nil && b.hookExecutor.HasAny()
+	if hasHooks {
+		if cmdOp != nil {
+			// Derive hookCtx from operation context (filtered per plugin happens in executor).
+			hookCtx = cmdOp.ContextSnapshot(false)
+		} else {
+			// Fallback: build hookCtx manually (no operations).
+			startNs = time.Now().UnixNano()
+			hookCtx = command.NewHookCtx()
+			hookCtx[command.StartNs] = strconv.FormatInt(startNs, 10)
+			if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
+				rex.InjectIntoHookCtx(hookCtx, ctx.RexMeta, ctx.CmdMeta)
+			}
 		}
 
-		// Pre-hooks: fire before command execution.
-		// NOTE: context.Background() is used because Evaluate does not yet thread
-		// a per-request context through its signature. See roadmap for the
-		// context-propagation refactor.
 		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args, hookCtx); pre != nil {
 			if pre.Denied {
+				// Denied — clean up operation if active.
+				if cmdOp != nil {
+					cmdOp.Fail("denied: " + pre.DenyReason)
+					if b.opHookExecutor != nil {
+						b.opHookExecutor.RunCompleteHooks(cmdOp)
+					}
+					b.tracker.Fail(cmdOp.ID, "denied: "+pre.DenyReason)
+				}
 				return command.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
 			}
 			hookCtx = pre.Context
+			// Merge pre-hook enrichments back into operation.
+			if cmdOp != nil {
+				for k, v := range hookCtx {
+					cmdOp.Enrich(k, v)
+				}
+			}
 		}
 	}
 
+	// --- Execute command handler ---
 	result := handler(cmdCtx)
 
-	// Post-hooks: fire after command execution.
-	if b.hookExecutor != nil && b.hookExecutor.HasAny() && hookCtx != nil {
-		// Use the locally captured startNs -- not a round-trip through the map.
-		// A plugin could have deleted _start_ns from hookCtx during pre-hooks,
-		// and parsing back out of the map would silently yield 0 elapsed.
+	// --- Command hooks (post) ---
+	if hasHooks && hookCtx != nil {
 		elapsedNs := time.Now().UnixNano() - startNs
 		hookCtx[command.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
 		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr, hookCtx)
 	}
 
-	// Emit command.post event.
-	if b.emitter != nil {
+	// --- Complete operation ---
+	if cmdOp != nil {
+		cmdOp.Complete()
+		elapsedNs := uint64(cmdOp.Duration().Nanoseconds())
+		resultVal, resultErr := resultToHookStrings(result)
+
+		// Inject final timing into context.
+		cmdOp.Enrich(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+		cmdOp.Enrich("_result", resultVal)
+		if resultErr != "" {
+			cmdOp.Enrich("_error", resultErr)
+		}
+
+		// Fire operation complete hooks (async).
+		if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
+			b.opHookExecutor.RunCompleteHooks(cmdOp)
+		}
+
+		// Emit events with operation_id.
+		if b.emitter != nil {
+			status := "completed"
+			failReason := ""
+			b.emitter.Emit(events.NewCommandPost(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+			b.emitter.Emit(events.NewOperationComplete(cmdOp.ID, string(cmdOp.Type), elapsedNs, status, failReason, cmdOp.ContextSnapshot(false)))
+		}
+
+		b.tracker.Complete(cmdOp.ID)
+	} else if b.emitter != nil {
+		// No tracker — emit command.post event without operation_id.
 		var elapsedNs uint64
 		if startNs > 0 {
 			elapsedNs = uint64(time.Now().UnixNano() - startNs)

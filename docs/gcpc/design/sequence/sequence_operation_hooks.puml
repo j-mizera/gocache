@@ -1,0 +1,73 @@
+@startuml sequence_operation_hooks
+!include ../../../design/theme.iuml
+
+mainframe **sd** Operation Hook Execution Flow
+
+participant "Server\n(Evaluator / Worker)" as Server
+participant "Operation\nTracker" as Tracker
+participant "OpHook\nExecutor" as Exec
+participant "OpHook\nRegistry" as Reg
+participant "PluginConn\n(multiplexed)" as PC
+participant "Auth Plugin\n(priority=1)" as Auth
+participant "Gobservability\n(priority=10)" as Gobs
+
+== Operation Start ==
+
+Server -> Tracker : Start(TypeCommand, parentID)
+Tracker --> Server : op = Operation{id: "cmd_42"}
+
+Server -> Server : Inject server context\n_start_ns, _operation_id
+
+Server -> Exec : RunStartHooks(ctx, op)
+
+Exec -> Reg : Match("command")
+Reg --> Exec : [Auth(pri=1), Gobs(pri=10)]
+
+== Synchronous Hook Chain (priority order) ==
+
+Exec -> Exec : op.FilteredContext("auth", false)
+Exec -> PC : OperationHookRequestV1\n{phase: "start", context: filtered}
+PC -> Auth : (synchronous, waits)
+activate Auth
+Auth --> PC : OperationHookResponseV1\n{context_values:\n  shared.username: "john"\n  shared.secret.jwt: "eyJ..."}
+deactivate Auth
+PC --> Exec : response
+
+hnote over Exec : MergeFromPlugin(op, "auth", values)\nop.context now has:\n  shared.username, shared.secret.jwt,\n  auth.cache_hit (auto-prefixed)
+
+Exec -> Exec : op.FilteredContext("gobservability", false)
+Exec -> PC : OperationHookRequestV1\n{phase: "start", context: filtered}
+PC -> Gobs : (synchronous, waits)
+activate Gobs
+Gobs --> PC : OperationHookResponseV1\n{context_values:\n  shared.traceparent: "00-abc-def-01"\n  span_id: "xyz"}
+deactivate Gobs
+PC --> Exec : response
+
+hnote over Exec : MergeFromPlugin(op, "gobservability", values)\nop.context now has:\n  shared.traceparent,\n  gobservability.span_id (auto-prefixed)
+
+Exec --> Server : hooks complete, context enriched
+
+== Work Executes ==
+
+Server -> Server : Command handler runs\nContext fully enriched\nBEFORE any work begins
+
+== Operation Complete ==
+
+Server -> Exec : RunCompleteHooks(op)
+
+Exec ->> Auth : OperationHookRequestV1\n{phase: "complete"}\n(fire-and-forget)
+Exec ->> Gobs : OperationHookRequestV1\n{phase: "complete"}\n(fire-and-forget)
+
+note right of Gobs
+  Gobservability finalizes OTEL span
+  Context available (filtered):
+    shared.username = "john"
+    shared.traceparent = "00-abc-def-01"
+  NOT in span attributes:
+    shared.secret.jwt (redacted)
+    auth.cache_hit (private to auth)
+end note
+
+Server -> Tracker : Complete("cmd_42")
+
+@enduml

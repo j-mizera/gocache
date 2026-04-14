@@ -37,6 +37,9 @@ const (
 	CacheEviction Type = "cache.eviction"
 
 	LogEntry Type = "log.entry"
+
+	OperationStart    Type = "operation.start"
+	OperationComplete Type = "operation.complete"
 )
 
 // Event is a structured notification emitted by the server.
@@ -167,6 +170,32 @@ func newEventProto(t Type) *gcpc.EventV1 {
 		Type:      string(t),
 		Timestamp: uint64(time.Now().UnixNano()),
 	}
+}
+
+// WithOperationID returns a copy of the event with the operation_id set.
+func (e Event) WithOperationID(id string) Event {
+	e.Proto.OperationId = id
+	return e
+}
+
+// NewOperationStart creates an operation.start event.
+func NewOperationStart(id, opType, parentID string, ctx map[string]string) Event {
+	e := newEventProto(OperationStart)
+	e.Data = &gcpc.EventV1_OperationStart{OperationStart: &gcpc.OperationStartEventV1{
+		Id: id, Type: opType, ParentId: parentID, Context: ctx,
+	}}
+	e.OperationId = id
+	return Event{Proto: e}
+}
+
+// NewOperationComplete creates an operation.complete event.
+func NewOperationComplete(id, opType string, elapsedNs uint64, status, failReason string, ctx map[string]string) Event {
+	e := newEventProto(OperationComplete)
+	e.Data = &gcpc.EventV1_OperationComplete{OperationComplete: &gcpc.OperationCompleteEventV1{
+		Id: id, Type: opType, ElapsedNs: elapsedNs, Status: status, FailReason: failReason, Context: ctx,
+	}}
+	e.OperationId = id
+	return Event{Proto: e}
 }
 
 // Emitter is the interface server components use to emit events.
