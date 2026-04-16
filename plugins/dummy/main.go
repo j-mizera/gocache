@@ -23,7 +23,7 @@ func (d *dummyPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (d *dummyPlugin) OnShutdown(_ context.Context) error {
-	d.log.Info().Msg("shutting down")
+	d.log.InfoNoCtx().Msg("shutting down")
 	return nil
 }
 
@@ -34,7 +34,7 @@ func main() {
 	defer cancel()
 
 	if err := pluginsdk.Run(ctx, &dummyPlugin{log: plog}); err != nil {
-		plog.Error().Err(err).Msg("plugin error")
+		plog.ErrorNoCtx().Err(err).Msg("plugin error")
 		os.Exit(1)
 	}
 }

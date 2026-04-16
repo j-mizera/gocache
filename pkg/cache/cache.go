@@ -130,7 +130,7 @@ func (c *Cache) SetMemoryLimit(maxMemoryMB int64, policy EvictionPolicy) {
 		c.maxBytes = 0
 	}
 	c.evictionPolicy = policy
-	logger.Info().Int64("maxBytes", c.maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
+	logger.InfoNoCtx().Int64("maxBytes", c.maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
 
 	// Evict if the new limit is below current usage.
 	if c.maxBytes > 0 && c.usedBytes > c.maxBytes && c.evictionPolicy == EvictionLRU {
@@ -177,7 +177,7 @@ func (c *Cache) RawSet(key string, value interface{}, expiration int64) error {
 			case EvictionLRU:
 				c.evictLRU(delta)
 			case EvictionNone:
-				logger.Warn().Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
+				logger.WarnNoCtx().Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
 				return ErrOutOfMemory
 			}
 		}
@@ -249,7 +249,7 @@ func (c *Cache) evictLRU(delta int64) {
 			break
 		}
 		evictKey := elem.Value.(string)
-		logger.Debug().Str("key", evictKey).Msg("lru eviction")
+		logger.DebugNoCtx().Str("key", evictKey).Msg("lru eviction")
 		c.delete(evictKey)
 	}
 }
@@ -315,7 +315,7 @@ func (c *Cache) RawTTL(key string) int64 {
 }
 
 func (c *Cache) Clear() {
-	logger.Info().Int("items", len(c.items)).Msg("cache cleared")
+	logger.InfoNoCtx().Int("items", len(c.items)).Msg("cache cleared")
 	c.items = make(map[string]*Entry)
 	c.ttl = make(map[string]int64)
 	c.lruList.Init()

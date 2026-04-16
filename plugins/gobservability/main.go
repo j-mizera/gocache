@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gocache/api/command"
+	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
 	"gocache/sdk/pluginsdk"
 )
@@ -39,16 +40,16 @@ func (p *gobservabilityPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (p *gobservabilityPlugin) OnShutdown(ctx context.Context) error {
-	p.log.Info().Msg("shutting down")
+	p.log.InfoNoCtx().Msg("shutting down")
 	if p.tracer != nil {
 		if err := p.tracer.Shutdown(ctx); err != nil {
-			p.log.Error().Err(err).Msg("tracer shutdown error")
+			p.log.ErrorNoCtx().Err(err).Msg("tracer shutdown error")
 		}
 	}
 	return p.server.Shutdown(ctx)
 }
 
-// HookPlugin interface.
+// HookPlugin interface — Prometheus metrics only (no OTEL spans).
 
 func (p *gobservabilityPlugin) Hooks() []pluginsdk.HookDecl {
 	return []pluginsdk.HookDecl{
@@ -69,16 +70,71 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 	isError := req.ResultError != ""
 	p.collector.Record(req.Command, elapsedNs, isError)
 
-	// Create OTEL span if tracer is enabled.
-	if p.tracer != nil {
-		var startNs uint64
-		if v, ok := req.Context[command.StartNs]; ok {
-			startNs, _ = strconv.ParseUint(v, 10, 64)
-		}
-		p.tracer.RecordCommand(req.Command, req.Args, elapsedNs, startNs, isError, req.ResultError, req.Metadata)
+	return nil
+}
+
+// OperationHookPlugin interface — OTEL tracing for ALL operations.
+
+func (p *gobservabilityPlugin) OperationHooks() []pluginsdk.OperationHookDecl {
+	return []pluginsdk.OperationHookDecl{
+		{Type: "*", Priority: 10},
+	}
+}
+
+func (p *gobservabilityPlugin) HandleOperationHook(_ context.Context, req *pluginsdk.OperationHookRequest) *pluginsdk.OperationHookResponse {
+	if req.Phase == "start" {
+		return p.onOperationStart(req)
+	}
+	p.onOperationComplete(req)
+	return nil
+}
+
+func (p *gobservabilityPlugin) onOperationStart(req *pluginsdk.OperationHookRequest) *pluginsdk.OperationHookResponse {
+	if p.tracer == nil {
+		return nil
 	}
 
-	return nil
+	// Start a span — tracer reads traceparent from context or generates one.
+	traceparent := p.tracer.StartOperation(req.OperationID, req.OperationType, req.Context)
+
+	// Write the canonical traceparent back so all downstream sees it.
+	return &pluginsdk.OperationHookResponse{
+		ContextValues: map[string]string{
+			"shared.traceparent": traceparent,
+		},
+	}
+}
+
+func (p *gobservabilityPlugin) onOperationComplete(req *pluginsdk.OperationHookRequest) {
+	if p.tracer == nil {
+		return
+	}
+
+	status := "completed"
+	failReason := ""
+	if v, ok := req.Context["_error"]; ok && v != "" {
+		status = "failed"
+		failReason = v
+	}
+
+	p.tracer.CompleteOperation(req.OperationID, status, failReason, req.Context)
+}
+
+// EventPlugin interface — subscribe to log.entry events for OTEL log export.
+
+func (p *gobservabilityPlugin) EventTypes() []string {
+	return []string{"log.entry"}
+}
+
+func (p *gobservabilityPlugin) HandleEvent(_ context.Context, evt *gcpc.EventV1) {
+	if p.tracer == nil {
+		return
+	}
+	logEntry := evt.GetLogEntry()
+	if logEntry == nil {
+		return
+	}
+	p.tracer.RecordLog(evt.OperationId, logEntry.Level, logEntry.Message, logEntry.Fields)
 }
 
 // QueryPlugin interface.
@@ -90,7 +146,13 @@ func (p *gobservabilityPlugin) SetSession(s *pluginsdk.Session) {
 // ScopePlugin interface.
 
 func (p *gobservabilityPlugin) Scopes() []string {
-	return []string{"hook:post", "server:query:health", "server:query:plugins"}
+	return []string{
+		"hook:post",
+		"operation:hook",
+		"events",
+		"server:query:health",
+		"server:query:plugins",
+	}
 }
 
 func main() {
@@ -114,12 +176,12 @@ func main() {
 		if serviceName == "" {
 			serviceName = "gocache"
 		}
-		tracer, err := NewTracer(otlpEndpoint, serviceName)
+		tracer, err := NewTracer(otlpEndpoint, serviceName, plog)
 		if err != nil {
-			plog.Error().Err(err).Msg("failed to initialize OTEL tracer")
+			plog.ErrorNoCtx().Err(err).Msg("failed to initialize OTEL tracer")
 		} else {
 			plugin.tracer = tracer
-			plog.Info().Str("endpoint", otlpEndpoint).Msg("OTEL tracing enabled")
+			plog.InfoNoCtx().Str("endpoint", otlpEndpoint).Msg("OTEL tracing enabled")
 		}
 	}
 
@@ -136,9 +198,9 @@ func main() {
 	}
 
 	go func() {
-		plog.Info().Str("addr", port).Msg("metrics server listening")
+		plog.InfoNoCtx().Str("addr", port).Msg("metrics server listening")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			plog.Error().Err(err).Msg("metrics server error")
+			plog.ErrorNoCtx().Err(err).Msg("metrics server error")
 		}
 	}()
 
@@ -148,7 +210,7 @@ func main() {
 	defer cancel()
 
 	if err := pluginsdk.Run(ctx, plugin); err != nil {
-		plog.Error().Err(err).Msg("plugin error")
+		plog.ErrorNoCtx().Err(err).Msg("plugin error")
 		os.Exit(1)
 	}
 }

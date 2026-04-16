@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
@@ -186,6 +187,12 @@ func Run(ctx context.Context, p Plugin) error {
 	tc := transport.NewConn(conn)
 	defer tc.Close()
 
+	// Track handler goroutines so Run waits for them before returning —
+	// prevents a concurrent OnShutdown from tearing down state while a
+	// handler is still using it.
+	var handlerWg sync.WaitGroup
+	defer handlerWg.Wait()
+
 	// Detect interface support.
 	cp, isCommandPlugin := p.(CommandPlugin)
 	hp, isHookPlugin := p.(HookPlugin)
@@ -272,7 +279,7 @@ func Run(ctx context.Context, p Plugin) error {
 		return fmt.Errorf("registration rejected: %s", ack.Reason)
 	}
 	if len(ack.GrantedScopes) > 0 {
-		pluginLog.Info().Strs("scopes", ack.GrantedScopes).Msg("granted scopes")
+		pluginLog.InfoNoCtx().Strs("scopes", ack.GrantedScopes).Msg("granted scopes")
 	}
 	// Log denied scopes so the plugin author knows which features will be unavailable.
 	if isScopePlugin {
@@ -287,7 +294,7 @@ func Run(ctx context.Context, p Plugin) error {
 			}
 		}
 		if len(denied) > 0 {
-			pluginLog.Warn().Strs("denied", denied).Msg("scopes denied — features requiring these scopes will return errors")
+			pluginLog.WarnNoCtx().Strs("denied", denied).Msg("scopes denied — features requiring these scopes will return errors")
 		}
 	}
 
@@ -349,7 +356,9 @@ func Run(ctx context.Context, p Plugin) error {
 				continue
 			}
 			req := env.GetCommandRequest()
+			handlerWg.Add(1)
 			go func() {
+				defer handlerWg.Done()
 				result := cp.HandleCommand(ctx, req.Command, req.Args, req.Metadata)
 				var protoResult *gcpc.ResultV1
 				if result != nil {
@@ -359,7 +368,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewCommandResponse(req.RequestId, protoResult)
 				if err := tc.Send(resp); err != nil {
-					pluginLog.Error().Err(err).Str("command", req.Command).Msg("failed to send command response")
+					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command).Msg("failed to send command response")
 				}
 			}()
 
@@ -384,17 +393,25 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewOperationHookResponse(req.RequestId, ctxValues)
 				if err := tc.Send(resp); err != nil {
-					pluginLog.Error().Err(err).Msg("failed to send operation hook response")
+					pluginLog.ErrorNoCtx().Err(err).Msg("failed to send operation hook response")
 				}
 			} else {
 				// Complete phase: fire-and-forget.
-				go ohp.HandleOperationHook(ctx, hookReq)
+				handlerWg.Add(1)
+				go func() {
+					defer handlerWg.Done()
+					ohp.HandleOperationHook(ctx, hookReq)
+				}()
 			}
 
 		case *gcpc.EnvelopeV1_Event:
 			if isEventPlugin {
 				evt := env.GetEvent()
-				go ep.HandleEvent(ctx, evt)
+				handlerWg.Add(1)
+				go func() {
+					defer handlerWg.Done()
+					ep.HandleEvent(ctx, evt)
+				}()
 			}
 
 		case *gcpc.EnvelopeV1_ServerQueryResponse:
@@ -406,7 +423,9 @@ func Run(ctx context.Context, p Plugin) error {
 				continue
 			}
 			req := env.GetHookRequest()
+			handlerWg.Add(1)
 			go func() {
+				defer handlerWg.Done()
 				hookReq := &HookRequest{
 					Phase:       HookPhase(req.Phase),
 					Command:     req.Command,
@@ -427,7 +446,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewHookResponse(req.RequestId, deny, denyReason, ctxValues)
 				if err := tc.Send(resp); err != nil {
-					pluginLog.Error().Err(err).Str("command", req.Command).Msg("failed to send hook response")
+					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command).Msg("failed to send hook response")
 				}
 			}()
 		}

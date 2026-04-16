@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"sync/atomic"
@@ -11,11 +12,13 @@ import (
 
 	"gocache/api/events"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
+	"gocache/pkg/logcollector"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
 	"gocache/pkg/plugin/cmdhooks"
@@ -55,7 +58,7 @@ func main() {
 	if err != nil {
 		// Initialize logger with default level for fatal message
 		logger.Init("info")
-		logger.Fatal().Err(err).Msg("failed to load configuration")
+		logger.FatalNoCtx().Err(err).Msg("failed to load configuration")
 	}
 
 	// Wrap the config in an atomic.Pointer so the fsnotify callback goroutine
@@ -64,63 +67,147 @@ func main() {
 	cfgPtr.Store(initialCfg)
 	cfg := initialCfg
 
-	// Initialize structured logging
-	logger.Init(cfg.Server.LogLevel)
-
-	logger.Info().Str("version", version.String()).Msg("starting gocache server")
-	if cfgFile := v.ConfigFileUsed(); cfgFile != "" {
-		logger.Info().Str("file", cfgFile).Msg("config loaded")
+	// Capture server logs via pipe for the log collector.
+	// Logs go to both the pipe (for event emission) and stderr (for console).
+	logPipeR, logPipeW, err := os.Pipe()
+	if err != nil {
+		logger.Init("info")
+		logger.FatalNoCtx().Err(err).Msg("failed to create log pipe")
 	}
-	logger.Info().Str("addr", cfg.Server.GetAddr()).Msg("listening on")
+	logWriter := io.MultiWriter(logPipeW, os.Stderr)
+	logger.InitWithWriter(logWriter, cfg.Server.LogLevel)
 
-	// Initialize core components
+	logger.InfoNoCtx().Str("version", version.String()).Msg("starting gocache server")
+	if cfgFile := v.ConfigFileUsed(); cfgFile != "" {
+		logger.InfoNoCtx().Str("file", cfgFile).Msg("config loaded")
+	}
+	logger.InfoNoCtx().Str("addr", cfg.Server.GetAddr()).Msg("listening on")
+
+	// Initialize core components (no operations yet — infrastructure setup).
 	cacheInstance := cache.NewWithConfig(
 		cfg.Memory.MaxMemoryMB,
 		cache.ParseEvictionPolicy(cfg.Memory.EvictionPolicy),
 	)
 	engineInstance := engine.New(cacheInstance)
+	blockingRegistry := blocking.NewRegistry()
+	watchManager := watch.NewManager()
+	cacheInstance.OnMutate = watchManager.NotifyMutation
+	cacheInstance.OnMutateAll = watchManager.NotifyAll
 
-	// Load snapshot if configured
+	// Initialize infrastructure: tracker + event bus + log collector.
+	tracker := serverOps.NewTracker()
+	eventBus := serverEvents.NewBus()
+	logCollector := logcollector.New(eventBus)
+	logCollector.AddSource("server", logPipeR)
+
+	// Initialize the server (before plugins so we have CoreCommandNames).
+	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Persistence.SnapshotFile, cfg.Server.RequirePass, blockingRegistry, watchManager)
+	srv.SetEmitter(eventBus)
+	srv.SetTracker(tracker)
+
+	// Set up signal handling.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---
+	var pluginManager *pluginmgr.Manager
+	var opHookExec *ophooks.Executor
+	if cfg.Plugins.Enabled {
+		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
+		pluginManager.SetLogCollector(logCollector)
+		if err := pluginManager.Start(ctx); err != nil {
+			logger.FatalNoCtx().Err(err).Msg("failed to start plugin manager")
+		}
+		pluginManager.SetEventBus(eventBus)
+		srv.SetPluginRouter(pluginManager.Router())
+		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
+		opHookExec = ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout)
+		srv.SetOpHookExecutor(opHookExec)
+	}
+
+	// --- ServerBootstrap operation (after plugins, so operation hooks can enrich) ---
+	bootOp := tracker.Start(ops.TypeStartup, "")
+	bootOp.Enrich("_version", version.String())
+	bootOp.Enrich("_addr", cfg.Server.GetAddr())
+	if opHookExec != nil && opHookExec.HasAny() {
+		opHookExec.RunStartHooks(ctx, bootOp)
+	}
+	eventBus.Emit(events.NewOperationStart(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
+
+	// LoadSnapshot operation.
 	if cfg.Persistence.LoadOnStartup {
+		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
+		snapOp.Enrich("_file", cfg.Persistence.SnapshotFile)
+		snapOp.Enrich("_trigger", "startup")
+		if opHookExec != nil && opHookExec.HasAny() {
+			opHookExec.RunStartHooks(ctx, snapOp)
+		}
+		eventBus.Emit(events.NewOperationStart(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
 		if err := persistence.LoadSnapshot(cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
-			logger.Warn().Err(err).Msg("failed to load snapshot")
+			logger.Warn(snapOp).Err(err).Msg("failed to load snapshot")
+			snapOp.Fail(err.Error())
+			if opHookExec != nil {
+				opHookExec.RunCompleteHooks(snapOp)
+			}
+			eventBus.Emit(events.NewOperationComplete(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "failed", err.Error(), snapOp.ContextSnapshot(false)))
+			tracker.Fail(snapOp.ID, err.Error())
 		} else {
-			logger.Info().Str("file", cfg.Persistence.SnapshotFile).Msg("snapshot loaded")
+			logger.Info(snapOp).Str("file", cfg.Persistence.SnapshotFile).Msg("snapshot loaded")
+			snapOp.Complete()
+			if opHookExec != nil {
+				opHookExec.RunCompleteHooks(snapOp)
+			}
+			eventBus.Emit(events.NewOperationComplete(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "completed", "", snapOp.ContextSnapshot(false)))
+			tracker.Complete(snapOp.ID)
 		}
 	}
 
-	// Start engine loop
+	// Start engine.
 	go engineInstance.Run()
 
-	// Initialize and start workers
+	// Initialize and start workers.
 	snapshotWorker := workers.NewSnapshotWorker(
 		cacheInstance, engineInstance,
 		cfg.Persistence.SnapshotInterval,
 		cfg.Persistence.SnapshotFile,
 	)
 	cleanupWorker := workers.NewCleanupWorker(cacheInstance, engineInstance, cfg.Workers.CleanupInterval)
+	snapshotWorker.SetTracker(tracker)
+	snapshotWorker.SetEmitter(eventBus)
+	if opHookExec != nil {
+		snapshotWorker.SetOpHookExecutor(opHookExec)
+		cleanupWorker.SetOpHookExecutor(opHookExec)
+	}
+	cleanupWorker.SetTracker(tracker)
+	cleanupWorker.SetEmitter(eventBus)
 	snapshotWorker.Start()
 	cleanupWorker.Start()
 
-	// Initialize server-wide event bus (before hot reload callback which captures it).
-	eventBus := serverEvents.NewBus()
-
-	// Hot reload: watch config file for changes and apply live-reloadable fields.
-	// The callback runs in the fsnotify goroutine, so config swaps use
-	// atomic.Pointer to avoid races with the main goroutine.
+	// Hot reload: config changes create config_reload operations.
 	v.WatchConfig()
 	v.OnConfigChange(func(e fsnotify.Event) {
+		reloadOp := tracker.Start(ops.TypeConfigReload, "")
+		reloadOp.Enrich("_file", e.Name)
+		if opHookExec != nil && opHookExec.HasAny() {
+			opHookExec.RunStartHooks(context.Background(), reloadOp)
+		}
+
 		newCfg, err := config.Reload(v)
 		if err != nil {
-			logger.Warn().Err(err).Msg("failed to parse updated config")
+			logger.Warn(reloadOp).Err(err).Msg("failed to parse updated config")
+			reloadOp.Fail(err.Error())
+			if opHookExec != nil {
+				opHookExec.RunCompleteHooks(reloadOp)
+			}
+			eventBus.Emit(events.NewOperationComplete(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "failed", err.Error(), reloadOp.ContextSnapshot(false)))
+			tracker.Fail(reloadOp.ID, err.Error())
 			return
 		}
-		logger.Info().Str("file", e.Name).Msg("config reloaded")
-		eventBus.Emit(events.NewConfigReloaded(e.Name))
+		logger.Info(reloadOp).Str("file", e.Name).Msg("config reloaded")
 
 		prev := cfgPtr.Load()
 		if newCfg.Server.GetAddr() != prev.Server.GetAddr() {
-			logger.Warn().Msg("server address/port changes require a restart")
+			logger.Warn(reloadOp).Msg("server address/port changes require a restart")
 		}
 
 		snapshotWorker.UpdateInterval(newCfg.Persistence.SnapshotInterval)
@@ -132,56 +219,29 @@ func main() {
 		)
 
 		cfgPtr.Store(newCfg)
+		reloadOp.Complete()
+		if opHookExec != nil {
+			opHookExec.RunCompleteHooks(reloadOp)
+		}
+		eventBus.Emit(events.NewOperationComplete(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "completed", "", reloadOp.ContextSnapshot(false)))
+		tracker.Complete(reloadOp.ID)
 	})
 
-	// Initialize blocking registry for BLPOP/BRPOP
-	blockingRegistry := blocking.NewRegistry()
-
-	// Initialize watch manager for WATCH/UNWATCH optimistic locking
-	watchManager := watch.NewManager()
-
-	// Wire mutation notifications from cache to watch manager
-	cacheInstance.OnMutate = watchManager.NotifyMutation
-	cacheInstance.OnMutateAll = watchManager.NotifyAll
-
-	// Initialize operation tracker.
-	tracker := serverOps.NewTracker()
-
-	// Initialize the server
-	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Persistence.SnapshotFile, cfg.Server.RequirePass, blockingRegistry, watchManager)
-	srv.SetEmitter(eventBus)
-	srv.SetTracker(tracker)
-
-	// Set up signal handling for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Initialize plugin system (optional — disabled by default)
-	var pluginManager *pluginmgr.Manager
-	if cfg.Plugins.Enabled {
-		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
-		if err := pluginManager.Start(ctx); err != nil {
-			logger.Fatal().Err(err).Msg("failed to start plugin manager")
-		}
-		pluginManager.SetEventBus(eventBus)
-		srv.SetPluginRouter(pluginManager.Router())
-		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
-		srv.SetOpHookExecutor(ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout))
+	// ServerBootstrap complete.
+	bootOp.Complete()
+	if opHookExec != nil {
+		opHookExec.RunCompleteHooks(bootOp)
 	}
-
-	// Wire tracker and emitter to workers so background tasks become operations.
-	snapshotWorker.SetTracker(tracker)
-	snapshotWorker.SetEmitter(eventBus)
-	cleanupWorker.SetTracker(tracker)
-	cleanupWorker.SetEmitter(eventBus)
+	eventBus.Emit(events.NewOperationComplete(bootOp.ID, string(bootOp.Type), uint64(bootOp.Duration().Nanoseconds()), "completed", "", bootOp.ContextSnapshot(false)))
+	tracker.Complete(bootOp.ID)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	// Start server in a goroutine
+	// Start server in a goroutine.
 	serverErrChan := make(chan error, 1)
 	go func() {
-		logger.Info().Msg("server ready to accept connections")
+		logger.InfoNoCtx().Msg("server ready to accept connections")
 		if err := srv.Start(ctx); err != nil && err != context.Canceled {
 			serverErrChan <- err
 		}
@@ -190,13 +250,17 @@ func main() {
 	// Wait for shutdown signal or server error
 	select {
 	case sig := <-sigChan:
-		logger.Info().Str("signal", sig.String()).Msg("received signal")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager)
+		logger.InfoNoCtx().Str("signal", sig.String()).Msg("received signal")
+		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, sig.String())
 	case err := <-serverErrChan:
-		logger.Error().Err(err).Msg("server error")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager)
+		logger.ErrorNoCtx().Err(err).Msg("server error")
+		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, "error: "+err.Error())
 		os.Exit(1)
 	}
+
+	// Close the log pipe so the collector reader gets EOF.
+	logPipeW.Close()
+	logCollector.Wait()
 }
 
 func handleShutdown(
@@ -208,39 +272,67 @@ func handleShutdown(
 	cfg *config.Config,
 	blockingRegistry *blocking.Registry,
 	pluginManager *pluginmgr.Manager,
+	tracker *serverOps.Tracker,
+	eventBus *serverEvents.Bus,
+	opHookExec *ophooks.Executor,
+	reason string,
 ) {
-	logger.Info().Msg("starting graceful shutdown sequence")
-	srv.EmitEvent(events.NewServerShutdown("signal"))
+	// Create shutdown operation — plugins see this via operation hooks
+	// before they are shut down.
+	var shutdownOp *ops.Operation
+	if tracker != nil {
+		shutdownOp = tracker.Start(ops.TypeShutdown, "")
+		shutdownOp.Enrich("_reason", reason)
+		if opHookExec != nil && opHookExec.HasAny() {
+			opHookExec.RunStartHooks(context.Background(), shutdownOp)
+		}
+		eventBus.Emit(events.NewServerShutdown(reason).WithOperationID(shutdownOp.ID))
+	}
+
+	logger.Info(shutdownOp).Msg("starting graceful shutdown sequence")
 
 	// Unblock all waiting BLPOP/BRPOP clients first so their connections can close.
 	blockingRegistry.Shutdown()
 
 	shutdownTimeout := 10 * time.Second
-	logger.Info().Str("step", "1/6").Dur("timeout", shutdownTimeout).Msg("shutting down server")
+	logger.Info(shutdownOp).Str("step", "1/6").Dur("timeout", shutdownTimeout).Msg("shutting down server")
 	if err := srv.Shutdown(shutdownTimeout); err != nil {
-		logger.Warn().Err(err).Msg("server shutdown error")
+		logger.Warn(shutdownOp).Err(err).Msg("server shutdown error")
 	}
 
-	// Shutdown plugins before workers so plugin hooks can still fire.
+	// Fire operation complete hooks BEFORE shutting down plugins
+	// so gobservability can finalize the shutdown span.
+	if shutdownOp != nil && opHookExec != nil {
+		opHookExec.RunCompleteHooks(shutdownOp)
+	}
+
+	// Shutdown plugins.
 	if pluginManager != nil {
-		logger.Info().Str("step", "2/6").Msg("shutting down plugins")
+		logger.Info(shutdownOp).Str("step", "2/6").Msg("shutting down plugins")
 		pluginManager.Shutdown(cfg.Plugins.ShutdownTimeout)
 	}
 
-	logger.Info().Str("step", "3/6").Msg("stopping background workers")
+	logger.Info(shutdownOp).Str("step", "3/6").Msg("stopping background workers")
 	snapshotWorker.Stop()
 	cleanupWorker.Stop()
 
-	logger.Info().Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
+	logger.Info(shutdownOp).Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
 	if err := persistence.SaveSnapshot(cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
-		logger.Warn().Err(err).Msg("failed to save final snapshot")
+		logger.Warn(shutdownOp).Err(err).Msg("failed to save final snapshot")
 	} else {
-		logger.Info().Msg("final snapshot saved successfully")
+		logger.Info(shutdownOp).Msg("final snapshot saved successfully")
 	}
 
-	logger.Info().Str("step", "5/6").Msg("stopping engine")
+	logger.Info(shutdownOp).Str("step", "5/6").Msg("stopping engine")
 	engineInstance.Stop()
 
-	logger.Info().Str("step", "6/6").Msg("shutdown complete")
-	logger.Info().Msg("gocache server stopped gracefully")
+	if shutdownOp != nil {
+		shutdownOp.Complete()
+		if eventBus != nil {
+			eventBus.Emit(events.NewOperationComplete(shutdownOp.ID, string(shutdownOp.Type), uint64(shutdownOp.Duration().Nanoseconds()), "completed", "", shutdownOp.ContextSnapshot(false)))
+		}
+		tracker.Complete(shutdownOp.ID)
+	}
+
+	logger.Info(shutdownOp).Str("step", "6/6").Msg("shutdown complete")
 }

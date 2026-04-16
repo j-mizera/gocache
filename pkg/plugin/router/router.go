@@ -118,7 +118,7 @@ func (pc *PluginConn) readLoop() {
 			select {
 			case <-pc.done:
 			default:
-				logger.Debug().Str("plugin", pc.Name).Err(err).Msg("plugin conn read error")
+				logger.DebugNoCtx().Str("plugin", pc.Name).Err(err).Msg("plugin conn read error")
 			}
 			return
 		}
@@ -264,7 +264,7 @@ func (r *Router) RegisterPlugin(name string, conn *transport.Conn, decls []*gcpc
 	}
 	r.pluginRoutes[name] = keys
 
-	logger.Info().Str("plugin", name).Int("commands", len(toAdd)).Msg("plugin commands registered")
+	logger.InfoNoCtx().Str("plugin", name).Int("commands", len(toAdd)).Msg("plugin commands registered")
 	return nil
 }
 
@@ -287,7 +287,7 @@ func (r *Router) UnregisterPlugin(name string) {
 	}
 
 	if len(keys) > 0 {
-		logger.Info().Str("plugin", name).Int("commands", len(keys)).Msg("plugin commands unregistered")
+		logger.InfoNoCtx().Str("plugin", name).Int("commands", len(keys)).Msg("plugin commands unregistered")
 	}
 }
 

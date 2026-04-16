@@ -51,7 +51,7 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 		Handler: handler,
 	}
 
-	logger.Info().Str("subscriber", name).Int("types", len(types)).Msg("event subscription registered")
+	logger.InfoNoCtx().Str("subscriber", name).Int("types", len(types)).Msg("event subscription registered")
 }
 
 // Unsubscribe removes a subscriber.
@@ -89,13 +89,21 @@ func (b *Bus) Emit(evt apiEvents.Event) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Error().Str("subscriber", s.Name).Str("event", string(evtType)).
+					logger.ErrorNoCtx().Str("subscriber", s.Name).Str("event", string(evtType)).
 						Interface("panic", r).Msg("event handler panicked")
 				}
 			}()
 			s.Handler(evt)
 		}()
 	}
+}
+
+// HasSubscriber returns true if a subscriber with the given name is registered.
+func (b *Bus) HasSubscriber(name string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	_, ok := b.subscribers[name]
+	return ok
 }
 
 // HasSubscribers returns true if any subscribers are registered. Zero-cost guard.

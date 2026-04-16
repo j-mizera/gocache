@@ -49,17 +49,21 @@ type Server struct {
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
+	tracker := serverOps.NewTracker()
+	ev := evaluator.New(c, e, snapshotFile, requirePass, br, wm)
+	ev.SetTracker(tracker)
 	return &Server{
 		addr:             addr,
 		cache:            c,
 		engine:           e,
-		evaluator:        evaluator.New(c, e, snapshotFile, requirePass, br, wm),
+		evaluator:        ev,
 		shutdownChan:     make(chan struct{}),
 		requirePass:      requirePass,
 		blockingRegistry: br,
 		watchManager:     wm,
 		startTime:        time.Now(),
 		emitter:          events.NoopEmitter{},
+		tracker:          tracker,
 	}
 }
 
@@ -123,7 +127,7 @@ func (srv *Server) Start(ctx context.Context) error {
 	}
 	srv.listener = listener
 
-	logger.Info().Str("addr", srv.addr).Msg("server listening")
+	logger.InfoNoCtx().Str("addr", srv.addr).Msg("server listening")
 
 	// Accept connections in a goroutine
 	go srv.acceptConnections()
@@ -150,7 +154,7 @@ func (srv *Server) acceptConnections() {
 			if shuttingDown {
 				return
 			}
-			logger.Error().Err(err).Msg("failed to accept connection")
+			logger.ErrorNoCtx().Err(err).Msg("failed to accept connection")
 			continue
 		}
 
@@ -163,7 +167,7 @@ func (srv *Server) acceptConnections() {
 func (srv *Server) Shutdown(timeout time.Duration) error {
 	var err error
 	srv.shutdownOnce.Do(func() {
-		logger.Info().Msg("initiating graceful shutdown")
+		logger.InfoNoCtx().Msg("initiating graceful shutdown")
 
 		// Mark as shutting down
 		srv.mu.Lock()
@@ -173,7 +177,7 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 		// Stop accepting new connections
 		if srv.listener != nil {
 			if err := srv.listener.Close(); err != nil {
-				logger.Warn().Err(err).Msg("listener close error")
+				logger.WarnNoCtx().Err(err).Msg("listener close error")
 			}
 		}
 
@@ -186,9 +190,9 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 
 		select {
 		case <-done:
-			logger.Info().Msg("all connections closed gracefully")
+			logger.InfoNoCtx().Msg("all connections closed gracefully")
 		case <-time.After(timeout):
-			logger.Warn().Msg("shutdown timeout reached, forcing close")
+			logger.WarnNoCtx().Msg("shutdown timeout reached, forcing close")
 		}
 
 		// Signal shutdown complete
@@ -204,23 +208,16 @@ func (srv *Server) handleConnection(conn net.Conn) {
 	remoteAddr := conn.RemoteAddr().String()
 	connStart := time.Now()
 
-	// Create connection operation if tracker is set.
-	var connOp *ops.Operation
-	if srv.tracker != nil {
-		connOp = srv.tracker.Start(ops.TypeConnection, "")
-		connOp.Enrich("_remote_addr", remoteAddr)
-		if srv.opHookExecutor != nil {
-			srv.opHookExecutor.RunStartHooks(context.Background(), connOp)
-		}
-		srv.emitter.Emit(events.NewConnectionOpen(remoteAddr).WithOperationID(connOp.ID))
-	} else {
-		srv.emitter.Emit(events.NewConnectionOpen(remoteAddr))
+	// Create connection operation.
+	connOp := srv.tracker.Start(ops.TypeConnection, "")
+	connOp.Enrich("_remote_addr", remoteAddr)
+	if srv.opHookExecutor != nil {
+		srv.opHookExecutor.RunStartHooks(context.Background(), connOp)
 	}
+	srv.emitter.Emit(events.NewConnectionOpen(remoteAddr).WithOperationID(connOp.ID))
 
 	ctx := clientctx.New()
-	if connOp != nil {
-		ctx.OperationID = connOp.ID
-	}
+	ctx.OperationID = connOp.ID
 
 	defer func() {
 		if srv.watchManager != nil {
@@ -228,16 +225,12 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		}
 		conn.Close()
 		srv.connectionWg.Done()
-		if connOp != nil {
-			connOp.Complete()
-			if srv.opHookExecutor != nil {
-				srv.opHookExecutor.RunCompleteHooks(connOp)
-			}
-			srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())).WithOperationID(connOp.ID))
-			srv.tracker.Complete(connOp.ID)
-		} else {
-			srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())))
+		connOp.Complete()
+		if srv.opHookExecutor != nil {
+			srv.opHookExecutor.RunCompleteHooks(connOp)
 		}
+		srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())).WithOperationID(connOp.ID))
+		srv.tracker.Complete(connOp.ID)
 	}()
 
 	reader := resp.NewReader(conn)
@@ -262,7 +255,7 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		val, err := reader.Read()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				logger.Debug().Err(err).Msg("connection read error")
+				logger.DebugNoCtx().Err(err).Msg("connection read error")
 			}
 			return
 		}
@@ -330,7 +323,7 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		// Auth gate: block commands until authenticated
 		if srv.requirePass != "" && !ctx.Authenticated {
 			if op != "AUTH" && op != "HELLO" {
-				srv.emitter.Emit(events.NewAuthFailed(remoteAddr, op))
+				srv.emitter.Emit(events.NewAuthFailed(remoteAddr, op).WithOperationID(ctx.OperationID))
 				if err := writer.Write(resp.MarshalError("NOAUTH Authentication required.")); err != nil {
 					return
 				}

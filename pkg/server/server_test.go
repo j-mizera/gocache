@@ -2,14 +2,16 @@ package server
 
 import (
 	"context"
-	"gocache/pkg/blocking"
-	"gocache/pkg/cache"
-	"gocache/pkg/engine"
-	"gocache/pkg/resp"
-	"gocache/pkg/watch"
 	"net"
 	"testing"
 	"time"
+
+	"gocache/pkg/blocking"
+	"gocache/pkg/cache"
+	"gocache/pkg/engine"
+	serverOps "gocache/pkg/operations"
+	"gocache/pkg/resp"
+	"gocache/pkg/watch"
 )
 
 func startTestServer(t *testing.T, requirePass string) (*Server, string) {
@@ -24,6 +26,7 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 	c.OnMutate = wm.NotifyMutation
 
 	srv := New("127.0.0.1:0", c, e, "", requirePass, br, wm)
+	srv.SetTracker(serverOps.NewTracker())
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -154,6 +157,7 @@ func TestServer_Shutdown(t *testing.T) {
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	srv := New("127.0.0.1:0", c, e, "", "", br, wm)
+	srv.SetTracker(serverOps.NewTracker())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)

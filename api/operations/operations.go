@@ -26,6 +26,7 @@ const (
 	TypeCleanup      Type = "cleanup"
 	TypeSnapshot     Type = "snapshot"
 	TypeStartup      Type = "startup"
+	TypeShutdown     Type = "shutdown"
 	TypeConfigReload Type = "config_reload"
 	TypePluginStart  Type = "plugin_start"
 	TypePluginStop   Type = "plugin_stop"
@@ -38,6 +39,7 @@ var typePrefixes = map[Type]string{
 	TypeCleanup:      "cleanup",
 	TypeSnapshot:     "snap",
 	TypeStartup:      "boot",
+	TypeShutdown:     "shut",
 	TypeConfigReload: "cfg",
 	TypePluginStart:  "pstart",
 	TypePluginStop:   "pstop",
