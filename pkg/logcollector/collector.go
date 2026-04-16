@@ -9,8 +9,8 @@ package logcollector
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"io"
+	"strconv"
 	"sync"
 
 	"gocache/api/events"
@@ -83,56 +83,28 @@ func (c *Collector) parseLine(sourceName string, line []byte) {
 	}
 	operationID := stringField(raw, "_operation_id")
 
-	// Extract _ctx (redacted operation context written by the logger).
-	var ctxFields map[string]string
-	if ctxRaw, ok := raw["_ctx"]; ok {
-		if ctxMap, ok := ctxRaw.(map[string]interface{}); ok {
-			ctxFields = make(map[string]string, len(ctxMap))
-			for k, v := range ctxMap {
-				if s, ok := v.(string); ok {
-					ctxFields[k] = s
-				}
-			}
-		}
-	}
-
-	// Build fields from remaining keys (exclude well-known).
-	fields := make(map[string]string)
+	// Build the fields map directly: one allocation sized for the upper bound
+	// (raw keys + potential _ctx keys + "_source"). Unknown keys are written
+	// straight in; _ctx entries are flattened in-place rather than merged.
+	ctxMap, _ := raw["_ctx"].(map[string]interface{})
+	fields := make(map[string]string, len(raw)+len(ctxMap)+1)
 	fields["_source"] = source
 	for k, v := range raw {
 		switch k {
 		case "level", "message", "time", "source", "_operation_id", "_ctx":
 			continue
 		default:
-			switch val := v.(type) {
-			case string:
-				fields[k] = val
-			case float64:
-				// JSON numbers are float64.
-				if val == float64(int64(val)) {
-					fields[k] = json.Number(fmt.Sprintf("%d", int64(val))).String()
-				} else {
-					fields[k] = json.Number(fmt.Sprintf("%g", val)).String()
-				}
-			case bool:
-				if val {
-					fields[k] = "true"
-				} else {
-					fields[k] = "false"
-				}
-			default:
-				if b, err := json.Marshal(val); err == nil {
-					fields[k] = string(b)
-				}
+			if s, ok := formatJSONValue(v); ok {
+				fields[k] = s
 			}
 		}
 	}
-
-	// Merge _ctx fields into the event fields. The _ctx contains the redacted
-	// operation context (shared.traceparent, _command, etc.). These flow through
-	// to the LogEntry event so subscribers can correlate.
-	for k, v := range ctxFields {
-		fields[k] = v
+	// _ctx contains the redacted operation context (shared.traceparent,
+	// _command, etc.) — flatten it into fields so subscribers can correlate.
+	for k, v := range ctxMap {
+		if s, ok := v.(string); ok {
+			fields[k] = s
+		}
 	}
 
 	evt := events.NewLogEntry(level, message, "", fields)
@@ -150,4 +122,29 @@ func stringField(m map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// formatJSONValue renders a decoded JSON value as a string suitable for
+// the log fields map. Returns ("", false) if the value cannot be serialised.
+func formatJSONValue(v interface{}) (string, bool) {
+	switch val := v.(type) {
+	case string:
+		return val, true
+	case float64:
+		// JSON numbers decode as float64; detect integers and render cleanly.
+		if val == float64(int64(val)) {
+			return strconv.FormatInt(int64(val), 10), true
+		}
+		return strconv.FormatFloat(val, 'g', -1, 64), true
+	case bool:
+		return strconv.FormatBool(val), true
+	case nil:
+		return "", false
+	default:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return "", false
+		}
+		return string(b), true
+	}
 }

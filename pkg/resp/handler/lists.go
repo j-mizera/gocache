@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"gocache/api/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
@@ -31,7 +32,7 @@ func HandleLpush(cmdCtx *command.Context) command.Result {
 			reversed[len(values)-1-i] = v
 		}
 		list = append(reversed, list...)
-		if err := cmdCtx.Cache.RawSet(key, list, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
 			return err
 		}
 		return len(list)
@@ -59,7 +60,7 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 		}
 
 		list = append(list, values...)
-		if err := cmdCtx.Cache.RawSet(key, list, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
 			return err
 		}
 		return len(list)
@@ -90,7 +91,7 @@ func HandleLpop(cmdCtx *command.Context) command.Result {
 		if len(list) == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if err := cmdCtx.Cache.RawSet(key, list, 0); err != nil {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
 				return err
 			}
 		}
@@ -118,7 +119,7 @@ func HandleRpop(cmdCtx *command.Context) command.Result {
 		if len(list) == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if err := cmdCtx.Cache.RawSet(key, list, 0); err != nil {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
 				return err
 			}
 		}
@@ -233,7 +234,11 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 			if len(list) == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSet(key, list, cmdCtx.Cache.RawTTL(key))
+				// Shrinking write — RawSet cannot return ErrOutOfMemory because
+				// delta ≤ 0, but surface any unexpected error instead of dropping it.
+				if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, cmdCtx.Cache.RawTTL(key)); err != nil {
+					logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on pop write-back")
+				}
 			}
 			return []interface{}{key, val}
 		}
@@ -291,7 +296,7 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 		if !found {
 			return
 		}
-		popResult := cmdCtx.Engine.DispatchWithResult(func() interface{} {
+		popResult, dispatchErr := cmdCtx.Engine.DispatchWithResult(cmdCtx.Context(), func() interface{} {
 			entry, ok := cmdCtx.Cache.RawGet(key)
 			if !ok {
 				return nil
@@ -308,10 +313,18 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 			if len(list) == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSet(key, list, cmdCtx.Cache.RawTTL(key))
+				// Shrinking write — RawSet cannot return ErrOutOfMemory because
+				// delta ≤ 0, but surface any unexpected error instead of dropping it.
+				if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, cmdCtx.Cache.RawTTL(key)); err != nil {
+					logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on blocked-pop write-back")
+				}
 			}
 			return val
 		})
+		if dispatchErr != nil {
+			logger.Error(cmdCtx.Context()).Err(dispatchErr).Str("key", key).Msg("blocked-pop dispatch failed")
+			return
+		}
 		if popResult == nil {
 			return
 		}

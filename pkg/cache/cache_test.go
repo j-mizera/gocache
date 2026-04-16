@@ -1,6 +1,7 @@
 package cache_test
 
 import (
+	"context"
 	"errors"
 	"gocache/pkg/cache"
 	"gocache/pkg/persistence"
@@ -10,7 +11,7 @@ import (
 
 func TestCache_Basic(t *testing.T) {
 	c := cache.New()
-	if err := c.RawSet("key", "value", 0); err != nil {
+	if err := c.RawSet(context.Background(), "key", "value", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -31,17 +32,17 @@ func TestCache_Snapshot(t *testing.T) {
 	defer os.Remove(filename)
 
 	c := cache.New()
-	if err := c.RawSet("snap", "data", 0); err != nil {
+	if err := c.RawSet(context.Background(), "snap", "data", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	err := persistence.SaveSnapshot(filename, c)
+	err := persistence.SaveSnapshot(context.Background(), filename, c)
 	if err != nil {
 		t.Fatalf("failed to save snapshot: %v", err)
 	}
 
 	cacheInstance2 := cache.New()
-	err = persistence.LoadSnapshot(filename, cacheInstance2)
+	err = persistence.LoadSnapshot(context.Background(), filename, cacheInstance2)
 	if err != nil {
 		t.Fatalf("failed to load snapshot: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestCache_MemoryLimit_LRU(t *testing.T) {
 	// Fill it: each write evicts the previous LRU entry
 	for i := 0; i < 5; i++ {
 		key := string(rune('a' + i))
-		if err := c.RawSet(key, "value", 0); err != nil {
+		if err := c.RawSet(context.Background(), key, "value", 0); err != nil {
 			t.Fatalf("unexpected OOM on LRU cache at key %s: %v", key, err)
 		}
 	}
@@ -80,12 +81,12 @@ func TestCache_MemoryLimit_NoEviction(t *testing.T) {
 	c := cache.NewWithBytes(200, cache.EvictionNone)
 
 	// First write should succeed (cache is empty)
-	if err := c.RawSet("first", "v", 0); err != nil {
+	if err := c.RawSet(context.Background(), "first", "v", 0); err != nil {
 		t.Fatalf("unexpected error on first write: %v", err)
 	}
 
 	// Subsequent writes that exceed the limit must return ErrOutOfMemory
-	err := c.RawSet("second", "v", 0)
+	err := c.RawSet(context.Background(), "second", "v", 0)
 	if !errors.Is(err, cache.ErrOutOfMemory) {
 		t.Errorf("expected ErrOutOfMemory, got %v", err)
 	}
@@ -98,7 +99,7 @@ func TestCache_MemoryTracking(t *testing.T) {
 		t.Errorf("expected 0 used bytes on empty cache, got %d", c.UsedBytes())
 	}
 
-	_ = c.RawSet("key", "hello", 0)
+	_ = c.RawSet(context.Background(), "key", "hello", 0)
 	usedAfterSet := c.UsedBytes()
 	if usedAfterSet <= 0 {
 		t.Errorf("expected usedBytes > 0 after set, got %d", usedAfterSet)
@@ -114,14 +115,14 @@ func TestCache_LRU_OrderOnGet(t *testing.T) {
 	// Cache that holds ~2 small entries; verify that GET refreshes LRU order
 	c := cache.NewWithBytes(300, cache.EvictionLRU)
 
-	_ = c.RawSet("a", "1", 0)
-	_ = c.RawSet("b", "2", 0) // b is now MRU, a is LRU
+	_ = c.RawSet(context.Background(), "a", "1", 0)
+	_ = c.RawSet(context.Background(), "b", "2", 0) // b is now MRU, a is LRU
 
 	// Access "a" to make it MRU; "b" becomes LRU
 	c.RawGet("a")
 
 	// Writing a new key should evict "b" (now LRU), not "a"
-	_ = c.RawSet("c", "3", 0)
+	_ = c.RawSet(context.Background(), "c", "3", 0)
 
 	_, aFound := c.RawGet("a")
 	_, bFound := c.RawGet("b")
@@ -143,7 +144,7 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	c := cache.New()
 	for i := 0; i < 10; i++ {
 		key := "key" + string(rune('a'+i))
-		if err := c.RawSet(key, "somevalue", 0); err != nil {
+		if err := c.RawSet(context.Background(), key, "somevalue", 0); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
@@ -157,13 +158,13 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	}
 
 	// Lower the limit to something tiny — should trigger eviction.
-	c.SetMemoryLimit(1, cache.EvictionLRU) // 1 MB — still bigger than our data
+	c.SetMemoryLimit(context.Background(), 1, cache.EvictionLRU) // 1 MB — still bigger than our data
 	// Use a byte-level limit via the internal path: set maxBytes directly by
 	// creating a new cache with bytes limit to test eviction trigger.
 	small := cache.NewWithBytes(200, cache.EvictionLRU)
 	for i := 0; i < 5; i++ {
 		key := "k" + string(rune('a'+i))
-		_ = small.RawSet(key, "val", 0)
+		_ = small.RawSet(context.Background(), key, "val", 0)
 	}
 	before := small.Len()
 	if before == 0 {
@@ -171,12 +172,12 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	}
 
 	// Lower to 1 byte — must evict down.
-	small.SetMemoryLimit(0, cache.EvictionLRU) // disable limit first
+	small.SetMemoryLimit(context.Background(), 0, cache.EvictionLRU) // disable limit first
 	// Manually set a very small byte limit. Since SetMemoryLimit takes MB,
 	// we use NewWithBytes + re-populate to test the eviction path.
 	tiny := cache.NewWithBytes(1, cache.EvictionLRU)
 	for i := 0; i < 5; i++ {
-		_ = tiny.RawSet("k"+string(rune('a'+i)), "val", 0)
+		_ = tiny.RawSet(context.Background(), "k"+string(rune('a'+i)), "val", 0)
 	}
 	// Only one key should survive (each entry > 128 bytes overhead).
 	if tiny.Len() > 1 {
@@ -187,7 +188,7 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 func TestCache_LargeEntryExceedsMaxBytes(t *testing.T) {
 	// A single entry larger than maxBytes should be rejected with noeviction.
 	c := cache.NewWithBytes(1, cache.EvictionNone)
-	err := c.RawSet("big", "this is way more than 1 byte of data", 0)
+	err := c.RawSet(context.Background(), "big", "this is way more than 1 byte of data", 0)
 	if !errors.Is(err, cache.ErrOutOfMemory) {
 		t.Errorf("expected ErrOutOfMemory for oversized entry, got %v", err)
 	}

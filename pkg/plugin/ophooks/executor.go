@@ -2,7 +2,6 @@ package ophooks
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	opctx "gocache/api/context"
@@ -94,5 +93,3 @@ func (e *Executor) RunCompleteHooks(op *ops.Operation) {
 func (e *Executor) RegistryForTesting() *Registry {
 	return e.registry
 }
-
-var _ fmt.Stringer // suppress unused import warning if fmt is used only in errors

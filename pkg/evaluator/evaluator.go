@@ -37,21 +37,14 @@ type OpHookExecutor interface {
 	RunCompleteHooks(op *ops.Operation)
 }
 
-// Evaluator is the command dispatch pipeline.
-type Evaluator interface {
-	Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result
-	RegisterHandler(op string, handler command.Handler)
-	SetPluginRouter(r *router.Router)
-	SetHookExecutor(e command.HookExecutor)
-	SetEmitter(e events.Emitter)
-	SetTracker(t *serverOps.Tracker)
-	SetOpHookExecutor(e OpHookExecutor)
-	CoreCommandNames() []string
-}
-
-// BaseEvaluator is the pipeline implementation. It owns no command-specific
+// BaseEvaluator is the command dispatch pipeline. It owns no command-specific
 // knowledge — handlers and their argument specs are provided by external
 // packages (resp/handler, rex/handler) via command.Registration.
+//
+// Following "accept interfaces, return structs," constructors return
+// *BaseEvaluator directly; consumers that need a narrower surface for testing
+// should define their own interface locally (pkg/server does this via a
+// package-private alias of the methods it actually calls).
 type BaseEvaluator struct {
 	cache              *cache.Cache
 	engine             *engine.Engine
@@ -69,7 +62,7 @@ type BaseEvaluator struct {
 	opHookExecutor     OpHookExecutor
 }
 
-func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) Evaluator {
+func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *BaseEvaluator {
 	b := &BaseEvaluator{
 		cache:              c,
 		engine:             e,
@@ -137,18 +130,18 @@ func (b *BaseEvaluator) registerAll() {
 	}
 }
 
-func (b *BaseEvaluator) Evaluate(ctx *clientctx.ClientContext, op string, args []string) command.Result {
-	return b.evaluateInternal(ctx, op, args, false)
+func (b *BaseEvaluator) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+	return b.evaluateInternal(parentCtx, client, op, args, false)
 }
 
-func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
+func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
 	op = strings.ToUpper(op)
 
 	handler, ok := b.handlers[op]
 	if !ok {
 		// Fall through to plugin router for plugin-provided commands.
 		if b.pluginRouter != nil && b.pluginRouter.HasCommand(op) {
-			return b.routeToPlugin(ctx, op, args)
+			return b.routeToPlugin(parentCtx, ctx, op, args)
 		}
 		logger.DebugNoCtx().Str("command", op).Msg("unknown command")
 		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
@@ -192,9 +185,14 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		}
 	}
 
+	// Build operation-carrying context so handlers and downstream (cache,
+	// persistence) can log with correlation. Derives from the parent
+	// (connection) context so cancellation propagates into plugin routing.
+	opCtx := ops.WithContext(parentCtx, cmdOp)
+
 	// Fire operation start hooks (synchronous — enriches context before work).
 	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
-		b.opHookExecutor.RunStartHooks(context.Background(), cmdOp)
+		b.opHookExecutor.RunStartHooks(opCtx, cmdOp)
 	}
 
 	// Emit operation.start + command.pre events.
@@ -217,6 +215,7 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		RequirePass:      b.requirePass,
 		EvalFn:           b.evaluateInternal,
 	}
+	cmdCtx.SetContext(opCtx)
 
 	// --- Command hooks (pre) ---
 	var hookCtx map[string]string
@@ -224,7 +223,7 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 	if hasHooks {
 		hookCtx = cmdOp.ContextSnapshot(false)
 
-		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args, hookCtx); pre != nil {
+		if pre := b.hookExecutor.RunPreHooks(opCtx, op, args, hookCtx); pre != nil {
 			if pre.Denied {
 				cmdOp.Fail("denied: " + pre.DenyReason)
 				if b.opHookExecutor != nil {
@@ -248,7 +247,7 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		elapsedNs := time.Now().UnixNano() - startNs
 		hookCtx[command.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
-		b.hookExecutor.RunPostHooks(context.Background(), op, args, resultVal, resultErr, hookCtx)
+		b.hookExecutor.RunPostHooks(opCtx, op, args, resultVal, resultErr, hookCtx)
 	}
 
 	// --- Complete operation ---
@@ -275,11 +274,13 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 	return result
 }
 
-// routeToPlugin dispatches a command to a plugin via the router.
-func (b *BaseEvaluator) routeToPlugin(client *clientctx.ClientContext, op string, args []string) command.Result {
+// routeToPlugin dispatches a command to a plugin via the router. The per-call
+// timeout is derived from parentCtx so connection-level cancellation also
+// aborts the plugin call.
+func (b *BaseEvaluator) routeToPlugin(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
 	metadata := rex.BuildMetadata(client.RexMeta, client.CmdMeta)
 
-	ctx, cancel := context.WithTimeout(context.Background(), pluginCommandTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)
 	defer cancel()
 
 	val, err := b.pluginRouter.Route(ctx, op, args, metadata)

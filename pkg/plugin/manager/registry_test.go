@@ -7,7 +7,8 @@ import (
 func TestRegistry_AddGetRemove(t *testing.T) {
 	r := NewRegistry()
 
-	p := &PluginInstance{Name: "auth", BinPath: "/bin/auth", State: StateLoaded}
+	p := &PluginInstance{Name: "auth", BinPath: "/bin/auth"}
+	p.SetState(StateLoaded)
 	r.Add(p)
 
 	got, ok := r.Get("auth")
@@ -39,13 +40,15 @@ func TestRegistry_All(t *testing.T) {
 
 func TestRegistry_SetState(t *testing.T) {
 	r := NewRegistry()
-	r.Add(&PluginInstance{Name: "x", State: StateLoaded})
+	inst := &PluginInstance{Name: "x"}
+	inst.SetState(StateLoaded)
+	r.Add(inst)
 
 	r.SetState("x", StateRunning)
 
 	p, _ := r.Get("x")
-	if p.State != StateRunning {
-		t.Errorf("expected Running, got %s", p.State)
+	if got := p.State(); got != StateRunning {
+		t.Errorf("expected Running, got %s", got)
 	}
 }
 

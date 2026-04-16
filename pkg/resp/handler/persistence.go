@@ -13,14 +13,14 @@ import (
 
 func HandleSnapshot(cmdCtx *command.Context) command.Result {
 	executeFn := func() interface{} {
-		if err := persistence.SaveSnapshot(cmdCtx.SnapshotFile, cmdCtx.Cache); err != nil {
+		if err := persistence.SaveSnapshot(cmdCtx.Context(), cmdCtx.SnapshotFile, cmdCtx.Cache); err != nil {
 			return err
 		}
 		return "OK"
 	}
 	res := command.Dispatch(cmdCtx, executeFn)
 	if res.Err != nil {
-		logger.ErrorNoCtx().Err(res.Err).Msg("snapshot command failed")
+		logger.Error(cmdCtx.Context()).Err(res.Err).Msg("snapshot command failed")
 	}
 	return res
 }
@@ -38,14 +38,14 @@ func HandleLoadSnapshot(cmdCtx *command.Context) command.Result {
 	}
 
 	executeFn := func() interface{} {
-		if err := persistence.LoadSnapshot(filename, cmdCtx.Cache); err != nil {
+		if err := persistence.LoadSnapshot(cmdCtx.Context(), filename, cmdCtx.Cache); err != nil {
 			return err
 		}
 		return "OK"
 	}
 	res := command.Dispatch(cmdCtx, executeFn)
 	if res.Err != nil {
-		logger.ErrorNoCtx().Err(res.Err).Str("file", filename).Msg("loadsnapshot command failed")
+		logger.Error(cmdCtx.Context()).Err(res.Err).Str("file", filename).Msg("loadsnapshot command failed")
 	}
 	return res
 }
@@ -69,9 +69,10 @@ func sanitizeSnapshotPath(baseSnapshotFile, requested string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve base dir: %w", err)
 	}
-	// filepath.Base on requested strips any remaining separators, leaving only
-	// a file name. Combined with the absolute-path/".." rejection above this
-	// guarantees the result stays in baseDir.
+	// filepath.Base returns the final path element (not interior segments),
+	// so anything the caller sent like "sub/file" collapses to "file".
+	// Combined with the absolute-path/".." rejection above, the result is
+	// guaranteed to live directly under baseDir.
 	final := filepath.Join(baseDir, filepath.Base(requested))
 
 	// Defense in depth: verify the result is within baseDir after cleaning.

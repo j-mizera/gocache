@@ -46,7 +46,7 @@ func HandleZadd(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		if err := cmdCtx.Cache.RawSet(key, zset, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, zset, 0); err != nil {
 			return err
 		}
 		return added
@@ -82,7 +82,7 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 		if zset.Card() == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if err := cmdCtx.Cache.RawSet(key, zset, 0); err != nil {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, zset, 0); err != nil {
 				return err
 			}
 		}

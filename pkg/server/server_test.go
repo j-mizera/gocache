@@ -34,7 +34,7 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 	}
 	srv.listener = listener
 
-	go srv.acceptConnections()
+	go srv.acceptConnections(context.Background())
 	t.Cleanup(func() { srv.Shutdown(2 * time.Second) })
 
 	return srv, listener.Addr().String()

@@ -31,7 +31,7 @@ type Server struct {
 	addr             string
 	cache            *cache.Cache
 	engine           *engine.Engine
-	evaluator        evaluator.Evaluator
+	evaluator        *evaluator.BaseEvaluator
 	listener         net.Listener
 	shutdownChan     chan struct{}
 	connectionWg     sync.WaitGroup
@@ -129,8 +129,8 @@ func (srv *Server) Start(ctx context.Context) error {
 
 	logger.InfoNoCtx().Str("addr", srv.addr).Msg("server listening")
 
-	// Accept connections in a goroutine
-	go srv.acceptConnections()
+	// Accept connections in a goroutine; propagate the server lifecycle ctx.
+	go srv.acceptConnections(ctx)
 
 	// Wait for shutdown signal or context cancellation
 	select {
@@ -143,7 +143,7 @@ func (srv *Server) Start(ctx context.Context) error {
 }
 
 // acceptConnections handles the accept loop
-func (srv *Server) acceptConnections() {
+func (srv *Server) acceptConnections(ctx context.Context) {
 	for {
 		conn, err := srv.listener.Accept()
 		if err != nil {
@@ -159,7 +159,7 @@ func (srv *Server) acceptConnections() {
 		}
 
 		srv.connectionWg.Add(1)
-		go srv.handleConnection(conn)
+		go srv.handleConnection(ctx, conn)
 	}
 }
 
@@ -201,18 +201,19 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 	return err
 }
 
-func (srv *Server) handleConnection(conn net.Conn) {
+func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	srv.activeConns.Add(1)
 	defer srv.activeConns.Add(-1)
 
 	remoteAddr := conn.RemoteAddr().String()
 	connStart := time.Now()
 
-	// Create connection operation.
+	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
 	connOp.Enrich("_remote_addr", remoteAddr)
+	connCtx := ops.WithContext(serverCtx, connOp)
 	if srv.opHookExecutor != nil {
-		srv.opHookExecutor.RunStartHooks(context.Background(), connOp)
+		srv.opHookExecutor.RunStartHooks(connCtx, connOp)
 	}
 	srv.emitter.Emit(events.NewConnectionOpen(remoteAddr).WithOperationID(connOp.ID))
 
@@ -338,7 +339,7 @@ func (srv *Server) handleConnection(conn net.Conn) {
 		}
 
 		ctx.CmdMeta = cmdMeta
-		res := srv.evaluator.Evaluate(ctx, op, parts[1:])
+		res := srv.evaluator.Evaluate(connCtx, ctx, op, parts[1:])
 		ctx.CmdMeta = nil
 		cmdMeta = nil
 		if err := writer.Write(srv.mapToResp(ctx, res)); err != nil {

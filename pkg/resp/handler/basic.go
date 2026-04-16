@@ -47,7 +47,7 @@ func HandleSelect(cmdCtx *command.Context) command.Result {
 // HandleFlushDB clears the entire cache (single-DB server, same as FLUSHALL).
 func HandleFlushDB(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, func() interface{} {
-		cmdCtx.Cache.Clear()
+		cmdCtx.Cache.Clear(cmdCtx.Context())
 		return "OK"
 	})
 }
@@ -55,7 +55,7 @@ func HandleFlushDB(cmdCtx *command.Context) command.Result {
 // HandleFlushAll clears the entire cache.
 func HandleFlushAll(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, func() interface{} {
-		cmdCtx.Cache.Clear()
+		cmdCtx.Cache.Clear(cmdCtx.Context())
 		return "OK"
 	})
 }
@@ -140,7 +140,7 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 		newVal := existing + incr
 		newStr := strconv.FormatFloat(newVal, 'f', -1, 64)
 		rawTTL := cmdCtx.Cache.RawTTL(key)
-		if setErr := cmdCtx.Cache.RawSet(key, newStr, rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newStr, rawTTL); setErr != nil {
 			return setErr
 		}
 		return newStr
@@ -170,7 +170,7 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 		}
 
 		newStr := existing + suffix
-		if setErr := cmdCtx.Cache.RawSet(key, newStr, rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newStr, rawTTL); setErr != nil {
 			return setErr
 		}
 		return int64(len(newStr))
@@ -234,7 +234,7 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 	}
 	return command.Dispatch(cmdCtx, func() interface{} {
 		for i := 0; i < len(cmdCtx.Args); i += 2 {
-			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Args[i], cmdCtx.Args[i+1], 0); setErr != nil {
+			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], cmdCtx.Args[i+1], 0); setErr != nil {
 				return setErr
 			}
 		}
@@ -266,7 +266,7 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) interface{} {
 	}
 
 	newVal := current + delta
-	if setErr := cmdCtx.Cache.RawSet(key, strconv.FormatInt(newVal, 10), rawTTL); setErr != nil {
+	if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, strconv.FormatInt(newVal, 10), rawTTL); setErr != nil {
 		return setErr
 	}
 	return newVal
@@ -335,7 +335,7 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 			exp = cmdCtx.Cache.RawTTL(key)
 		}
 
-		if err := cmdCtx.Cache.RawSet(key, val, exp); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, val, exp); err != nil {
 			return err
 		}
 		return "OK"
@@ -356,7 +356,7 @@ func HandleSetnx(cmdCtx *command.Context) command.Result {
 			}
 			cmdCtx.Cache.RawDelete(key)
 		}
-		if err := cmdCtx.Cache.RawSet(key, val, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, val, 0); err != nil {
 			return err
 		}
 		return 1
@@ -382,7 +382,7 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		expiration := time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
-		if err := cmdCtx.Cache.RawSet(key, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
 			return err
 		}
 		return 1
@@ -488,7 +488,7 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 		if ttl > 0 {
 			expiration = time.Now().Add(ttl).UnixNano()
 		}
-		if err := cmdCtx.Cache.RawSet(key, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
 			return err
 		}
 		return 1

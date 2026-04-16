@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"gocache/pkg/cache"
 	"os"
 	"path/filepath"
@@ -14,18 +15,18 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 
 	c := cache.New()
 	c.Lock()
-	_ = c.RawSet("str", "hello", 0)
-	_ = c.RawSet("list", []string{"a", "b", "c"}, 0)
-	_ = c.RawSet("hash", map[string]string{"k": "v"}, 0)
-	_ = c.RawSet("set", map[string]struct{}{"x": {}, "y": {}}, 0)
+	_ = c.RawSet(context.Background(), "str", "hello", 0)
+	_ = c.RawSet(context.Background(), "list", []string{"a", "b", "c"}, 0)
+	_ = c.RawSet(context.Background(), "hash", map[string]string{"k": "v"}, 0)
+	_ = c.RawSet(context.Background(), "set", map[string]struct{}{"x": {}, "y": {}}, 0)
 	c.Unlock()
 
-	if err := SaveSnapshot(file, c); err != nil {
+	if err := SaveSnapshot(context.Background(), file, c); err != nil {
 		t.Fatalf("SaveSnapshot failed: %v", err)
 	}
 
 	c2 := cache.New()
-	if err := LoadSnapshot(file, c2); err != nil {
+	if err := LoadSnapshot(context.Background(), file, c2); err != nil {
 		t.Fatalf("LoadSnapshot failed: %v", err)
 	}
 
@@ -53,7 +54,7 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 
 func TestLoadSnapshot_FileNotFound(t *testing.T) {
 	c := cache.New()
-	err := LoadSnapshot("/nonexistent/path/file.dat", c)
+	err := LoadSnapshot(context.Background(), "/nonexistent/path/file.dat", c)
 	if err != nil {
 		t.Errorf("expected nil for missing file, got %v", err)
 	}
@@ -66,16 +67,16 @@ func TestLoadSnapshot_SkipsExpired(t *testing.T) {
 	c := cache.New()
 	c.Lock()
 	// Set a key that's already expired.
-	_ = c.RawSet("expired", "val", time.Now().Add(-time.Hour).UnixNano())
-	_ = c.RawSet("alive", "val", 0)
+	_ = c.RawSet(context.Background(), "expired", "val", time.Now().Add(-time.Hour).UnixNano())
+	_ = c.RawSet(context.Background(), "alive", "val", 0)
 	c.Unlock()
 
-	if err := SaveSnapshot(file, c); err != nil {
+	if err := SaveSnapshot(context.Background(), file, c); err != nil {
 		t.Fatalf("SaveSnapshot failed: %v", err)
 	}
 
 	c2 := cache.New()
-	if err := LoadSnapshot(file, c2); err != nil {
+	if err := LoadSnapshot(context.Background(), file, c2); err != nil {
 		t.Fatalf("LoadSnapshot failed: %v", err)
 	}
 
@@ -91,7 +92,7 @@ func TestLoadSnapshot_SkipsExpired(t *testing.T) {
 }
 
 func TestSaveSnapshot_CreateError(t *testing.T) {
-	err := SaveSnapshot("/nonexistent/dir/file.dat", cache.New())
+	err := SaveSnapshot(context.Background(), "/nonexistent/dir/file.dat", cache.New())
 	if err == nil {
 		t.Error("expected error for invalid path")
 	}
@@ -103,7 +104,7 @@ func TestLoadSnapshot_EmptyFile(t *testing.T) {
 	_ = os.WriteFile(file, []byte{}, 0644)
 
 	c := cache.New()
-	err := LoadSnapshot(file, c)
+	err := LoadSnapshot(context.Background(), file, c)
 	if err == nil {
 		t.Error("expected error for empty file")
 	}

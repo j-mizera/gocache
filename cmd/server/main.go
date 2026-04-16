@@ -139,12 +139,13 @@ func main() {
 		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
 		snapOp.Enrich("_file", cfg.Persistence.SnapshotFile)
 		snapOp.Enrich("_trigger", "startup")
+		snapCtx := ops.WithContext(ctx, snapOp)
 		if opHookExec != nil && opHookExec.HasAny() {
-			opHookExec.RunStartHooks(ctx, snapOp)
+			opHookExec.RunStartHooks(snapCtx, snapOp)
 		}
 		eventBus.Emit(events.NewOperationStart(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
-		if err := persistence.LoadSnapshot(cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
-			logger.Warn(snapOp).Err(err).Msg("failed to load snapshot")
+		if err := persistence.LoadSnapshot(snapCtx, cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
+			logger.Warn(snapCtx).Err(err).Msg("failed to load snapshot")
 			snapOp.Fail(err.Error())
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
@@ -152,7 +153,7 @@ func main() {
 			eventBus.Emit(events.NewOperationComplete(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "failed", err.Error(), snapOp.ContextSnapshot(false)))
 			tracker.Fail(snapOp.ID, err.Error())
 		} else {
-			logger.Info(snapOp).Str("file", cfg.Persistence.SnapshotFile).Msg("snapshot loaded")
+			logger.Info(snapCtx).Str("file", cfg.Persistence.SnapshotFile).Msg("snapshot loaded")
 			snapOp.Complete()
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
@@ -180,21 +181,22 @@ func main() {
 	}
 	cleanupWorker.SetTracker(tracker)
 	cleanupWorker.SetEmitter(eventBus)
-	snapshotWorker.Start()
-	cleanupWorker.Start()
+	snapshotWorker.Start(ctx)
+	cleanupWorker.Start(ctx)
 
 	// Hot reload: config changes create config_reload operations.
 	v.WatchConfig()
 	v.OnConfigChange(func(e fsnotify.Event) {
 		reloadOp := tracker.Start(ops.TypeConfigReload, "")
 		reloadOp.Enrich("_file", e.Name)
+		reloadCtx := ops.WithContext(context.Background(), reloadOp)
 		if opHookExec != nil && opHookExec.HasAny() {
-			opHookExec.RunStartHooks(context.Background(), reloadOp)
+			opHookExec.RunStartHooks(reloadCtx, reloadOp)
 		}
 
 		newCfg, err := config.Reload(v)
 		if err != nil {
-			logger.Warn(reloadOp).Err(err).Msg("failed to parse updated config")
+			logger.Warn(reloadCtx).Err(err).Msg("failed to parse updated config")
 			reloadOp.Fail(err.Error())
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(reloadOp)
@@ -203,17 +205,18 @@ func main() {
 			tracker.Fail(reloadOp.ID, err.Error())
 			return
 		}
-		logger.Info(reloadOp).Str("file", e.Name).Msg("config reloaded")
+		logger.Info(reloadCtx).Str("file", e.Name).Msg("config reloaded")
 
 		prev := cfgPtr.Load()
 		if newCfg.Server.GetAddr() != prev.Server.GetAddr() {
-			logger.Warn(reloadOp).Msg("server address/port changes require a restart")
+			logger.Warn(reloadCtx).Msg("server address/port changes require a restart")
 		}
 
 		snapshotWorker.UpdateInterval(newCfg.Persistence.SnapshotInterval)
 		snapshotWorker.UpdateFile(newCfg.Persistence.SnapshotFile)
 		cleanupWorker.UpdateInterval(newCfg.Workers.CleanupInterval)
 		cacheInstance.SetMemoryLimit(
+			reloadCtx,
 			newCfg.Memory.MaxMemoryMB,
 			cache.ParseEvictionPolicy(newCfg.Memory.EvictionPolicy),
 		)
@@ -280,24 +283,26 @@ func handleShutdown(
 	// Create shutdown operation — plugins see this via operation hooks
 	// before they are shut down.
 	var shutdownOp *ops.Operation
+	shutdownCtx := context.Background()
 	if tracker != nil {
 		shutdownOp = tracker.Start(ops.TypeShutdown, "")
 		shutdownOp.Enrich("_reason", reason)
+		shutdownCtx = ops.WithContext(shutdownCtx, shutdownOp)
 		if opHookExec != nil && opHookExec.HasAny() {
-			opHookExec.RunStartHooks(context.Background(), shutdownOp)
+			opHookExec.RunStartHooks(shutdownCtx, shutdownOp)
 		}
 		eventBus.Emit(events.NewServerShutdown(reason).WithOperationID(shutdownOp.ID))
 	}
 
-	logger.Info(shutdownOp).Msg("starting graceful shutdown sequence")
+	logger.Info(shutdownCtx).Msg("starting graceful shutdown sequence")
 
 	// Unblock all waiting BLPOP/BRPOP clients first so their connections can close.
 	blockingRegistry.Shutdown()
 
 	shutdownTimeout := 10 * time.Second
-	logger.Info(shutdownOp).Str("step", "1/6").Dur("timeout", shutdownTimeout).Msg("shutting down server")
+	logger.Info(shutdownCtx).Str("step", "1/6").Dur("timeout", shutdownTimeout).Msg("shutting down server")
 	if err := srv.Shutdown(shutdownTimeout); err != nil {
-		logger.Warn(shutdownOp).Err(err).Msg("server shutdown error")
+		logger.Warn(shutdownCtx).Err(err).Msg("server shutdown error")
 	}
 
 	// Fire operation complete hooks BEFORE shutting down plugins
@@ -308,22 +313,22 @@ func handleShutdown(
 
 	// Shutdown plugins.
 	if pluginManager != nil {
-		logger.Info(shutdownOp).Str("step", "2/6").Msg("shutting down plugins")
+		logger.Info(shutdownCtx).Str("step", "2/6").Msg("shutting down plugins")
 		pluginManager.Shutdown(cfg.Plugins.ShutdownTimeout)
 	}
 
-	logger.Info(shutdownOp).Str("step", "3/6").Msg("stopping background workers")
+	logger.Info(shutdownCtx).Str("step", "3/6").Msg("stopping background workers")
 	snapshotWorker.Stop()
 	cleanupWorker.Stop()
 
-	logger.Info(shutdownOp).Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
-	if err := persistence.SaveSnapshot(cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
-		logger.Warn(shutdownOp).Err(err).Msg("failed to save final snapshot")
+	logger.Info(shutdownCtx).Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
+	if err := persistence.SaveSnapshot(shutdownCtx, cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
+		logger.Warn(shutdownCtx).Err(err).Msg("failed to save final snapshot")
 	} else {
-		logger.Info(shutdownOp).Msg("final snapshot saved successfully")
+		logger.Info(shutdownCtx).Msg("final snapshot saved successfully")
 	}
 
-	logger.Info(shutdownOp).Str("step", "5/6").Msg("stopping engine")
+	logger.Info(shutdownCtx).Str("step", "5/6").Msg("stopping engine")
 	engineInstance.Stop()
 
 	if shutdownOp != nil {
@@ -334,5 +339,5 @@ func handleShutdown(
 		tracker.Complete(shutdownOp.ID)
 	}
 
-	logger.Info(shutdownOp).Str("step", "6/6").Msg("shutdown complete")
+	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
 }

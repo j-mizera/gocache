@@ -50,10 +50,11 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 		return command.Result{Value: []interface{}{}}
 	}
 
-	results := cmdCtx.Engine.DispatchWithResult(func() interface{} {
+	batchCtx := cmdCtx.Context()
+	results, err := cmdCtx.Engine.DispatchWithResult(batchCtx, func() interface{} {
 		batchResults := make([]interface{}, len(queue))
 		for i, cmdParts := range queue {
-			res := cmdCtx.EvalFn(cmdCtx.Client, cmdParts[0], cmdParts[1:], true)
+			res := cmdCtx.EvalFn(batchCtx, cmdCtx.Client, cmdParts[0], cmdParts[1:], true)
 			if res.Err != nil {
 				batchResults[i] = res.Err.Error()
 			} else {
@@ -62,6 +63,9 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 		}
 		return batchResults
 	})
+	if err != nil {
+		return command.Result{Err: err}
+	}
 	return command.Result{Value: results}
 }
 
