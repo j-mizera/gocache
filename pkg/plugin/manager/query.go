@@ -102,8 +102,8 @@ func pluginsHandler(registry *Registry) QueryHandlerFunc {
 		plugins := registry.All()
 		data := make(map[string]string, len(plugins)*2)
 		for _, p := range plugins {
-			data[p.Name+".state"] = p.State.String()
-			data[p.Name+".critical"] = strconv.FormatBool(p.Critical)
+			data[p.Name+".state"] = p.State().String()
+			data[p.Name+".critical"] = strconv.FormatBool(p.Critical())
 		}
 		return data, nil
 	}

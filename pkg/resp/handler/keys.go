@@ -70,7 +70,7 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 
 		cmdCtx.Cache.RawDelete(dst)
 		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSet(dst, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
 			return err
 		}
 		return "OK"
@@ -111,7 +111,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 		}
 
 		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSet(dst, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
 			return err
 		}
 		return 1

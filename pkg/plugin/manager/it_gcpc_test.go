@@ -112,9 +112,8 @@ func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, *serverOps.Tracker
 	mgr := NewManager(cfg, []string{"GET", "SET", "PING"}, &mockState{})
 	mgr.SetEventBus(eventBus)
 
-	// Set the context (normally done by Start()).
+	// Establish the lifecycle context (normally done by Start()).
 	ctx, cancel := context.WithCancel(context.Background())
-	mgr.ctx = ctx
 	mgr.cancel = cancel
 	t.Cleanup(cancel)
 
@@ -138,7 +137,7 @@ func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, *serverOps.Tracker
 			if err != nil {
 				return
 			}
-			go mgr.handleConnection(conn)
+			go mgr.handleConnection(ctx, conn)
 		}
 	}()
 

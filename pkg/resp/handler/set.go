@@ -138,7 +138,7 @@ func HandleSadd(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		if err := cmdCtx.Cache.RawSet(key, set, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0); err != nil {
 			return err
 		}
 		return added
@@ -175,7 +175,7 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 		if len(set) == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if err := cmdCtx.Cache.RawSet(key, set, 0); err != nil {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0); err != nil {
 				return err
 			}
 		}
@@ -289,7 +289,7 @@ func HandleSpop(cmdCtx *command.Context) command.Result {
 		if len(set) == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if err := cmdCtx.Cache.RawSet(key, set, 0); err != nil {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0); err != nil {
 				return err
 			}
 		}

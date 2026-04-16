@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -15,8 +16,8 @@ func TestHandler_Transactions(t *testing.T) {
 	tm := transaction.NewManager()
 
 	// evalFn re-enters through the handler map, like the evaluator pipeline.
-	var evalFn func(*clientctx.ClientContext, string, []string, bool) command.Result
-	evalFn = func(client *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
+	var evalFn func(context.Context, *clientctx.ClientContext, string, []string, bool) command.Result
+	evalFn = func(_ context.Context, client *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
 		op = strings.ToUpper(op)
 		h, ok := handlers[op]
 		if !ok {

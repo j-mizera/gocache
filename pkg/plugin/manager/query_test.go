@@ -109,8 +109,14 @@ func TestStatsHandler(t *testing.T) {
 
 func TestPluginsHandler(t *testing.T) {
 	reg := NewRegistry()
-	reg.Add(&PluginInstance{Name: "auth", State: StateRunning, Critical: true})
-	reg.Add(&PluginInstance{Name: "metrics", State: StateRunning, Critical: false})
+	authInst := &PluginInstance{Name: "auth"}
+	authInst.SetState(StateRunning)
+	authInst.SetCritical(true)
+	metricsInst := &PluginInstance{Name: "metrics"}
+	metricsInst.SetState(StateRunning)
+	metricsInst.SetCritical(false)
+	reg.Add(authInst)
+	reg.Add(metricsInst)
 
 	handler := pluginsHandler(reg)
 	data, err := handler()

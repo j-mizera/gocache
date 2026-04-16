@@ -2,6 +2,7 @@ package cache
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"gocache/api/logger"
 	"strings"
@@ -120,8 +121,9 @@ func (c *Cache) RUnlock() {
 }
 
 // SetMemoryLimit updates the memory limit and eviction policy at runtime.
-// Safe to call from any goroutine.
-func (c *Cache) SetMemoryLimit(maxMemoryMB int64, policy EvictionPolicy) {
+// Safe to call from any goroutine. ctx carries the operation (e.g. config
+// reload) for log correlation.
+func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy EvictionPolicy) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if maxMemoryMB > 0 {
@@ -130,11 +132,11 @@ func (c *Cache) SetMemoryLimit(maxMemoryMB int64, policy EvictionPolicy) {
 		c.maxBytes = 0
 	}
 	c.evictionPolicy = policy
-	logger.InfoNoCtx().Int64("maxBytes", c.maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
+	logger.Info(ctx).Int64("maxBytes", c.maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
 
 	// Evict if the new limit is below current usage.
 	if c.maxBytes > 0 && c.usedBytes > c.maxBytes && c.evictionPolicy == EvictionLRU {
-		c.evictLRU(0)
+		c.evictLRU(ctx, 0)
 	}
 }
 
@@ -166,8 +168,9 @@ func (c *Cache) MaxBytes() int64 {
 // RawSet stores a key with the given value and expiration, enforcing the
 // memory limit. It evicts LRU entries as needed (EvictionLRU) or returns
 // ErrOutOfMemory (EvictionNone) when the limit would be exceeded.
-// Must be called while holding the cache write lock.
-func (c *Cache) RawSet(key string, value interface{}, expiration int64) error {
+// Must be called while holding the cache write lock. ctx carries the
+// operation (command, cleanup, etc.) for log correlation.
+func (c *Cache) RawSet(ctx context.Context, key string, value interface{}, expiration int64) error {
 	if c.maxBytes > 0 {
 		newSize := estimateSize(key, value)
 		oldSize := c.sizes[key]
@@ -175,9 +178,9 @@ func (c *Cache) RawSet(key string, value interface{}, expiration int64) error {
 		if delta > 0 && c.usedBytes+delta > c.maxBytes {
 			switch c.evictionPolicy {
 			case EvictionLRU:
-				c.evictLRU(delta)
+				c.evictLRU(ctx, delta)
 			case EvictionNone:
-				logger.WarnNoCtx().Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
+				logger.Warn(ctx).Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
 				return ErrOutOfMemory
 			}
 		}
@@ -242,14 +245,14 @@ func (c *Cache) setInternal(key string, value interface{}, expiration int64) {
 
 // evictLRU removes least recently used entries until delta bytes can be
 // accommodated within the memory limit.
-func (c *Cache) evictLRU(delta int64) {
+func (c *Cache) evictLRU(ctx context.Context, delta int64) {
 	for c.maxBytes > 0 && c.usedBytes+delta > c.maxBytes {
 		elem := c.lruList.Back()
 		if elem == nil {
 			break
 		}
 		evictKey := elem.Value.(string)
-		logger.DebugNoCtx().Str("key", evictKey).Msg("lru eviction")
+		logger.Debug(ctx).Str("key", evictKey).Msg("lru eviction")
 		c.delete(evictKey)
 	}
 }
@@ -314,8 +317,8 @@ func (c *Cache) RawTTL(key string) int64 {
 	return c.ttl[key]
 }
 
-func (c *Cache) Clear() {
-	logger.InfoNoCtx().Int("items", len(c.items)).Msg("cache cleared")
+func (c *Cache) Clear(ctx context.Context) {
+	logger.Info(ctx).Int("items", len(c.items)).Msg("cache cleared")
 	c.items = make(map[string]*Entry)
 	c.ttl = make(map[string]int64)
 	c.lruList.Init()

@@ -1,6 +1,7 @@
 package workers
 
 import (
+	"context"
 	"gocache/pkg/cache"
 	"gocache/pkg/engine"
 	"os"
@@ -22,15 +23,15 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 	c, e := setup(t)
 
 	// Add some data.
-	e.Dispatch(func() {
-		_ = c.RawSet("key", "val", 0)
+	e.Dispatch(context.Background(), func() {
+		_ = c.RawSet(context.Background(), "key", "val", 0)
 	})
 
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test_snapshot.dat")
 
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file)
-	w.Start()
+	w.Start(context.Background())
 	defer w.Stop()
 
 	// Wait for at least one tick.
@@ -45,29 +46,35 @@ func TestCleanupWorker_RemovesExpired(t *testing.T) {
 	c, e := setup(t)
 
 	// Add an already-expired key.
-	e.Dispatch(func() {
-		_ = c.RawSet("expired", "val", time.Now().Add(-time.Hour).UnixNano())
-		_ = c.RawSet("alive", "val", 0)
+	e.Dispatch(context.Background(), func() {
+		_ = c.RawSet(context.Background(), "expired", "val", time.Now().Add(-time.Hour).UnixNano())
+		_ = c.RawSet(context.Background(), "alive", "val", 0)
 	})
 
 	w := NewCleanupWorker(c, e, 50*time.Millisecond)
-	w.Start()
+	w.Start(context.Background())
 	defer w.Stop()
 
 	time.Sleep(200 * time.Millisecond)
 
-	res := e.DispatchWithResult(func() interface{} {
+	res, err := e.DispatchWithResult(context.Background(), func() interface{} {
 		_, found := c.RawGet("expired")
 		return found
 	})
+	if err != nil {
+		t.Fatalf("dispatch error: %v", err)
+	}
 	if res.(bool) {
 		t.Error("expected expired key to be cleaned up")
 	}
 
-	res = e.DispatchWithResult(func() interface{} {
+	res, err = e.DispatchWithResult(context.Background(), func() interface{} {
 		_, found := c.RawGet("alive")
 		return found
 	})
+	if err != nil {
+		t.Fatalf("dispatch error: %v", err)
+	}
 	if !res.(bool) {
 		t.Error("expected alive key to remain")
 	}
@@ -77,7 +84,7 @@ func TestWorker_Stop(t *testing.T) {
 	_, e := setup(t)
 
 	w := NewCleanupWorker(cache.New(), e, time.Hour)
-	w.Start()
+	w.Start(context.Background())
 	w.Stop()
 	w.Stop() // idempotent
 }
@@ -86,7 +93,7 @@ func TestWorker_UpdateInterval(t *testing.T) {
 	_, e := setup(t)
 
 	w := NewCleanupWorker(cache.New(), e, time.Hour)
-	w.Start()
+	w.Start(context.Background())
 	defer w.Stop()
 
 	// Should not block or panic.
@@ -95,8 +102,8 @@ func TestWorker_UpdateInterval(t *testing.T) {
 
 func TestSnapshotWorker_UpdateFile(t *testing.T) {
 	c, e := setup(t)
-	e.Dispatch(func() {
-		_ = c.RawSet("k", "v", 0)
+	e.Dispatch(context.Background(), func() {
+		_ = c.RawSet(context.Background(), "k", "v", 0)
 	})
 
 	dir := t.TempDir()
@@ -104,7 +111,7 @@ func TestSnapshotWorker_UpdateFile(t *testing.T) {
 	file2 := filepath.Join(dir, "snap2.dat")
 
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file1)
-	w.Start()
+	w.Start(context.Background())
 
 	// Switch to file2.
 	w.UpdateFile(file2)

@@ -21,11 +21,13 @@ var (
 	ErrDuplicateCmd    = errors.New("command already registered by another plugin")
 )
 
-// RequestSeq is exported so the hooks package can generate unique IDs too.
-var RequestSeq atomic.Uint64
+// requestSeq is a package-private monotonic counter; callers outside the
+// package use NextRequestID to mint IDs.
+var requestSeq atomic.Uint64
 
+// NextRequestID returns a new unique request identifier for plugin calls.
 func NextRequestID() string {
-	return fmt.Sprintf("req-%d", RequestSeq.Add(1))
+	return fmt.Sprintf("req-%d", requestSeq.Add(1))
 }
 
 // PluginRoute describes a single command route to a plugin.

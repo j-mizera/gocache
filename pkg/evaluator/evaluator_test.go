@@ -25,7 +25,7 @@ func newTestEvaluator() (*BaseEvaluator, *engine.Engine, *serverOps.Tracker) {
 	go e.Run()
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	eval := New(c, e, "test.dat", "", br, wm).(*BaseEvaluator)
+	eval := New(c, e, "test.dat", "", br, wm)
 	tracker := serverOps.NewTracker()
 	eval.SetTracker(tracker)
 	return eval, e, tracker
@@ -86,7 +86,7 @@ func TestEvaluate_BasicCommand(t *testing.T) {
 	defer e.Stop()
 
 	ctx := clientctx.New()
-	result := eval.Evaluate(ctx, "PING", nil)
+	result := eval.Evaluate(context.Background(), ctx, "PING", nil)
 	if result.Value != "PONG" {
 		t.Errorf("expected PONG, got %v", result.Value)
 	}
@@ -97,7 +97,7 @@ func TestEvaluate_WithTracker_CreatesOperation(t *testing.T) {
 	defer e.Stop()
 
 	ctx := clientctx.New()
-	result := eval.Evaluate(ctx, "PING", nil)
+	result := eval.Evaluate(context.Background(), ctx, "PING", nil)
 	if result.Value != "PONG" {
 		t.Errorf("expected PONG, got %v", result.Value)
 	}
@@ -117,7 +117,7 @@ func TestEvaluate_WithTracker_OperationHasContext(t *testing.T) {
 	eval.SetOpHookExecutor(opHook)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	if opHook.startCalled.Load() != 1 {
 		t.Errorf("expected start hook called once, got %d", opHook.startCalled.Load())
@@ -150,7 +150,7 @@ func TestEvaluate_WithTracker_ParentID(t *testing.T) {
 	ctx := clientctx.New()
 	ctx.OperationID = "conn_1" // simulate connection operation
 
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	if opHook.lastOp.Load().ParentID != "conn_1" {
 		t.Errorf("expected parent conn_1, got %q", opHook.lastOp.Load().ParentID)
@@ -170,7 +170,7 @@ func TestEvaluate_WithTracker_REXMetadataInContext(t *testing.T) {
 		"tenant":      "acme",
 	}
 
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// REX metadata should be in operation context with shared.rex. prefix.
 	tp, ok := opHook.lastOp.Load().Get("shared.rex.traceparent")
@@ -198,7 +198,7 @@ func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
 	eval.SetOpHookExecutor(opHook)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// Verify enrichment landed in operation.
 	tp, ok := opHook.lastOp.Load().Get("shared.traceparent")
@@ -215,7 +215,7 @@ func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
 	eval.SetEmitter(emitter)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// Should have: operation.start, command.pre, command.post, operation.complete
 	if len(emitter.events) < 4 {
@@ -275,7 +275,7 @@ func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
 	eval.SetHookExecutor(cmdHook)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// The hook context should contain the operation-enriched traceparent.
 	if cmdHook.lastHookCtx == nil {
@@ -311,7 +311,7 @@ func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
 	eval.SetHookExecutor(cmdHook)
 
 	ctx := clientctx.New()
-	result := eval.Evaluate(ctx, "PING", nil)
+	result := eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// Command should be denied.
 	if result.Value == "PONG" {
@@ -352,7 +352,7 @@ func TestEvaluate_WithTracker_PreHookEnrichmentFlowsToOperation(t *testing.T) {
 	eval.SetHookExecutor(cmdHook)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// Pre-hook enrichments should be in the operation.
 	user, _ := opHook.lastOp.Load().Get("shared.user")
@@ -366,7 +366,7 @@ func TestEvaluate_UnknownCommand(t *testing.T) {
 	defer e.Stop()
 
 	ctx := clientctx.New()
-	result := eval.Evaluate(ctx, "NOSUCHCMD", nil)
+	result := eval.Evaluate(context.Background(), ctx, "NOSUCHCMD", nil)
 
 	// Unknown commands don't create operations (they bail before the op lifecycle).
 	if tracker.ActiveCount() != 0 {
@@ -382,7 +382,7 @@ func TestEvaluate_TransactionQueued(t *testing.T) {
 	ctx := clientctx.New()
 	ctx.InTransaction = true
 
-	result := eval.Evaluate(ctx, "SET", []string{"key", "value"})
+	result := eval.Evaluate(context.Background(), ctx, "SET", []string{"key", "value"})
 	if result.Value != "QUEUED" {
 		t.Errorf("expected QUEUED, got %v", result.Value)
 	}
@@ -406,7 +406,7 @@ func TestEvaluate_ConcurrentCommands(t *testing.T) {
 	for range n {
 		go func() {
 			ctx := clientctx.New()
-			eval.Evaluate(ctx, "PING", nil)
+			eval.Evaluate(context.Background(), ctx, "PING", nil)
 			done <- struct{}{}
 		}()
 	}
@@ -435,7 +435,7 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 	eval.SetEmitter(emitter)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// Find the operation.complete event and check elapsed_ns > 0.
 	for _, evt := range emitter.events {
@@ -464,7 +464,7 @@ func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
 	eval.SetOpHookExecutor(opHook)
 
 	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
+	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// The completed operation should have _elapsed_ns in context.
 	elapsed, ok := opHook.lastOp.Load().Get(command.ElapsedNs)
@@ -483,7 +483,7 @@ func TestEvaluate_ArgValidation_NoOperation(t *testing.T) {
 
 	ctx := clientctx.New()
 	// SET requires 2 args.
-	result := eval.Evaluate(ctx, "SET", []string{"key"})
+	result := eval.Evaluate(context.Background(), ctx, "SET", []string{"key"})
 
 	// Arg validation failure happens before operation creation.
 	// Actually — arg validation happens BEFORE op creation in current code.

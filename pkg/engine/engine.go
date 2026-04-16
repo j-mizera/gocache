@@ -1,10 +1,25 @@
+// Package engine serialises all cache mutations through a single goroutine.
+//
+// Callers submit work via Dispatch or DispatchWithResult. The engine goroutine
+// executes the work under the cache lock and returns the result through a
+// per-call channel. Callers pass a context.Context so shutdown and timeouts
+// propagate correctly; if the context expires before the work starts, the
+// engine returns ctx.Err() without executing the function. If the engine is
+// stopped before the work starts, ErrEngineStopped is returned.
 package engine
 
 import (
+	"context"
+	"errors"
+	"sync"
+
 	"gocache/api/logger"
 	"gocache/pkg/cache"
-	"sync"
 )
+
+// ErrEngineStopped is returned by Dispatch/DispatchWithResult when the engine
+// has been stopped before the work could be executed.
+var ErrEngineStopped = errors.New("engine stopped")
 
 type Command struct {
 	Execute func() interface{}
@@ -48,7 +63,10 @@ func (e *Engine) Stop() {
 	})
 }
 
-func (e *Engine) Dispatch(fn func()) {
+// Dispatch submits fn to the engine and blocks until it runs (or the engine
+// stops, or ctx is cancelled). Returns nil on success, ErrEngineStopped if
+// the engine stopped before execution, or ctx.Err() if ctx was cancelled.
+func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
 	resChan := make(chan interface{}, 1)
 	select {
 	case e.cmdChan <- Command{
@@ -59,15 +77,24 @@ func (e *Engine) Dispatch(fn func()) {
 		ResChan: resChan,
 	}:
 	case <-e.stopChan:
-		return
+		return ErrEngineStopped
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	select {
 	case <-resChan:
+		return nil
 	case <-e.stopChan:
+		return ErrEngineStopped
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-func (e *Engine) DispatchWithResult(fn func() interface{}) interface{} {
+// DispatchWithResult submits fn to the engine and blocks until it runs.
+// Returns (result, nil) on success, (nil, ErrEngineStopped) if the engine
+// stopped before execution, or (nil, ctx.Err()) if ctx was cancelled.
+func (e *Engine) DispatchWithResult(ctx context.Context, fn func() interface{}) (interface{}, error) {
 	resChan := make(chan interface{}, 1)
 	select {
 	case e.cmdChan <- Command{
@@ -75,12 +102,16 @@ func (e *Engine) DispatchWithResult(fn func() interface{}) interface{} {
 		ResChan: resChan,
 	}:
 	case <-e.stopChan:
-		return nil
+		return nil, ErrEngineStopped
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 	select {
 	case res := <-resChan:
-		return res
+		return res, nil
 	case <-e.stopChan:
-		return nil
+		return nil, ErrEngineStopped
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }

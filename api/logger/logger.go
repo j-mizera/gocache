@@ -4,12 +4,18 @@
 // written to a configurable io.Writer (stdout by default). The log collector
 // worker reads from the pipe and emits LogEntry events to the event bus.
 //
-// The default log methods (Trace, Debug, Info, Warn, Error) require an
-// operation context. Use TraceNoCtx, DebugNoCtx, etc. for the rare cases
-// where no operation is active (early startup, plugin loading).
+// The default log methods (Trace, Debug, Info, Warn, Error) take a
+// context.Context and extract the current *ops.Operation via
+// operations.FromContext. If no operation is present the log line is still
+// written but without operation correlation.
+//
+// Use the NoCtx variants only at boundaries where no operation exists:
+// early startup before the bootstrap operation, plugin discovery/loading,
+// and config parsing.
 package logger
 
 import (
+	"context"
 	"io"
 	"os"
 	"sync/atomic"
@@ -35,19 +41,28 @@ func New(w io.Writer, source, level string) *Logger {
 	return &Logger{zl: zl}
 }
 
-// --- Default log methods (WITH operation context) ---
-// These are the standard methods. Every log call should pass an operation.
-// The operation may be nil — context is simply omitted in that case.
+// --- Default log methods (WITH operation context via ctx) ---
+// These are the standard methods. Every log call should pass the ambient ctx.
+// The operation is extracted via ops.FromContext(ctx); if nil, context is omitted.
 
-func (l *Logger) Trace(op *ops.Operation) *OpEvent { return &OpEvent{event: l.zl.Trace(), op: op} }
-func (l *Logger) Debug(op *ops.Operation) *OpEvent { return &OpEvent{event: l.zl.Debug(), op: op} }
-func (l *Logger) Info(op *ops.Operation) *OpEvent  { return &OpEvent{event: l.zl.Info(), op: op} }
-func (l *Logger) Warn(op *ops.Operation) *OpEvent  { return &OpEvent{event: l.zl.Warn(), op: op} }
-func (l *Logger) Error(op *ops.Operation) *OpEvent { return &OpEvent{event: l.zl.Error(), op: op} }
+func (l *Logger) Trace(ctx context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Trace(), op: ops.FromContext(ctx)}
+}
+func (l *Logger) Debug(ctx context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Debug(), op: ops.FromContext(ctx)}
+}
+func (l *Logger) Info(ctx context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Info(), op: ops.FromContext(ctx)}
+}
+func (l *Logger) Warn(ctx context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Warn(), op: ops.FromContext(ctx)}
+}
+func (l *Logger) Error(ctx context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Error(), op: ops.FromContext(ctx)}
+}
 
 // --- NoCtx methods (WITHOUT operation context) ---
-// For the rare cases where no operation is active: early startup, plugin loading,
-// shutdown after operations are cleaned up.
+// For boundaries with no operation: early startup, plugin loading, config loading.
 
 func (l *Logger) TraceNoCtx() *zerolog.Event { return l.zl.Trace() }
 func (l *Logger) DebugNoCtx() *zerolog.Event { return l.zl.Debug() }
@@ -70,6 +85,11 @@ func (e *OpEvent) Str(key, val string) *OpEvent {
 
 func (e *OpEvent) Int(key string, val int) *OpEvent {
 	e.event = e.event.Int(key, val)
+	return e
+}
+
+func (e *OpEvent) Int64(key string, val int64) *OpEvent {
+	e.event = e.event.Int64(key, val)
 	return e
 }
 
@@ -146,11 +166,11 @@ func Default() *Logger {
 
 // --- Package-level convenience functions (WITH context, delegate to Default()) ---
 
-func Trace(op *ops.Operation) *OpEvent { return Default().Trace(op) }
-func Debug(op *ops.Operation) *OpEvent { return Default().Debug(op) }
-func Info(op *ops.Operation) *OpEvent  { return Default().Info(op) }
-func Warn(op *ops.Operation) *OpEvent  { return Default().Warn(op) }
-func Error(op *ops.Operation) *OpEvent { return Default().Error(op) }
+func Trace(ctx context.Context) *OpEvent { return Default().Trace(ctx) }
+func Debug(ctx context.Context) *OpEvent { return Default().Debug(ctx) }
+func Info(ctx context.Context) *OpEvent  { return Default().Info(ctx) }
+func Warn(ctx context.Context) *OpEvent  { return Default().Warn(ctx) }
+func Error(ctx context.Context) *OpEvent { return Default().Error(ctx) }
 
 // --- Package-level convenience functions (NO context, delegate to Default()) ---
 

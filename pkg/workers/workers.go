@@ -18,7 +18,10 @@ import (
 const defaultInterval = 5 * time.Minute
 
 type Worker interface {
-	Start()
+	// Start begins the worker's ticker loop. parentCtx is the scheduler/server
+	// lifecycle context; operations created each tick derive from it so
+	// cancellation propagates.
+	Start(parentCtx context.Context)
 	Stop()
 	UpdateInterval(d time.Duration)
 }
@@ -45,20 +48,23 @@ func (w *baseWorker) SetEmitter(e events.Emitter) { w.emitter = e }
 // SetOpHookExecutor sets the operation hook executor.
 func (w *baseWorker) SetOpHookExecutor(e evaluator.OpHookExecutor) { w.opHookExecutor = e }
 
-// startOp creates an operation if tracker is set, runs start hooks, emits start event.
-func (w *baseWorker) startOp(opType ops.Type) *ops.Operation {
+// startOp creates an operation if tracker is set, runs start hooks, emits start
+// event. Returns (op, ctx) where ctx is derived from parentCtx and carries op
+// for log correlation downstream.
+func (w *baseWorker) startOp(parentCtx context.Context, opType ops.Type) (*ops.Operation, context.Context) {
 	if w.tracker == nil {
-		return nil
+		return nil, parentCtx
 	}
 	op := w.tracker.Start(opType, "")
 	op.Enrich("_trigger", "scheduled")
+	opCtx := ops.WithContext(parentCtx, op)
 	if w.opHookExecutor != nil && w.opHookExecutor.HasAny() {
-		w.opHookExecutor.RunStartHooks(context.Background(), op)
+		w.opHookExecutor.RunStartHooks(opCtx, op)
 	}
 	if w.emitter != nil {
 		w.emitter.Emit(events.NewOperationStart(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
 	}
-	return op
+	return op, opCtx
 }
 
 // completeOp marks an operation as completed, runs complete hooks, emits events.
@@ -136,7 +142,7 @@ func (w *SnapshotWorker) UpdateFile(file string) {
 	w.fileChan <- file
 }
 
-func (w *SnapshotWorker) Start() {
+func (w *SnapshotWorker) Start(parentCtx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	w.wg.Add(1)
 	go func() {
@@ -145,19 +151,22 @@ func (w *SnapshotWorker) Start() {
 			select {
 			case <-ticker.C:
 				file := w.file
-				op := w.startOp(ops.TypeSnapshot)
+				op, opCtx := w.startOp(parentCtx, ops.TypeSnapshot)
 				if op != nil {
 					op.Enrich("_file", file)
 				}
-				w.engine.Dispatch(func() {
-					if err := persistence.SaveSnapshot(file, w.cache); err != nil {
-						logger.WarnNoCtx().Err(err).Msg("snapshot save failed")
+				if err := w.engine.Dispatch(opCtx, func() {
+					if err := persistence.SaveSnapshot(opCtx, file, w.cache); err != nil {
+						logger.Warn(opCtx).Err(err).Msg("snapshot save failed")
 						w.failOp(op, err.Error())
 					} else {
-						logger.DebugNoCtx().Str("file", file).Msg("snapshot saved")
+						logger.Debug(opCtx).Str("file", file).Msg("snapshot saved")
 						w.completeOp(op)
 					}
-				})
+				}); err != nil {
+					logger.Warn(opCtx).Err(err).Msg("snapshot dispatch failed")
+					w.failOp(op, err.Error())
+				}
 			case d := <-w.intervalChan:
 				ticker.Reset(safeInterval(d))
 			case f := <-w.fileChan:
@@ -187,7 +196,7 @@ func NewCleanupWorker(c *cache.Cache, e *engine.Engine, interval time.Duration) 
 	}
 }
 
-func (w *CleanupWorker) Start() {
+func (w *CleanupWorker) Start(parentCtx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	w.wg.Add(1)
 	go func() {
@@ -195,8 +204,8 @@ func (w *CleanupWorker) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				op := w.startOp(ops.TypeCleanup)
-				w.engine.Dispatch(func() {
+				op, opCtx := w.startOp(parentCtx, ops.TypeCleanup)
+				if err := w.engine.Dispatch(opCtx, func() {
 					now := time.Now().UnixNano()
 					w.cache.Range(func(key string, entry *cache.Entry, expiration int64) bool {
 						if expiration > 0 && now > expiration {
@@ -204,9 +213,12 @@ func (w *CleanupWorker) Start() {
 						}
 						return true
 					})
-					logger.DebugNoCtx().Msg("cleanup sweep completed")
+					logger.Debug(opCtx).Msg("cleanup sweep completed")
 					w.completeOp(op)
-				})
+				}); err != nil {
+					logger.Warn(opCtx).Err(err).Msg("cleanup dispatch failed")
+					w.failOp(op, err.Error())
+				}
 			case d := <-w.intervalChan:
 				ticker.Reset(safeInterval(d))
 			case <-w.stopChan:

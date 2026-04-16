@@ -36,7 +36,7 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 			hash[field] = value
 		}
 
-		if err := cmdCtx.Cache.RawSet(key, hash, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, hash, 0); err != nil {
 			return err
 		}
 		return added
@@ -98,7 +98,7 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 		if len(hash) == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if err := cmdCtx.Cache.RawSet(key, hash, 0); err != nil {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, hash, 0); err != nil {
 				return err
 			}
 		}
