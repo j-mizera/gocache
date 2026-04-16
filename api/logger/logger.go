@@ -4,15 +4,16 @@
 // written to a configurable io.Writer (stdout by default). The log collector
 // worker reads from the pipe and emits LogEntry events to the event bus.
 //
-// The Logger carries a source tag (e.g. "server", "gobservability") and
-// supports operation-scoped logging via Op* methods that include the
-// operation ID and redacted operation context in the JSON output.
+// The default log methods (Trace, Debug, Info, Warn, Error) require an
+// operation context. Use TraceNoCtx, DebugNoCtx, etc. for the rare cases
+// where no operation is active (early startup, plugin loading).
 package logger
 
 import (
 	"io"
 	"os"
 	"sync/atomic"
+	"time"
 
 	ops "gocache/api/operations"
 
@@ -34,41 +35,26 @@ func New(w io.Writer, source, level string) *Logger {
 	return &Logger{zl: zl}
 }
 
-// --- Standard log methods (no operation context) ---
+// --- Default log methods (WITH operation context) ---
+// These are the standard methods. Every log call should pass an operation.
+// The operation may be nil — context is simply omitted in that case.
 
-func (l *Logger) Trace() *zerolog.Event { return l.zl.Trace() }
-func (l *Logger) Debug() *zerolog.Event { return l.zl.Debug() }
-func (l *Logger) Info() *zerolog.Event  { return l.zl.Info() }
-func (l *Logger) Warn() *zerolog.Event  { return l.zl.Warn() }
-func (l *Logger) Error() *zerolog.Event { return l.zl.Error() }
-func (l *Logger) Fatal() *zerolog.Event { return l.zl.Fatal() }
+func (l *Logger) Trace(op *ops.Operation) *OpEvent { return &OpEvent{event: l.zl.Trace(), op: op} }
+func (l *Logger) Debug(op *ops.Operation) *OpEvent { return &OpEvent{event: l.zl.Debug(), op: op} }
+func (l *Logger) Info(op *ops.Operation) *OpEvent  { return &OpEvent{event: l.zl.Info(), op: op} }
+func (l *Logger) Warn(op *ops.Operation) *OpEvent  { return &OpEvent{event: l.zl.Warn(), op: op} }
+func (l *Logger) Error(op *ops.Operation) *OpEvent { return &OpEvent{event: l.zl.Error(), op: op} }
 
-// --- Operation-scoped log methods ---
+// --- NoCtx methods (WITHOUT operation context) ---
+// For the rare cases where no operation is active: early startup, plugin loading,
+// shutdown after operations are cleaned up.
 
-// OpTrace logs at Trace level with operation context.
-func (l *Logger) OpTrace(op *ops.Operation) *OpEvent {
-	return &OpEvent{event: l.zl.Trace(), op: op}
-}
-
-// OpDebug logs at Debug level with operation context.
-func (l *Logger) OpDebug(op *ops.Operation) *OpEvent {
-	return &OpEvent{event: l.zl.Debug(), op: op}
-}
-
-// OpInfo logs at Info level with operation context.
-func (l *Logger) OpInfo(op *ops.Operation) *OpEvent {
-	return &OpEvent{event: l.zl.Info(), op: op}
-}
-
-// OpWarn logs at Warn level with operation context.
-func (l *Logger) OpWarn(op *ops.Operation) *OpEvent {
-	return &OpEvent{event: l.zl.Warn(), op: op}
-}
-
-// OpError logs at Error level with operation context.
-func (l *Logger) OpError(op *ops.Operation) *OpEvent {
-	return &OpEvent{event: l.zl.Error(), op: op}
-}
+func (l *Logger) TraceNoCtx() *zerolog.Event { return l.zl.Trace() }
+func (l *Logger) DebugNoCtx() *zerolog.Event { return l.zl.Debug() }
+func (l *Logger) InfoNoCtx() *zerolog.Event  { return l.zl.Info() }
+func (l *Logger) WarnNoCtx() *zerolog.Event  { return l.zl.Warn() }
+func (l *Logger) ErrorNoCtx() *zerolog.Event { return l.zl.Error() }
+func (l *Logger) FatalNoCtx() *zerolog.Event { return l.zl.Fatal() }
 
 // OpEvent wraps a zerolog.Event with an optional operation.
 // On Msg/Msgf, the operation's ID and redacted context are injected into JSON.
@@ -102,6 +88,11 @@ func (e *OpEvent) Strs(key string, vals []string) *OpEvent {
 	return e
 }
 
+func (e *OpEvent) Dur(key string, val time.Duration) *OpEvent {
+	e.event = e.event.Dur(key, val)
+	return e
+}
+
 func (e *OpEvent) Interface(key string, val interface{}) *OpEvent {
 	e.event = e.event.Interface(key, val)
 	return e
@@ -130,13 +121,17 @@ func (e *OpEvent) injectContext() {
 
 // --- Default logger (server uses this, writes to stdout) ---
 
-var (
-	defaultLogger atomic.Pointer[Logger]
-)
+var defaultLogger atomic.Pointer[Logger]
 
 // Init initializes the default server logger writing to stdout.
 func Init(level string) {
 	defaultLogger.Store(New(os.Stdout, "server", level))
+}
+
+// InitWithWriter initializes the default server logger writing to a custom writer.
+// Used by main.go to pipe logs through the log collector while teeing to stderr.
+func InitWithWriter(w io.Writer, level string) {
+	defaultLogger.Store(New(w, "server", level))
 }
 
 // Default returns the default logger. Thread-safe.
@@ -144,17 +139,24 @@ func Default() *Logger {
 	if l := defaultLogger.Load(); l != nil {
 		return l
 	}
-	// Lazy init for tests that don't call Init().
 	l := New(os.Stdout, "server", "info")
 	defaultLogger.CompareAndSwap(nil, l)
 	return defaultLogger.Load()
 }
 
-// --- Package-level convenience functions (delegate to Default()) ---
+// --- Package-level convenience functions (WITH context, delegate to Default()) ---
 
-func Trace() *zerolog.Event { return Default().Trace() }
-func Debug() *zerolog.Event { return Default().Debug() }
-func Info() *zerolog.Event  { return Default().Info() }
-func Warn() *zerolog.Event  { return Default().Warn() }
-func Error() *zerolog.Event { return Default().Error() }
-func Fatal() *zerolog.Event { return Default().Fatal() }
+func Trace(op *ops.Operation) *OpEvent { return Default().Trace(op) }
+func Debug(op *ops.Operation) *OpEvent { return Default().Debug(op) }
+func Info(op *ops.Operation) *OpEvent  { return Default().Info(op) }
+func Warn(op *ops.Operation) *OpEvent  { return Default().Warn(op) }
+func Error(op *ops.Operation) *OpEvent { return Default().Error(op) }
+
+// --- Package-level convenience functions (NO context, delegate to Default()) ---
+
+func TraceNoCtx() *zerolog.Event { return Default().TraceNoCtx() }
+func DebugNoCtx() *zerolog.Event { return Default().DebugNoCtx() }
+func InfoNoCtx() *zerolog.Event  { return Default().InfoNoCtx() }
+func WarnNoCtx() *zerolog.Event  { return Default().WarnNoCtx() }
+func ErrorNoCtx() *zerolog.Event { return Default().ErrorNoCtx() }
+func FatalNoCtx() *zerolog.Event { return Default().FatalNoCtx() }

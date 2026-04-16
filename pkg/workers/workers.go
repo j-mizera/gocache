@@ -151,10 +151,10 @@ func (w *SnapshotWorker) Start() {
 				}
 				w.engine.Dispatch(func() {
 					if err := persistence.SaveSnapshot(file, w.cache); err != nil {
-						logger.Warn().Err(err).Msg("snapshot save failed")
+						logger.WarnNoCtx().Err(err).Msg("snapshot save failed")
 						w.failOp(op, err.Error())
 					} else {
-						logger.Debug().Str("file", file).Msg("snapshot saved")
+						logger.DebugNoCtx().Str("file", file).Msg("snapshot saved")
 						w.completeOp(op)
 					}
 				})
@@ -204,7 +204,7 @@ func (w *CleanupWorker) Start() {
 						}
 						return true
 					})
-					logger.Debug().Msg("cleanup sweep completed")
+					logger.DebugNoCtx().Msg("cleanup sweep completed")
 					w.completeOp(op)
 				})
 			case d := <-w.intervalChan:

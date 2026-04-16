@@ -19,14 +19,16 @@ import (
 
 // --- Test helpers ---
 
-func newTestEvaluator() (*BaseEvaluator, *engine.Engine) {
+func newTestEvaluator() (*BaseEvaluator, *engine.Engine, *serverOps.Tracker) {
 	c := cache.New()
 	e := engine.New(c)
 	go e.Run()
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	eval := New(c, e, "test.dat", "", br, wm).(*BaseEvaluator)
-	return eval, e
+	tracker := serverOps.NewTracker()
+	eval.SetTracker(tracker)
+	return eval, e, tracker
 }
 
 // mockHookExecutor implements command.HookExecutor for testing.
@@ -79,11 +81,10 @@ func (m *mockEmitter) Emit(evt apiEvents.Event) {
 
 // --- Tests ---
 
-func TestEvaluate_NilTracker_Fallback(t *testing.T) {
-	eval, e := newTestEvaluator()
+func TestEvaluate_BasicCommand(t *testing.T) {
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
 
-	// No tracker set — should work exactly like before.
 	ctx := clientctx.New()
 	result := eval.Evaluate(ctx, "PING", nil)
 	if result.Value != "PONG" {
@@ -92,11 +93,8 @@ func TestEvaluate_NilTracker_Fallback(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_CreatesOperation(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, tracker := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	ctx := clientctx.New()
 	result := eval.Evaluate(ctx, "PING", nil)
@@ -111,11 +109,8 @@ func TestEvaluate_WithTracker_CreatesOperation(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_OperationHasContext(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	// Use a mock op hook executor that captures the operation.
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -146,11 +141,8 @@ func TestEvaluate_WithTracker_OperationHasContext(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_ParentID(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	opHook := &mockOpHookExecutor{hasAny: true}
 	eval.SetOpHookExecutor(opHook)
@@ -166,11 +158,8 @@ func TestEvaluate_WithTracker_ParentID(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_REXMetadataInContext(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	opHook := &mockOpHookExecutor{hasAny: true}
 	eval.SetOpHookExecutor(opHook)
@@ -195,11 +184,8 @@ func TestEvaluate_WithTracker_REXMetadataInContext(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	// Op hook enriches with traceparent during start.
 	opHook := &mockOpHookExecutor{
@@ -222,11 +208,8 @@ func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	emitter := &mockEmitter{}
 	eval.SetEmitter(emitter)
@@ -274,11 +257,8 @@ func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	// Op hook enriches operation context.
 	opHook := &mockOpHookExecutor{
@@ -315,11 +295,8 @@ func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, tracker := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	opHook := &mockOpHookExecutor{hasAny: true}
 	eval.SetOpHookExecutor(opHook)
@@ -353,11 +330,8 @@ func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_PreHookEnrichmentFlowsToOperation(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	opHook := &mockOpHookExecutor{hasAny: true}
 	eval.SetOpHookExecutor(opHook)
@@ -387,70 +361,9 @@ func TestEvaluate_WithTracker_PreHookEnrichmentFlowsToOperation(t *testing.T) {
 	}
 }
 
-func TestEvaluate_NilTracker_WithHooks_Fallback(t *testing.T) {
-	eval, e := newTestEvaluator()
-	defer e.Stop()
-
-	// No tracker, but hooks are set — should use legacy hookCtx path.
-	cmdHook := &mockHookExecutor{
-		hasAny:    true,
-		preResult: &command.PreHookResult{Denied: false},
-	}
-	eval.SetHookExecutor(cmdHook)
-
-	ctx := clientctx.New()
-	ctx.CmdMeta = map[string]string{"traceparent": "00-abc-def-01"}
-
-	result := eval.Evaluate(ctx, "PING", nil)
-	if result.Value != "PONG" {
-		t.Errorf("expected PONG, got %v", result.Value)
-	}
-
-	// Hook context should have been built via legacy path.
-	if cmdHook.lastHookCtx == nil {
-		t.Fatal("expected hook context")
-	}
-	if cmdHook.lastHookCtx[command.StartNs] == "" {
-		t.Error("legacy path should inject _start_ns")
-	}
-	// REX metadata should be injected.
-	if cmdHook.lastHookCtx["shared.rex.traceparent"] != "00-abc-def-01" {
-		t.Error("legacy path should inject REX metadata")
-	}
-}
-
-func TestEvaluate_NilTracker_WithEmitter_EmitsEvents(t *testing.T) {
-	eval, e := newTestEvaluator()
-	defer e.Stop()
-
-	emitter := &mockEmitter{}
-	eval.SetEmitter(emitter)
-
-	ctx := clientctx.New()
-	eval.Evaluate(ctx, "PING", nil)
-
-	// Should emit command.pre and command.post (no operation events).
-	if len(emitter.events) != 2 {
-		t.Fatalf("expected 2 events without tracker, got %d", len(emitter.events))
-	}
-	if emitter.events[0].Proto.Type != string(apiEvents.CommandPre) {
-		t.Errorf("expected command.pre, got %s", emitter.events[0].Proto.Type)
-	}
-	if emitter.events[1].Proto.Type != string(apiEvents.CommandPost) {
-		t.Errorf("expected command.post, got %s", emitter.events[1].Proto.Type)
-	}
-	// No operation_id without tracker.
-	if emitter.events[0].Proto.OperationId != "" {
-		t.Error("expected empty operation_id without tracker")
-	}
-}
-
 func TestEvaluate_UnknownCommand(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, tracker := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	ctx := clientctx.New()
 	result := eval.Evaluate(ctx, "NOSUCHCMD", nil)
@@ -463,11 +376,8 @@ func TestEvaluate_UnknownCommand(t *testing.T) {
 }
 
 func TestEvaluate_TransactionQueued(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, tracker := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	ctx := clientctx.New()
 	ctx.InTransaction = true
@@ -484,11 +394,8 @@ func TestEvaluate_TransactionQueued(t *testing.T) {
 }
 
 func TestEvaluate_ConcurrentCommands(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, tracker := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	opHook := &mockOpHookExecutor{hasAny: true}
 	eval.SetOpHookExecutor(opHook)
@@ -521,11 +428,8 @@ func TestEvaluate_ConcurrentCommands(t *testing.T) {
 }
 
 func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	emitter := &mockEmitter{}
 	eval.SetEmitter(emitter)
@@ -553,11 +457,8 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 }
 
 func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, _ := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	opHook := &mockOpHookExecutor{hasAny: true}
 	eval.SetOpHookExecutor(opHook)
@@ -577,11 +478,8 @@ func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
 }
 
 func TestEvaluate_ArgValidation_NoOperation(t *testing.T) {
-	eval, e := newTestEvaluator()
+	eval, e, tracker := newTestEvaluator()
 	defer e.Stop()
-
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
 
 	ctx := clientctx.New()
 	// SET requires 2 args.

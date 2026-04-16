@@ -80,6 +80,7 @@ func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br 
 		requirePass:        requirePass,
 		blockingRegistry:   br,
 		watchManager:       wm,
+		tracker:            serverOps.NewTracker(),
 	}
 	b.registerAll()
 	return b
@@ -149,7 +150,7 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		if b.pluginRouter != nil && b.pluginRouter.HasCommand(op) {
 			return b.routeToPlugin(ctx, op, args)
 		}
-		logger.Debug().Str("command", op).Msg("unknown command")
+		logger.DebugNoCtx().Str("command", op).Msg("unknown command")
 		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 
@@ -173,55 +174,33 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 		}
 	}
 
-	// --- Operation lifecycle ---
-	// When tracker is set, create a command operation that subsumes hookCtx.
-	// When tracker is nil, fall back to the existing hookCtx construction.
-	var (
-		cmdOp   *ops.Operation
-		hookCtx map[string]string
-		startNs int64
-	)
+	// --- Create command operation ---
+	cmdOp := b.tracker.Start(ops.TypeCommand, ctx.OperationID)
+	startNs := cmdOp.StartTime.UnixNano()
 
-	if b.tracker != nil {
-		// Determine parent operation ID from the connection context.
-		parentID := ""
-		if ctx.OperationID != "" {
-			parentID = ctx.OperationID
+	// Inject server context into operation.
+	cmdOp.Enrich(command.StartNs, strconv.FormatInt(startNs, 10))
+	cmdOp.Enrich(command.OperationID, cmdOp.ID)
+	cmdOp.Enrich("_command", op)
+	cmdOp.Enrich("_arg_count", strconv.Itoa(len(args)))
+
+	// Inject REX metadata into operation context.
+	if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
+		metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
+		for k, v := range metadata {
+			cmdOp.Enrich(rex.Prefix+k, v)
 		}
-		cmdOp = b.tracker.Start(ops.TypeCommand, parentID)
-		startNs = cmdOp.StartTime.UnixNano()
+	}
 
-		// Inject server context into operation.
-		cmdOp.Enrich(command.StartNs, strconv.FormatInt(startNs, 10))
-		cmdOp.Enrich(command.OperationID, cmdOp.ID)
-		cmdOp.Enrich("_command", op)
-		cmdOp.Enrich("_arg_count", strconv.Itoa(len(args)))
+	// Fire operation start hooks (synchronous — enriches context before work).
+	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
+		b.opHookExecutor.RunStartHooks(context.Background(), cmdOp)
+	}
 
-		// Inject REX metadata into operation context.
-		if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
-			metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
-			for k, v := range metadata {
-				cmdOp.Enrich(rex.Prefix+k, v)
-			}
-		}
-
-		// Fire operation start hooks (synchronous — enriches context before work).
-		if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
-			b.opHookExecutor.RunStartHooks(context.Background(), cmdOp)
-		}
-
-		// Emit operation.start event.
-		if b.emitter != nil {
-			b.emitter.Emit(events.NewOperationStart(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, cmdOp.ContextSnapshot(false)))
-		}
-
-		// Emit command.pre event with operation_id.
-		if b.emitter != nil {
-			b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
-		}
-	} else if b.emitter != nil {
-		// No tracker — emit command.pre event without operation_id.
-		b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)))
+	// Emit operation.start + command.pre events.
+	if b.emitter != nil {
+		b.emitter.Emit(events.NewOperationStart(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, cmdOp.ContextSnapshot(false)))
+		b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
 	}
 
 	cmdCtx := &command.Context{
@@ -240,40 +219,23 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 	}
 
 	// --- Command hooks (pre) ---
-	// Hook context is derived from operation context (if available) or built standalone.
+	var hookCtx map[string]string
 	hasHooks := b.hookExecutor != nil && b.hookExecutor.HasAny()
 	if hasHooks {
-		if cmdOp != nil {
-			// Derive hookCtx from operation context (filtered per plugin happens in executor).
-			hookCtx = cmdOp.ContextSnapshot(false)
-		} else {
-			// Fallback: build hookCtx manually (no operations).
-			startNs = time.Now().UnixNano()
-			hookCtx = command.NewHookCtx()
-			hookCtx[command.StartNs] = strconv.FormatInt(startNs, 10)
-			if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
-				rex.InjectIntoHookCtx(hookCtx, ctx.RexMeta, ctx.CmdMeta)
-			}
-		}
+		hookCtx = cmdOp.ContextSnapshot(false)
 
 		if pre := b.hookExecutor.RunPreHooks(context.Background(), op, args, hookCtx); pre != nil {
 			if pre.Denied {
-				// Denied — clean up operation if active.
-				if cmdOp != nil {
-					cmdOp.Fail("denied: " + pre.DenyReason)
-					if b.opHookExecutor != nil {
-						b.opHookExecutor.RunCompleteHooks(cmdOp)
-					}
-					b.tracker.Fail(cmdOp.ID, "denied: "+pre.DenyReason)
+				cmdOp.Fail("denied: " + pre.DenyReason)
+				if b.opHookExecutor != nil {
+					b.opHookExecutor.RunCompleteHooks(cmdOp)
 				}
+				b.tracker.Fail(cmdOp.ID, "denied: "+pre.DenyReason)
 				return command.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
 			}
 			hookCtx = pre.Context
-			// Merge pre-hook enrichments back into operation.
-			if cmdOp != nil {
-				for k, v := range hookCtx {
-					cmdOp.Enrich(k, v)
-				}
+			for k, v := range hookCtx {
+				cmdOp.Enrich(k, v)
 			}
 		}
 	}
@@ -290,42 +252,26 @@ func (b *BaseEvaluator) evaluateInternal(ctx *clientctx.ClientContext, op string
 	}
 
 	// --- Complete operation ---
-	if cmdOp != nil {
-		cmdOp.Complete()
-		elapsedNs := uint64(cmdOp.Duration().Nanoseconds())
-		resultVal, resultErr := resultToHookStrings(result)
+	cmdOp.Complete()
+	elapsedNs := uint64(cmdOp.Duration().Nanoseconds())
+	resultVal, resultErr := resultToHookStrings(result)
 
-		// Inject final timing into context.
-		cmdOp.Enrich(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
-		cmdOp.Enrich("_result", resultVal)
-		if resultErr != "" {
-			cmdOp.Enrich("_error", resultErr)
-		}
-
-		// Fire operation complete hooks (async).
-		if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
-			b.opHookExecutor.RunCompleteHooks(cmdOp)
-		}
-
-		// Emit events with operation_id.
-		if b.emitter != nil {
-			status := "completed"
-			failReason := ""
-			b.emitter.Emit(events.NewCommandPost(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
-			b.emitter.Emit(events.NewOperationComplete(cmdOp.ID, string(cmdOp.Type), elapsedNs, status, failReason, cmdOp.ContextSnapshot(false)))
-		}
-
-		b.tracker.Complete(cmdOp.ID)
-	} else if b.emitter != nil {
-		// No tracker — emit command.post event without operation_id.
-		var elapsedNs uint64
-		if startNs > 0 {
-			elapsedNs = uint64(time.Now().UnixNano() - startNs)
-		}
-		resultVal, resultErr := resultToHookStrings(result)
-		b.emitter.Emit(events.NewCommandPost(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)))
+	cmdOp.Enrich(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+	cmdOp.Enrich("_result", resultVal)
+	if resultErr != "" {
+		cmdOp.Enrich("_error", resultErr)
 	}
 
+	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
+		b.opHookExecutor.RunCompleteHooks(cmdOp)
+	}
+
+	if b.emitter != nil {
+		b.emitter.Emit(events.NewCommandPost(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+		b.emitter.Emit(events.NewOperationComplete(cmdOp.ID, string(cmdOp.Type), elapsedNs, "completed", "", cmdOp.ContextSnapshot(false)))
+	}
+
+	b.tracker.Complete(cmdOp.ID)
 	return result
 }
 

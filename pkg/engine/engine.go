@@ -27,7 +27,7 @@ func New(c *cache.Cache) *Engine {
 }
 
 func (e *Engine) Run() {
-	logger.Info().Msg("engine dispatch loop started")
+	logger.InfoNoCtx().Msg("engine dispatch loop started")
 	for {
 		select {
 		case cmd := <-e.cmdChan:
@@ -43,7 +43,7 @@ func (e *Engine) Run() {
 
 func (e *Engine) Stop() {
 	e.stopOnce.Do(func() {
-		logger.Info().Msg("engine stop signal received")
+		logger.InfoNoCtx().Msg("engine stop signal received")
 		close(e.stopChan)
 	})
 }
