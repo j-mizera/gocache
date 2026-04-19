@@ -111,7 +111,7 @@ type OperationHookRequest struct {
 	OperationID   string
 	OperationType string
 	ParentID      string
-	Phase         string            // "start" or "complete"
+	Phase         string            // apiplugin.PhaseStart or apiplugin.PhaseComplete
 	Context       map[string]string // filtered for this plugin's visibility
 }
 
@@ -385,7 +385,7 @@ func Run(ctx context.Context, p Plugin) error {
 				Phase:         req.Phase,
 				Context:       req.Context,
 			}
-			if req.Phase == "start" {
+			if req.Phase == apiplugin.PhaseStart {
 				// Start phase: synchronous — server is waiting for response.
 				result := ohp.HandleOperationHook(ctx, hookReq)
 				var ctxValues map[string]string

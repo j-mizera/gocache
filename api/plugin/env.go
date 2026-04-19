@@ -7,3 +7,11 @@ package plugin
 // communicates the Unix domain socket path to each plugin process. The
 // manager sets it via cmd.Env; the SDK reads it with os.Getenv at startup.
 const EnvSocketPath = "GOCACHE_PLUGIN_SOCK"
+
+// Operation hook phase strings. The server sets one of these on every
+// OperationHookRequest it sends; plugin authors compare the Phase field
+// against these constants to decide start-vs-complete handling.
+const (
+	PhaseStart    = "start"
+	PhaseComplete = "complete"
+)

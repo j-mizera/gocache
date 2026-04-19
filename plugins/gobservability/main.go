@@ -13,6 +13,7 @@ import (
 	"gocache/api/command"
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
+	apiplugin "gocache/api/plugin"
 	"gocache/sdk/pluginsdk"
 )
 
@@ -96,7 +97,7 @@ func (p *gobservabilityPlugin) OperationHooks() []pluginsdk.OperationHookDecl {
 }
 
 func (p *gobservabilityPlugin) HandleOperationHook(_ context.Context, req *pluginsdk.OperationHookRequest) *pluginsdk.OperationHookResponse {
-	if req.Phase == "start" {
+	if req.Phase == apiplugin.PhaseStart {
 		return p.onOperationStart(req)
 	}
 	p.onOperationComplete(req)
@@ -124,14 +125,11 @@ func (p *gobservabilityPlugin) onOperationComplete(req *pluginsdk.OperationHookR
 		return
 	}
 
-	status := "completed"
-	failReason := ""
-	if v, ok := req.Context[command.ErrorKey]; ok && v != "" {
-		status = "failed"
-		failReason = v
-	}
+	// An empty failReason signals a successful completion; a non-empty string
+	// becomes the OTEL span's error description.
+	failReason := req.Context[command.ErrorKey]
 
-	p.tracer.CompleteOperation(req.OperationID, status, failReason, req.Context)
+	p.tracer.CompleteOperation(req.OperationID, failReason, req.Context)
 }
 
 // EventPlugin interface — subscribe to log.entry events for OTEL log export.

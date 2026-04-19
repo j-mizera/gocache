@@ -67,7 +67,7 @@ func TestStartOperation_WithTraceparent(t *testing.T) {
 		t.Fatal("expected non-empty traceparent")
 	}
 
-	tracer.CompleteOperation("cmd_1", "completed", "", ctx)
+	tracer.CompleteOperation("cmd_1", "", ctx)
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {
@@ -96,7 +96,7 @@ func TestStartOperation_WithoutTraceparent(t *testing.T) {
 		t.Fatal("expected generated traceparent")
 	}
 
-	tracer.CompleteOperation("cleanup_1", "completed", "", map[string]string{})
+	tracer.CompleteOperation("cleanup_1", "", map[string]string{})
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {
@@ -121,7 +121,7 @@ func TestStartOperation_REXFallback(t *testing.T) {
 	}
 
 	tracer.StartOperation("cmd_2", "command", ctx)
-	tracer.CompleteOperation("cmd_2", "completed", "", ctx)
+	tracer.CompleteOperation("cmd_2", "", ctx)
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {
@@ -138,7 +138,7 @@ func TestCompleteOperation_Failed(t *testing.T) {
 	defer tracer.Shutdown(context.Background())
 
 	tracer.StartOperation("snap_1", "snapshot", map[string]string{})
-	tracer.CompleteOperation("snap_1", "failed", "disk full", map[string]string{})
+	tracer.CompleteOperation("snap_1", "disk full", map[string]string{})
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {
@@ -164,7 +164,7 @@ func TestCompleteOperation_SecretsRedacted(t *testing.T) {
 		"_command":          "SET",
 		"_secret.session":   "tok",
 	}
-	tracer.CompleteOperation("cmd_3", "completed", "", ctx)
+	tracer.CompleteOperation("cmd_3", "", ctx)
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {
@@ -196,7 +196,7 @@ func TestCompleteOperation_Unknown(t *testing.T) {
 	defer tracer.Shutdown(context.Background())
 
 	// Should not panic.
-	tracer.CompleteOperation("nonexistent", "completed", "", nil)
+	tracer.CompleteOperation("nonexistent", "", nil)
 }
 
 func TestNilTracer(t *testing.T) {
@@ -206,7 +206,7 @@ func TestNilTracer(t *testing.T) {
 	if tp != "" {
 		t.Error("expected empty traceparent from nil tracer")
 	}
-	tracer.CompleteOperation("cmd_1", "completed", "", nil)
+	tracer.CompleteOperation("cmd_1", "", nil)
 }
 
 func TestRecordLog_AttachesToSpan(t *testing.T) {
@@ -222,7 +222,7 @@ func TestRecordLog_AttachesToSpan(t *testing.T) {
 		"key":               "user:123",
 	})
 
-	tracer.CompleteOperation("cmd_10", "completed", "", map[string]string{})
+	tracer.CompleteOperation("cmd_10", "", map[string]string{})
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {

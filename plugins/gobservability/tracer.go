@@ -145,9 +145,11 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 	return fmt.Sprintf(traceparentFormat, sc.TraceID().String(), sc.SpanID().String())
 }
 
-// CompleteOperation finalizes the span for an operation.
-// Context is redacted (secrets stripped) before adding as attributes.
-func (t *Tracer) CompleteOperation(opID, status, failReason string, opContext map[string]string) {
+// CompleteOperation finalizes the span for an operation. An empty failReason
+// sets span status OK; a non-empty value sets span status Error with the
+// reason as description. Context is redacted (secrets stripped) before
+// attributes are attached.
+func (t *Tracer) CompleteOperation(opID, failReason string, opContext map[string]string) {
 	if t == nil {
 		return
 	}
@@ -175,7 +177,7 @@ func (t *Tracer) CompleteOperation(opID, status, failReason string, opContext ma
 		span.SetAttributes(attribute.String(k, v))
 	}
 
-	if status == "failed" {
+	if failReason != "" {
 		span.SetStatus(codes.Error, failReason)
 	} else {
 		span.SetStatus(codes.Ok, "")
