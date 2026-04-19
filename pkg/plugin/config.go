@@ -25,6 +25,11 @@ const (
 
 // deprecatedCriticalWarnOnce ensures we only log the migration warning
 // once per process no matter how many overrides still use the old field.
+// Intentional tradeoff: on a config hot-reload that re-adds a
+// `critical: true` after the first warn, the second reload will stay
+// silent. We accept that because the first log is sufficient — operators
+// fix the YAML once, not per reload — and spamming WARN per reload would
+// add noise to a hot-reload's already-busy log window.
 var deprecatedCriticalWarnOnce sync.Once
 
 // PluginsConfig holds the plugin system configuration.

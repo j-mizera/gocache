@@ -77,15 +77,15 @@ type Options struct {
 // so callers can log it.
 //
 // Fatal-path rules: no locking, no allocations inside loops when avoidable,
-// a single os.WriteFile. If the write fails, the error is returned so the
-// caller can decide what to do (usually: log to stderr and re-panic anyway).
+// a single os.WriteFile. If disk I/O fails (out-of-space, permission,
+// read-only fs), the dump is emitted to stderr as a last-resort fallback
+// so the operator still gets the panic payload via their supervisor /
+// systemd-journal / container log driver. The filesystem path is best-effort;
+// stderr is the reliable floor.
 func Write(panicVal any, stack []byte, o Options) (string, error) {
 	dir := o.Dir
 	if dir == "" {
 		dir = defaultSubdir
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("crashdump: mkdir: %w", err)
 	}
 
 	now := time.Now()
@@ -117,15 +117,40 @@ func Write(panicVal any, stack []byte, o Options) (string, error) {
 
 	data, err := json.Marshal(d)
 	if err != nil {
+		// Marshal failure is almost impossible for this struct, but if it
+		// happens we still want *something* on stderr — the raw stack.
+		emitStderrFallback(d, stack, fmt.Errorf("crashdump: marshal: %w", err))
 		return "", fmt.Errorf("crashdump: marshal: %w", err)
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		emitStderrFallback(d, data, fmt.Errorf("crashdump: mkdir: %w", err))
+		return "", fmt.Errorf("crashdump: mkdir: %w", err)
 	}
 
 	name := fmt.Sprintf("crash-%d-%d.json", pid, now.UnixNano())
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
+		emitStderrFallback(d, data, fmt.Errorf("crashdump: write: %w", err))
 		return "", fmt.Errorf("crashdump: write: %w", err)
 	}
 	return path, nil
+}
+
+// emitStderrFallback is the floor-level "the disk won't take our dump"
+// escape hatch. Tries the pre-marshalled bytes first; on total failure
+// falls back to a minimal plaintext line so the operator at least sees
+// the panic value and PID in their supervisor logs. Ignored errors on
+// purpose — there is nowhere more reliable than stderr to fall back to.
+func emitStderrFallback(d Dump, body []byte, reason error) {
+	_, _ = fmt.Fprintf(os.Stderr, "crashdump: disk write failed (%v), emitting to stderr:\n", reason)
+	if len(body) > 0 {
+		_, _ = os.Stderr.Write(body)
+		_, _ = os.Stderr.Write([]byte{'\n'})
+		return
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "crashdump: pid=%d panic=%q stage=%q\n%s\n",
+		d.PID, d.PanicValue, d.BootStage, d.Stack)
 }
 
 // WriteFromPanic is a convenience wrapper suitable for a top-level

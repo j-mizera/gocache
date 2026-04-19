@@ -122,12 +122,20 @@ func ShutdownAll(ctx context.Context) {
 // invoke runs fn wrapped in a panic recover. On error from a strict plugin,
 // it logs Fatal (which calls os.Exit). Non-strict errors/panics are logged
 // at Error level and iteration continues.
+//
+// After each Fatal call we explicitly `return` instead of relying on
+// os.Exit-via-Fatal. zerolog's Fatal does call os.Exit(1) today, but a
+// future logger swap or a test double could leave execution alive — and
+// we don't want a strict failure to silently degrade into the non-strict
+// "continue" log line below. The redundant return makes the contract
+// explicit at the callsite.
 func invoke(ctx context.Context, r registration, phase string, fn func() error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			if r.mustSucceed {
 				logger.Fatal(ctx).Str("embedded_plugin", r.plugin.Name()).Str("phase", phase).
 					Interface("panic", rec).Msg("strict embedded plugin panicked")
+				return
 			}
 			logger.Error(ctx).Str("embedded_plugin", r.plugin.Name()).Str("phase", phase).
 				Interface("panic", rec).Msg("embedded plugin panicked — continuing")
@@ -137,6 +145,7 @@ func invoke(ctx context.Context, r registration, phase string, fn func() error) 
 		wrapped := fmt.Errorf("embedded plugin %q %s: %w", r.plugin.Name(), phase, err)
 		if r.mustSucceed {
 			logger.Fatal(ctx).Err(wrapped).Msg("strict embedded plugin failed")
+			return
 		}
 		logger.Error(ctx).Err(wrapped).Msg("embedded plugin failed — continuing")
 	}
