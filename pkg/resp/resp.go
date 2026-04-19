@@ -2,7 +2,6 @@ package resp
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -368,7 +367,7 @@ func (w *Writer) Write(v Value) error {
 	case Set:
 		b = w.marshalSet(v)
 	default:
-		return errors.New("unknown type")
+		return ErrUnknownType
 	}
 
 	_, err := w.writer.Write(b)

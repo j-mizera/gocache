@@ -12,6 +12,10 @@ import (
 	"gocache/pkg/resp"
 )
 
+// ErrInvalidTimeout is returned by BLPOP/BRPOP when the timeout argument
+// is not a valid non-negative float.
+var ErrInvalidTimeout = errors.New("timeout is not a float or out of range")
+
 func HandleLpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
@@ -199,7 +203,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	timeoutStr := cmdCtx.Args[len(cmdCtx.Args)-1]
 	timeoutSec, err := strconv.ParseFloat(timeoutStr, 64)
 	if err != nil || timeoutSec < 0 {
-		return command.Result{Err: errors.New("timeout is not a float or out of range")}
+		return command.Result{Err: ErrInvalidTimeout}
 	}
 	keys := cmdCtx.Args[:len(cmdCtx.Args)-1]
 

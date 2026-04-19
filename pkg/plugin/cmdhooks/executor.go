@@ -2,6 +2,7 @@ package cmdhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,14 @@ import (
 	cmd "gocache/pkg/command"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/rex"
+)
+
+// Sentinel errors returned by the critical hook send path. Callers use
+// errors.Is to distinguish them from unexpected failures.
+var (
+	ErrPluginConnClosed     = errors.New("plugin connection closed")
+	ErrUnexpectedResponse   = errors.New("unexpected response type")
+	ErrHookTimeout          = errors.New("hook timeout")
 )
 
 // Executor dispatches hooks to plugins over IPC.
@@ -140,15 +149,15 @@ func (e *Executor) sendCriticalHook(ctx context.Context, h *HookEntry, phase gcp
 	select {
 	case resp, ok := <-respCh:
 		if !ok {
-			return nil, fmt.Errorf("plugin connection closed")
+			return nil, ErrPluginConnClosed
 		}
 		hookResp := resp.GetHookResponse()
 		if hookResp == nil {
-			return nil, fmt.Errorf("unexpected response type")
+			return nil, ErrUnexpectedResponse
 		}
 		return hookResp, nil
 	case <-hookCtx.Done():
 		h.Conn.DeletePending(reqID)
-		return nil, fmt.Errorf("hook timeout")
+		return nil, ErrHookTimeout
 	}
 }

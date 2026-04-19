@@ -6,9 +6,17 @@
 package rex
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+)
+
+// Sentinel validation errors. ErrReservedPrefix wraps via %w so callers can
+// still extract the offending key and prefix from the message.
+var (
+	ErrEmptyKey       = errors.New("metadata key is empty")
+	ErrReservedPrefix = errors.New("metadata key uses reserved prefix")
 )
 
 // Reserved metadata key prefixes. User-supplied REX keys must not start with
@@ -34,15 +42,16 @@ func NewStore() *Store {
 
 // ValidateKey checks that a metadata key is valid. Keys starting with the
 // reserved internal ("_") or shared ("shared.") prefixes are rejected.
+// Returns ErrEmptyKey or a wrapped ErrReservedPrefix; both are errors.Is-matchable.
 func ValidateKey(key string) error {
 	if key == "" {
-		return fmt.Errorf("empty metadata key")
+		return ErrEmptyKey
 	}
 	if strings.HasPrefix(key, reservedInternalPrefix) {
-		return fmt.Errorf("metadata key %q: reserved prefix %q", key, reservedInternalPrefix)
+		return fmt.Errorf("%w: %q starts with %q", ErrReservedPrefix, key, reservedInternalPrefix)
 	}
 	if strings.HasPrefix(key, reservedSharedPrefix) {
-		return fmt.Errorf("metadata key %q: reserved prefix %q", key, reservedSharedPrefix)
+		return fmt.Errorf("%w: %q starts with %q", ErrReservedPrefix, key, reservedSharedPrefix)
 	}
 	return nil
 }
