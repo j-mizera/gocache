@@ -18,6 +18,7 @@ import (
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
+	"gocache/pkg/embedded"
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logcollector"
@@ -30,6 +31,16 @@ import (
 	"gocache/pkg/version"
 	"gocache/pkg/watch"
 	"gocache/pkg/workers"
+
+	// Embedded plugins — compile-time-linked observability hooks that run
+	// before config.Load and survive panics. See pkg/embedded for details.
+	// Add new embedded plugins as blank imports below (they self-register
+	// from init()). Build tags on individual plugin packages control which
+	// are actually compiled in.
+	//
+	// Registrations:
+	// - (crashdump): always on — A.3
+	// - (otlp):      build tag `otlp_embedded` — A.4
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
@@ -65,6 +76,18 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Process-wide context — used for both embedded plugin lifecycle and the
+	// rest of boot. Declared early so embedded.BootAll runs under it.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Embedded plugins run BEFORE config.Load so they can observe boot-time
+	// failures (e.g. a config parse error surfaces as an OTLP span). Defer
+	// ShutdownAll immediately so it fires on normal exit AND during a panic
+	// unwind — giving exporters a final flush even if main() crashes.
+	embedded.BootAll(ctx)
+	defer embedded.ShutdownAll(ctx)
+
 	// Load configuration: CLI flags > env vars (GOCACHE_*) > config file > defaults
 	initialCfg, v, err := config.Load(pflag.CommandLine)
 	if err != nil {
@@ -89,7 +112,14 @@ func main() {
 	logWriter := io.MultiWriter(logPipeW, os.Stderr)
 	logger.InitWithWriter(logWriter, cfg.Server.LogLevel)
 
+	// Hand the parsed config to embedded plugins so they can upgrade
+	// env-var-only defaults with YAML-backed values (e.g. OTLP endpoint).
+	embedded.ConfigLoadedAll(ctx, cfg)
+
 	logger.InfoNoCtx().Str("version", version.String()).Msg("starting gocache server")
+	if n := embedded.Count(); n > 0 {
+		logger.InfoNoCtx().Int("count", n).Strs("names", embedded.Names()).Msg("embedded plugins loaded")
+	}
 	if cfgFile := v.ConfigFileUsed(); cfgFile != "" {
 		logger.InfoNoCtx().Str("file", cfgFile).Msg("config loaded")
 	}
@@ -116,10 +146,6 @@ func main() {
 	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Persistence.SnapshotFile, cfg.Server.RequirePass, blockingRegistry, watchManager)
 	srv.SetEmitter(eventBus)
 	srv.SetTracker(tracker)
-
-	// Set up signal handling.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---
 	var pluginManager *pluginmgr.Manager
