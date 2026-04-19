@@ -215,9 +215,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 				continue
 			}
 			// Skip expired keys.
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				continue
 			}
 			if entry.ValueType != cache.ObjTypeList {

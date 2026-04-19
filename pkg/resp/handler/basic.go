@@ -120,10 +120,7 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 		return command.Result{Value: resp.ErrNotFloatValue()}
 	}
 	return command.Dispatch(cmdCtx, func() any {
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
-		}
+		lazyExpire(cmdCtx.Cache, key)
 
 		existing := 0.0
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
@@ -153,10 +150,7 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	suffix := cmdCtx.Args[1]
 	return command.Dispatch(cmdCtx, func() any {
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
-		}
+		lazyExpire(cmdCtx.Cache, key)
 
 		existing := ""
 		rawTTL := int64(0)
@@ -181,9 +175,7 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 func HandleStrlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	return command.Dispatch(cmdCtx, func() any {
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return int64(0)
 		}
 
@@ -205,9 +197,7 @@ func HandleMget(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, func() any {
 		result := make([]any, len(keys))
 		for i, key := range keys {
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				result[i] = nil
 				continue
 			}
@@ -245,10 +235,7 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 // incrByDelta is shared logic for INCR, DECR, INCRBY, DECRBY.
 // Must be called inside a Dispatch closure (cache lock is held).
 func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
-	_, state := cmdCtx.Cache.TTLInternal(key)
-	if state == cache.ValueExpired {
-		cmdCtx.Cache.RawDelete(key)
-	}
+	lazyExpire(cmdCtx.Cache, key)
 
 	current := int64(0)
 	rawTTL := int64(0)
@@ -321,8 +308,8 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
 		if nx && found {
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state != cache.ValueExpired {
+			// Live (non-expired) key blocks NX; expired key is lazily deleted and SET proceeds.
+			if !lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
 		}
@@ -350,11 +337,10 @@ func HandleSetnx(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
 		if found {
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state != cache.ValueExpired {
+			// Live (non-expired) key blocks SETNX; expired key is lazily deleted and SETNX proceeds.
+			if !lazyExpire(cmdCtx.Cache, key) {
 				return 0
 			}
-			cmdCtx.Cache.RawDelete(key)
 		}
 		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, val, 0); err != nil {
 			return err
@@ -376,9 +362,7 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 		if !found {
 			return 0
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
 		expiration := time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
@@ -421,9 +405,7 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 		if !found {
 			return nil
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return nil
 		}
 		return entry.Value
@@ -455,9 +437,7 @@ func HandleExists(cmdCtx *command.Context) command.Result {
 		if !found {
 			return 0
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
 		return 1
@@ -478,9 +458,7 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 		if !found {
 			return 0
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
 

@@ -29,9 +29,7 @@ func HandleType(cmdCtx *command.Context) command.Result {
 		if !found {
 			return resp.Value{Type: resp.SimpleString, Str: "none"}
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return resp.Value{Type: resp.SimpleString, Str: "none"}
 		}
 		var typeName string
@@ -63,9 +61,7 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 		if !found {
 			return resp.MarshalError("ERR no such key")
 		}
-		_, state := cmdCtx.Cache.TTLInternal(src)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(src)
+		if lazyExpire(cmdCtx.Cache, src) {
 			return resp.MarshalError("ERR no such key")
 		}
 		ttl := cmdCtx.Cache.RawTTL(src)
@@ -95,21 +91,16 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 		if !found {
 			return resp.MarshalError("ERR no such key")
 		}
-		_, state := cmdCtx.Cache.TTLInternal(src)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(src)
+		if lazyExpire(cmdCtx.Cache, src) {
 			return resp.MarshalError("ERR no such key")
 		}
 
 		// Check if destination already exists.
-		_, dstFound := cmdCtx.Cache.RawGet(dst)
-		if dstFound {
-			_, dstState := cmdCtx.Cache.TTLInternal(dst)
-			if dstState != cache.ValueExpired {
+		if _, dstFound := cmdCtx.Cache.RawGet(dst); dstFound {
+			// Live (non-expired) destination blocks RENAMENX; expired dst is lazily deleted.
+			if !lazyExpire(cmdCtx.Cache, dst) {
 				return 0
 			}
-			// Destination is expired — treat as absent.
-			cmdCtx.Cache.RawDelete(dst)
 		}
 
 		ttl := cmdCtx.Cache.RawTTL(src)
@@ -266,9 +257,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			if !found {
 				return nil
 			}
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
 			switch entry.ValueType {
@@ -300,9 +289,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			if !found {
 				return nil
 			}
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
 			idle := int(time.Since(entry.LastAccessed).Seconds())
