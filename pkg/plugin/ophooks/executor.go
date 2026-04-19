@@ -8,6 +8,7 @@ import (
 	gcpc "gocache/api/gcpc/v1"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
+	apiplugin "gocache/api/plugin"
 	"gocache/pkg/plugin/router"
 )
 
@@ -41,13 +42,13 @@ func (e *Executor) RunStartHooks(ctx context.Context, op *ops.Operation) {
 	for _, h := range matches {
 		filteredCtx := op.FilteredContext(h.PluginName, false)
 		reqID := router.NextRequestID()
-		env := gcpc.NewOperationHookRequest(reqID, op.ID, string(op.Type), op.ParentID, "start", filteredCtx)
+		env := gcpc.NewOperationHookRequest(reqID, op.ID, string(op.Type), op.ParentID, apiplugin.PhaseStart, filteredCtx)
 
 		hookCtx, cancel := context.WithTimeout(ctx, e.timeout)
 		respCh, err := h.Conn.Send(hookCtx, env, reqID)
 		if err != nil {
 			cancel()
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("op", op.ID).Err(err).
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("op", op.ID).Err(err).
 				Msg("operation start hook send failed, continuing")
 			continue
 		}
@@ -68,7 +69,7 @@ func (e *Executor) RunStartHooks(ctx context.Context, op *ops.Operation) {
 		case <-hookCtx.Done():
 			cancel()
 			h.Conn.DeletePending(reqID)
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("op", op.ID).
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("op", op.ID).
 				Msg("operation start hook timed out, continuing")
 		}
 	}
@@ -84,12 +85,8 @@ func (e *Executor) RunCompleteHooks(op *ops.Operation) {
 	for _, h := range matches {
 		filteredCtx := op.FilteredContext(h.PluginName, false)
 		reqID := router.NextRequestID()
-		env := gcpc.NewOperationHookRequest(reqID, op.ID, string(op.Type), op.ParentID, "complete", filteredCtx)
+		env := gcpc.NewOperationHookRequest(reqID, op.ID, string(op.Type), op.ParentID, apiplugin.PhaseComplete, filteredCtx)
 		go h.Conn.SendFireAndForget(env)
 	}
 }
 
-// RegistryForTesting returns the underlying registry. Test-only.
-func (e *Executor) RegistryForTesting() *Registry {
-	return e.registry
-}

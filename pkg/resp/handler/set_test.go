@@ -58,7 +58,7 @@ func TestEvaluator_Set(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("SMEMBERS failed: %v", res.Err)
 	}
-	members := res.Value.([]interface{})
+	members := res.Value.([]any)
 	if len(members) != 3 {
 		t.Errorf("Expected 3 members, got %d", len(members))
 	}

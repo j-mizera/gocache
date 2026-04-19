@@ -12,6 +12,10 @@ var (
 	ErrExecWithoutMulti    = errors.New("exec without multi")
 )
 
+// defaultProtoVersion is the initial RESP protocol version for a new client
+// connection. Clients upgrade to RESP3 via the HELLO command.
+const defaultProtoVersion = 2
+
 type ClientContext struct {
 	InTransaction bool
 	CommandQueue  [][]string
@@ -28,7 +32,7 @@ type ClientContext struct {
 func New() *ClientContext {
 	return &ClientContext{
 		CommandQueue: make([][]string, 0),
-		ProtoVersion: 2,
+		ProtoVersion: defaultProtoVersion,
 		WatchedKeys:  make(map[string]struct{}),
 	}
 }

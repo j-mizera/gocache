@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gocache/api/command"
 	ops "gocache/api/operations"
 
 	"github.com/rs/zerolog"
@@ -113,7 +114,7 @@ func (e *OpEvent) Dur(key string, val time.Duration) *OpEvent {
 	return e
 }
 
-func (e *OpEvent) Interface(key string, val interface{}) *OpEvent {
+func (e *OpEvent) Interface(key string, val any) *OpEvent {
 	e.event = e.event.Interface(key, val)
 	return e
 }
@@ -123,7 +124,7 @@ func (e *OpEvent) Msg(msg string) {
 	e.event.Msg(msg)
 }
 
-func (e *OpEvent) Msgf(format string, args ...interface{}) {
+func (e *OpEvent) Msgf(format string, args ...any) {
 	e.injectContext()
 	e.event.Msgf(format, args...)
 }
@@ -132,10 +133,10 @@ func (e *OpEvent) injectContext() {
 	if e.op == nil {
 		return
 	}
-	e.event = e.event.Str("_operation_id", e.op.ID)
+	e.event = e.event.Str(command.OperationID, e.op.ID)
 	ctx := e.op.ContextSnapshot(true) // redacted — secrets stripped
 	if len(ctx) > 0 {
-		e.event = e.event.Interface("_ctx", ctx)
+		e.event = e.event.Interface(command.CtxField, ctx)
 	}
 }
 

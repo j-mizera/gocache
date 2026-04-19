@@ -17,7 +17,7 @@ func HandleZadd(cmdCtx *command.Context) command.Result {
 
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		var zset *cache.SortedSet
 		added := 0
@@ -60,7 +60,7 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -98,7 +98,7 @@ func HandleZscore(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
@@ -122,7 +122,7 @@ func HandleZscore(cmdCtx *command.Context) command.Result {
 func HandleZcard(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -157,10 +157,10 @@ func HandleZrange(cmdCtx *command.Context) command.Result {
 		withScores = true
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
-			return []interface{}{}
+			return []any{}
 		}
 
 		if entry.ValueType != cache.ObjTypeSortedSet {
@@ -171,14 +171,14 @@ func HandleZrange(cmdCtx *command.Context) command.Result {
 		members := zset.Range(start, stop)
 
 		if withScores {
-			result := make([]interface{}, 0, len(members)*2)
+			result := make([]any, 0, len(members)*2)
 			for _, sm := range members {
 				result = append(result, sm.Member, sm.Score)
 			}
 			return result
 		}
 
-		result := make([]interface{}, 0, len(members))
+		result := make([]any, 0, len(members))
 		for _, sm := range members {
 			result = append(result, sm.Member)
 		}
@@ -193,7 +193,7 @@ func HandleZrank(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
@@ -223,7 +223,7 @@ func HandleZcount(cmdCtx *command.Context) command.Result {
 		return command.Result{Err: resp.ErrNotFloat}
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0

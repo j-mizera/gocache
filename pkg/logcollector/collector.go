@@ -13,7 +13,15 @@ import (
 	"strconv"
 	"sync"
 
+	"gocache/api/command"
 	"gocache/api/events"
+)
+
+// Scanner buffer sizes — initial 64 KiB grows up to 256 KiB for long log
+// lines (large redacted _ctx maps can exceed the default bufio.Scanner cap).
+const (
+	scannerInitBuf = 64 * 1024
+	scannerMaxBuf  = 256 * 1024
 )
 
 // Collector reads JSON log lines from multiple sources and emits LogEntry events.
@@ -49,7 +57,7 @@ func (c *Collector) Wait() {
 func (c *Collector) readSource(sourceName string, r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	// Increase buffer for long log lines (e.g. large _ctx).
-	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	scanner.Buffer(make([]byte, 0, scannerInitBuf), scannerMaxBuf)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -63,7 +71,7 @@ func (c *Collector) readSource(sourceName string, r io.Reader) {
 
 // parseLine parses a single JSON log line and emits a LogEntry event.
 func (c *Collector) parseLine(sourceName string, line []byte) {
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(line, &raw); err != nil {
 		// Not JSON — could be a plain text line from a plugin.
 		// Emit as a raw log entry with no structured fields.
@@ -81,17 +89,17 @@ func (c *Collector) parseLine(sourceName string, line []byte) {
 	if source == "" {
 		source = sourceName
 	}
-	operationID := stringField(raw, "_operation_id")
+	operationID := stringField(raw, command.OperationID)
 
 	// Build the fields map directly: one allocation sized for the upper bound
 	// (raw keys + potential _ctx keys + "_source"). Unknown keys are written
 	// straight in; _ctx entries are flattened in-place rather than merged.
-	ctxMap, _ := raw["_ctx"].(map[string]interface{})
+	ctxMap, _ := raw[command.CtxField].(map[string]any)
 	fields := make(map[string]string, len(raw)+len(ctxMap)+1)
 	fields["_source"] = source
 	for k, v := range raw {
 		switch k {
-		case "level", "message", "time", "source", "_operation_id", "_ctx":
+		case "level", "message", "time", "source", command.OperationID, command.CtxField:
 			continue
 		default:
 			if s, ok := formatJSONValue(v); ok {
@@ -115,7 +123,7 @@ func (c *Collector) parseLine(sourceName string, line []byte) {
 	c.emitter.Emit(evt)
 }
 
-func stringField(m map[string]interface{}, key string) string {
+func stringField(m map[string]any, key string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.(string); ok {
 			return s
@@ -126,7 +134,7 @@ func stringField(m map[string]interface{}, key string) string {
 
 // formatJSONValue renders a decoded JSON value as a string suitable for
 // the log fields map. Returns ("", false) if the value cannot be serialised.
-func formatJSONValue(v interface{}) (string, bool) {
+func formatJSONValue(v any) (string, bool) {
 	switch val := v.(type) {
 	case string:
 		return val, true

@@ -158,9 +158,9 @@ func TestEvaluator_Hello(t *testing.T) {
 		if res.Err != nil {
 			t.Fatalf("HELLO 2 failed: %v", res.Err)
 		}
-		info, ok := res.Value.(map[string]interface{})
+		info, ok := res.Value.(map[string]any)
 		if !ok {
-			t.Fatalf("expected map[string]interface{}, got %T", res.Value)
+			t.Fatalf("expected map[string]any, got %T", res.Value)
 		}
 		if info["proto"] != 2 {
 			t.Errorf("expected proto=2, got %v", info["proto"])
@@ -175,9 +175,9 @@ func TestEvaluator_Hello(t *testing.T) {
 		if res.Err != nil {
 			t.Fatalf("HELLO 3 failed: %v", res.Err)
 		}
-		info, ok := res.Value.(map[string]interface{})
+		info, ok := res.Value.(map[string]any)
 		if !ok {
-			t.Fatalf("expected map[string]interface{}, got %T", res.Value)
+			t.Fatalf("expected map[string]any, got %T", res.Value)
 		}
 		if info["proto"] != 3 {
 			t.Errorf("expected proto=3, got %v", info["proto"])
@@ -204,7 +204,7 @@ func TestEvaluator_Hello(t *testing.T) {
 		if res.Err != nil {
 			t.Fatalf("HELLO REXV 1 failed: %v", res.Err)
 		}
-		info, ok := res.Value.(map[string]interface{})
+		info, ok := res.Value.(map[string]any)
 		if !ok {
 			t.Fatalf("expected map, got %T", res.Value)
 		}
@@ -219,7 +219,7 @@ func TestEvaluator_Hello(t *testing.T) {
 	t.Run("HELLO without REXV omits rexv field", func(t *testing.T) {
 		_, _, ctx := setup(t)
 		res := eval(t, c, e, ctx, "HELLO", []string{"3"})
-		info := res.Value.(map[string]interface{})
+		info := res.Value.(map[string]any)
 		if _, exists := info["rexv"]; exists {
 			t.Errorf("expected no rexv field when REXV not negotiated, got %v", info["rexv"])
 		}

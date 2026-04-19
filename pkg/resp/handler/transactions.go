@@ -47,12 +47,12 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 	}
 
 	if queue == nil {
-		return command.Result{Value: []interface{}{}}
+		return command.Result{Value: []any{}}
 	}
 
 	batchCtx := cmdCtx.Context()
-	results, err := cmdCtx.Engine.DispatchWithResult(batchCtx, func() interface{} {
-		batchResults := make([]interface{}, len(queue))
+	results, err := cmdCtx.Engine.DispatchWithResult(batchCtx, func() any {
+		batchResults := make([]any, len(queue))
 		for i, cmdParts := range queue {
 			res := cmdCtx.EvalFn(batchCtx, cmdCtx.Client, cmdParts[0], cmdParts[1:], true)
 			if res.Err != nil {

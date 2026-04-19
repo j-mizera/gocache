@@ -11,6 +11,7 @@ import (
 
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
+	apiplugin "gocache/api/plugin"
 	"gocache/api/transport"
 )
 
@@ -110,7 +111,7 @@ type OperationHookRequest struct {
 	OperationID   string
 	OperationType string
 	ParentID      string
-	Phase         string            // "start" or "complete"
+	Phase         string            // apiplugin.PhaseStart or apiplugin.PhaseComplete
 	Context       map[string]string // filtered for this plugin's visibility
 }
 
@@ -139,8 +140,8 @@ type CommandDecl struct {
 // CommandResult holds the result of a plugin command execution.
 type CommandResult struct {
 	// Value can be: string, int, int64, float64, nil, error,
-	// []interface{}, []string, map[string]string, map[string]interface{}.
-	Value interface{}
+	// []any, []string, map[string]string, map[string]any.
+	Value any
 }
 
 // HookDecl declares a hook a plugin wants to intercept.
@@ -175,9 +176,9 @@ func Run(ctx context.Context, p Plugin) error {
 	// Create a logger for this plugin, writing to stdout.
 	pluginLog := apilogger.New(os.Stdout, p.Name(), "debug")
 
-	sockPath := os.Getenv("GOCACHE_PLUGIN_SOCK")
+	sockPath := os.Getenv(apiplugin.EnvSocketPath)
 	if sockPath == "" {
-		return errors.New("GOCACHE_PLUGIN_SOCK not set")
+		return fmt.Errorf("%s not set", apiplugin.EnvSocketPath)
 	}
 
 	conn, err := net.Dial("unix", sockPath)
@@ -384,7 +385,7 @@ func Run(ctx context.Context, p Plugin) error {
 				Phase:         req.Phase,
 				Context:       req.Context,
 			}
-			if req.Phase == "start" {
+			if req.Phase == apiplugin.PhaseStart {
 				// Start phase: synchronous — server is waiting for response.
 				result := ohp.HandleOperationHook(ctx, hookReq)
 				var ctxValues map[string]string

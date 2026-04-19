@@ -44,20 +44,18 @@ func HandleSelect(cmdCtx *command.Context) command.Result {
 	return command.Result{Value: "OK"}
 }
 
-// HandleFlushDB clears the entire cache (single-DB server, same as FLUSHALL).
+// HandleFlushDB clears the entire cache (single-DB server, equivalent to FLUSHALL).
 func HandleFlushDB(cmdCtx *command.Context) command.Result {
-	return command.Dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() any {
 		cmdCtx.Cache.Clear(cmdCtx.Context())
 		return "OK"
 	})
 }
 
-// HandleFlushAll clears the entire cache.
+// HandleFlushAll is a Redis-compatibility alias for FLUSHDB. Multi-DB is not
+// supported, so there is nothing extra to flush.
 func HandleFlushAll(cmdCtx *command.Context) command.Result {
-	return command.Dispatch(cmdCtx, func() interface{} {
-		cmdCtx.Cache.Clear(cmdCtx.Context())
-		return "OK"
-	})
+	return HandleFlushDB(cmdCtx)
 }
 
 // HandleAuth validates a password against RequirePass.
@@ -75,7 +73,7 @@ func HandleAuth(cmdCtx *command.Context) command.Result {
 // HandleIncr atomically increments the integer value stored at key by 1.
 func HandleIncr(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	return command.Dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, 1)
 	})
 }
@@ -83,7 +81,7 @@ func HandleIncr(cmdCtx *command.Context) command.Result {
 // HandleDecr atomically decrements the integer value stored at key by 1.
 func HandleDecr(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	return command.Dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, -1)
 	})
 }
@@ -95,7 +93,7 @@ func HandleIncrBy(cmdCtx *command.Context) command.Result {
 	if err != nil {
 		return command.Result{Value: resp.ErrNotIntegerValue()}
 	}
-	return command.Dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, delta)
 	})
 }
@@ -107,7 +105,7 @@ func HandleDecrBy(cmdCtx *command.Context) command.Result {
 	if err != nil {
 		return command.Result{Value: resp.ErrNotIntegerValue()}
 	}
-	return command.Dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, -delta)
 	})
 }
@@ -119,11 +117,8 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 	if err != nil {
 		return command.Result{Value: resp.ErrNotFloatValue()}
 	}
-	return command.Dispatch(cmdCtx, func() interface{} {
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
-		}
+	return command.Dispatch(cmdCtx, func() any {
+		lazyExpire(cmdCtx.Cache, key)
 
 		existing := 0.0
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
@@ -152,11 +147,8 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 func HandleAppend(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	suffix := cmdCtx.Args[1]
-	return command.Dispatch(cmdCtx, func() interface{} {
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
-		}
+	return command.Dispatch(cmdCtx, func() any {
+		lazyExpire(cmdCtx.Cache, key)
 
 		existing := ""
 		rawTTL := int64(0)
@@ -180,10 +172,8 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 // HandleStrlen returns the length of the string stored at key, or 0 if absent.
 func HandleStrlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	return command.Dispatch(cmdCtx, func() interface{} {
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+	return command.Dispatch(cmdCtx, func() any {
+		if lazyExpire(cmdCtx.Cache, key) {
 			return int64(0)
 		}
 
@@ -202,12 +192,10 @@ func HandleStrlen(cmdCtx *command.Context) command.Result {
 // HandleMget returns the values for all specified keys (nil for absent/non-string).
 func HandleMget(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
-	return command.Dispatch(cmdCtx, func() interface{} {
-		result := make([]interface{}, len(keys))
+	return command.Dispatch(cmdCtx, func() any {
+		result := make([]any, len(keys))
 		for i, key := range keys {
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				result[i] = nil
 				continue
 			}
@@ -232,7 +220,7 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 	if len(cmdCtx.Args)%2 != 0 {
 		return command.Result{Value: resp.ErrArgs("mset")}
 	}
-	return command.Dispatch(cmdCtx, func() interface{} {
+	return command.Dispatch(cmdCtx, func() any {
 		for i := 0; i < len(cmdCtx.Args); i += 2 {
 			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], cmdCtx.Args[i+1], 0); setErr != nil {
 				return setErr
@@ -244,11 +232,8 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 
 // incrByDelta is shared logic for INCR, DECR, INCRBY, DECRBY.
 // Must be called inside a Dispatch closure (cache lock is held).
-func incrByDelta(cmdCtx *command.Context, key string, delta int64) interface{} {
-	_, state := cmdCtx.Cache.TTLInternal(key)
-	if state == cache.ValueExpired {
-		cmdCtx.Cache.RawDelete(key)
-	}
+func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
+	lazyExpire(cmdCtx.Cache, key)
 
 	current := int64(0)
 	rawTTL := int64(0)
@@ -318,11 +303,11 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 		}
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
 		if nx && found {
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state != cache.ValueExpired {
+			// Live (non-expired) key blocks NX; expired key is lazily deleted and SET proceeds.
+			if !lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
 		}
@@ -347,14 +332,13 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 // Returns 1 if set, 0 if key already exists (non-expired).
 func HandleSetnx(cmdCtx *command.Context) command.Result {
 	key, val := cmdCtx.Args[0], cmdCtx.Args[1]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
 		if found {
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state != cache.ValueExpired {
+			// Live (non-expired) key blocks SETNX; expired key is lazily deleted and SETNX proceeds.
+			if !lazyExpire(cmdCtx.Cache, key) {
 				return 0
 			}
-			cmdCtx.Cache.RawDelete(key)
 		}
 		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, val, 0); err != nil {
 			return err
@@ -371,14 +355,12 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 	if err != nil {
 		return command.Result{Err: ErrInvalidDuration}
 	}
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
 		expiration := time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
@@ -395,16 +377,15 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 // -2 if the key does not exist or has expired.
 func HandlePttl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
-		if _, found := cmdCtx.Cache.RawGet(key); !found {
-			return int64(-2)
-		}
+	executeFn := func() any {
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
 		switch state {
 		case cache.ValueExpired:
 			cmdCtx.Cache.RawDelete(key)
 			return int64(-2)
 		case cache.ValueAbsent:
+			return int64(-2)
+		case cache.ValueNoExpire:
 			return int64(-1)
 		default:
 			return ttl.Milliseconds()
@@ -416,14 +397,12 @@ func HandlePttl(cmdCtx *command.Context) command.Result {
 // HandleGet implements GET key.
 func HandleGet(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return nil
 		}
 		return entry.Value
@@ -433,7 +412,7 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 
 // HandleDelete implements DEL key [key ...].
 func HandleDelete(cmdCtx *command.Context) command.Result {
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		count := 0
 		for _, key := range cmdCtx.Args {
 			_, found := cmdCtx.Cache.RawGet(key)
@@ -450,14 +429,12 @@ func HandleDelete(cmdCtx *command.Context) command.Result {
 // HandleExists implements EXISTS key.
 func HandleExists(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
 		return 1
@@ -473,14 +450,12 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 		return command.Result{Err: ErrInvalidDuration}
 	}
 	ttl := time.Duration(secs) * time.Second
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
 
@@ -501,20 +476,15 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 // -2 if the key does not exist or has expired.
 func HandleTtl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
-		// Distinguish "key missing" (-2) from "key present with no TTL" (-1).
-		// TTLInternal returns ValueAbsent for both cases, so we must check
-		// key existence explicitly first.
-		if _, found := cmdCtx.Cache.RawGet(key); !found {
-			return int64(-2)
-		}
+	executeFn := func() any {
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
 		switch state {
 		case cache.ValueExpired:
 			cmdCtx.Cache.RawDelete(key)
 			return int64(-2)
 		case cache.ValueAbsent:
-			// Key exists but has no TTL set.
+			return int64(-2)
+		case cache.ValueNoExpire:
 			return int64(-1)
 		default:
 			return int64(ttl.Seconds())
@@ -523,9 +493,9 @@ func HandleTtl(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HandleDbsize implements DBSIZE.
-func HandleDbsize(cmdCtx *command.Context) command.Result {
-	executeFn := func() interface{} {
+// HandleDBSize implements DBSIZE.
+func HandleDBSize(cmdCtx *command.Context) command.Result {
+	executeFn := func() any {
 		return cmdCtx.Cache.Len()
 	}
 	return command.Dispatch(cmdCtx, executeFn)
@@ -561,7 +531,7 @@ func HandleInfo(cmdCtx *command.Context) command.Result {
 		return command.Result{Value: ""}
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		used := cmdCtx.Cache.UsedBytes()
 		maxMem := cmdCtx.Cache.MaxBytes()
 		policy := cmdCtx.Cache.EvictionPolicyString()
@@ -630,7 +600,7 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 		}
 	}
 
-	info := map[string]interface{}{
+	info := map[string]any{
 		"server":  "gocache",
 		"version": "0.1.0",
 		"proto":   version,

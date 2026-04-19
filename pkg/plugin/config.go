@@ -27,6 +27,11 @@ type PluginOverride struct {
 	Scopes   []string `yaml:"scopes"   mapstructure:"scopes"`
 }
 
+// executableBits is the mask of the owner, group, and other execute bits
+// on a Unix file mode. A plugin binary must have at least one of these
+// set to be considered executable by Discover.
+const executableBits os.FileMode = 0111
+
 // PluginEntry represents a discovered plugin before it connects.
 type PluginEntry struct {
 	Name     string
@@ -68,7 +73,7 @@ func Discover(cfg PluginsConfig) ([]*PluginEntry, error) {
 			continue
 		}
 		// Check if file is executable.
-		if fi.Mode()&0111 == 0 {
+		if fi.Mode()&executableBits == 0 {
 			continue
 		}
 

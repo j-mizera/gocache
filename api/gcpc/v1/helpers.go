@@ -212,8 +212,8 @@ func NewOperationHookResponse(requestID string, contextValues map[string]string)
 
 // ResultFromInterface converts a Go value to a proto ResultV1.
 // Supported types: string, int, int64, float64, nil, error,
-// []interface{}, []string, map[string]string, map[string]interface{}.
-func ResultFromInterface(val interface{}) *ResultV1 {
+// []any, []string, map[string]string, map[string]any.
+func ResultFromInterface(val any) *ResultV1 {
 	if val == nil {
 		return &ResultV1{Value: &ResultV1_IsNull{IsNull: true}}
 	}
@@ -234,7 +234,7 @@ func ResultFromInterface(val interface{}) *ResultV1 {
 			elems[i] = &ResultV1{Value: &ResultV1_BulkString{BulkString: s}}
 		}
 		return &ResultV1{Value: &ResultV1_Array{Array: &ResultArrayV1{Elements: elems}}}
-	case []interface{}:
+	case []any:
 		elems := make([]*ResultV1, len(v))
 		for i, item := range v {
 			elems[i] = ResultFromInterface(item)
@@ -249,7 +249,7 @@ func ResultFromInterface(val interface{}) *ResultV1 {
 			})
 		}
 		return &ResultV1{Value: &ResultV1_MapVal{MapVal: &ResultMapV1{Entries: entries}}}
-	case map[string]interface{}:
+	case map[string]any:
 		entries := make([]*ResultEntryV1, 0, len(v))
 		for k, val := range v {
 			entries = append(entries, &ResultEntryV1{
@@ -275,9 +275,9 @@ func NewEventSubscribe(types []string) *EnvelopeV1 {
 	}
 }
 
-// InterfaceFromResult converts a proto ResultV1 back to a Go interface{} value
+// InterfaceFromResult converts a proto ResultV1 back to a Go any value
 // compatible with evaluator.Result.Value types.
-func InterfaceFromResult(r *ResultV1) interface{} {
+func InterfaceFromResult(r *ResultV1) any {
 	if r == nil {
 		return nil
 	}
@@ -298,7 +298,7 @@ func InterfaceFromResult(r *ResultV1) interface{} {
 		if v.Array == nil {
 			return nil
 		}
-		elems := make([]interface{}, len(v.Array.Elements))
+		elems := make([]any, len(v.Array.Elements))
 		for i, e := range v.Array.Elements {
 			elems[i] = InterfaceFromResult(e)
 		}
@@ -307,7 +307,7 @@ func InterfaceFromResult(r *ResultV1) interface{} {
 		if v.MapVal == nil {
 			return nil
 		}
-		m := make(map[string]interface{}, len(v.MapVal.Entries))
+		m := make(map[string]any, len(v.MapVal.Entries))
 		for _, entry := range v.MapVal.Entries {
 			m[entry.Key] = InterfaceFromResult(entry.Value)
 		}

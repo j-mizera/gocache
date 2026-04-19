@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"gocache/api/command"
 	opctx "gocache/api/context"
 	apilogger "gocache/api/logger"
 
@@ -19,6 +19,35 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+)
+
+// OTEL + W3C Trace Context constants.
+const (
+	// tracerName identifies this plugin's OTEL tracer instrument.
+	tracerName = "gocache.gobservability"
+
+	// Resource + span attribute keys.
+	attrComponent     = "gocache.component"
+	attrOperationID   = "gocache.operation.id"
+	attrOperationType = "gocache.operation.type"
+	attrLogLevel      = "log.level"
+
+	// componentValue is the value stored under attrComponent.
+	componentValue = "gobservability"
+
+	// spanNamePrefix prefixes every span name with a stable vendor namespace.
+	spanNamePrefix = "gocache."
+
+	// W3C Trace Context format: version-traceID-spanID-flags. Version "00"
+	// and flags "01" (sampled) are the only combination currently emitted.
+	traceparentFormat  = "00-%s-%s-01"
+	traceparentVersion = "00"
+
+	// Context keys where an incoming traceparent may be found.
+	// ctxKeyTraceparent is canonical; ctxKeyRexTraceparent is accepted as a
+	// fallback so REX-provided trace context still links client traces.
+	ctxKeyTraceparent    = "shared.traceparent"
+	ctxKeyRexTraceparent = "shared.rex.traceparent"
 )
 
 // Tracer wraps an OTEL TracerProvider and manages operation-based spans.
@@ -36,10 +65,10 @@ type inflightSpan struct {
 	startTime time.Time
 }
 
-// NewTracer creates a Tracer with an OTLP HTTP exporter.
-func NewTracer(endpoint, serviceName string, log *apilogger.Logger) (*Tracer, error) {
-	ctx := context.Background()
-
+// NewTracer creates a Tracer with an OTLP HTTP exporter. The caller's ctx is
+// used for the OTLP exporter handshake and resource discovery so process-level
+// cancellation can interrupt a hung endpoint during startup.
+func NewTracer(ctx context.Context, endpoint, serviceName string, log *apilogger.Logger) (*Tracer, error) {
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(endpoint),
 	}
@@ -55,7 +84,7 @@ func NewTracer(endpoint, serviceName string, log *apilogger.Logger) (*Tracer, er
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
-			attribute.String("gocache.component", "gobservability"),
+			attribute.String(attrComponent, componentValue),
 		),
 	)
 	if err != nil {
@@ -69,7 +98,7 @@ func NewTracer(endpoint, serviceName string, log *apilogger.Logger) (*Tracer, er
 
 	return &Tracer{
 		provider: tp,
-		tracer:   tp.Tracer("gocache.gobservability"),
+		tracer:   tp.Tracer(tracerName),
 		log:      log,
 		inflight: make(map[string]inflightSpan),
 	}, nil
@@ -85,10 +114,11 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 
 	ctx := context.Background()
 
-	// Look for existing traceparent: shared.traceparent (canonical) then shared.rex.traceparent (REX fallback).
-	traceparent := opContext["shared.traceparent"]
+	// Look for an existing traceparent: ctxKeyTraceparent (canonical) then
+	// ctxKeyRexTraceparent (REX fallback).
+	traceparent := opContext[ctxKeyTraceparent]
 	if traceparent == "" {
-		traceparent = opContext["shared.rex.traceparent"]
+		traceparent = opContext[ctxKeyRexTraceparent]
 	}
 
 	if traceparent != "" {
@@ -97,11 +127,11 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 		}
 	}
 
-	_, span := t.tracer.Start(ctx, "gocache."+opType,
+	_, span := t.tracer.Start(ctx, spanNamePrefix+opType,
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
-			attribute.String("gocache.operation.id", opID),
-			attribute.String("gocache.operation.type", opType),
+			attribute.String(attrOperationID, opID),
+			attribute.String(attrOperationType, opType),
 		),
 	)
 
@@ -109,14 +139,16 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 	t.inflight[opID] = inflightSpan{span: span, startTime: time.Now()}
 	t.mu.Unlock()
 
-	// Generate traceparent from the new span if none existed.
+	// Emit a traceparent from the new span if none existed.
 	sc := span.SpanContext()
-	return fmt.Sprintf("00-%s-%s-01", sc.TraceID().String(), sc.SpanID().String())
+	return fmt.Sprintf(traceparentFormat, sc.TraceID().String(), sc.SpanID().String())
 }
 
-// CompleteOperation finalizes the span for an operation.
-// Context is redacted (secrets stripped) before adding as attributes.
-func (t *Tracer) CompleteOperation(opID, status, failReason string, opContext map[string]string) {
+// CompleteOperation finalizes the span for an operation. An empty failReason
+// sets span status OK; a non-empty value sets span status Error with the
+// reason as description. Context is redacted (secrets stripped) before
+// attributes are attached.
+func (t *Tracer) CompleteOperation(opID, failReason string, opContext map[string]string) {
 	if t == nil {
 		return
 	}
@@ -138,13 +170,13 @@ func (t *Tracer) CompleteOperation(opID, status, failReason string, opContext ma
 	redacted := opctx.RedactSecrets(opContext)
 	for k, v := range redacted {
 		// Skip internal keys that are already set or too noisy.
-		if strings.HasPrefix(k, "_") && k != "_command" {
+		if strings.HasPrefix(k, "_") && k != command.CommandKey {
 			continue
 		}
 		span.SetAttributes(attribute.String(k, v))
 	}
 
-	if status == "failed" {
+	if failReason != "" {
 		span.SetStatus(codes.Error, failReason)
 	} else {
 		span.SetStatus(codes.Ok, "")
@@ -172,22 +204,13 @@ func (t *Tracer) RecordLog(operationID, level, message string, fields map[string
 	// Redact secrets from fields before attaching to span.
 	redacted := opctx.RedactSecrets(fields)
 	attrs := []attribute.KeyValue{
-		attribute.String("log.level", level),
+		attribute.String(attrLogLevel, level),
 	}
 	for k, v := range redacted {
 		attrs = append(attrs, attribute.String(k, v))
 	}
 
 	entry.span.AddEvent(message, trace.WithAttributes(attrs...))
-}
-
-// GenerateTraceparent creates a new W3C traceparent string.
-func GenerateTraceparent() string {
-	var traceID [16]byte
-	var spanID [8]byte
-	rand.Read(traceID[:])
-	rand.Read(spanID[:])
-	return fmt.Sprintf("00-%s-%s-01", hex.EncodeToString(traceID[:]), hex.EncodeToString(spanID[:]))
 }
 
 // Shutdown flushes pending spans and shuts down the exporter.
@@ -204,7 +227,7 @@ func parseTraceparent(tp string) (trace.SpanContext, bool) {
 	if len(parts) != 4 {
 		return trace.SpanContext{}, false
 	}
-	if parts[0] != "00" {
+	if parts[0] != traceparentVersion {
 		return trace.SpanContext{}, false
 	}
 

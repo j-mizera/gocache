@@ -6,9 +6,26 @@
 package rex
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+)
+
+// Sentinel validation errors. ErrReservedPrefix wraps via %w so callers can
+// still extract the offending key and prefix from the message.
+var (
+	ErrEmptyKey       = errors.New("metadata key is empty")
+	ErrReservedPrefix = errors.New("metadata key uses reserved prefix")
+)
+
+// Reserved metadata key prefixes. User-supplied REX keys must not start with
+// either of these — the server uses "_" for its own context (see api/command
+// hook context keys) and "shared." for cross-plugin values (including the
+// REX Prefix, see inject.go).
+const (
+	reservedInternalPrefix = "_"
+	reservedSharedPrefix   = "shared."
 )
 
 // Store holds connection-scoped REX metadata. It is safe for concurrent use.
@@ -23,17 +40,18 @@ func NewStore() *Store {
 	return &Store{data: make(map[string]string)}
 }
 
-// ValidateKey checks that a metadata key is valid.
-// Keys starting with "_" are reserved for server-internal use.
+// ValidateKey checks that a metadata key is valid. Keys starting with the
+// reserved internal ("_") or shared ("shared.") prefixes are rejected.
+// Returns ErrEmptyKey or a wrapped ErrReservedPrefix; both are errors.Is-matchable.
 func ValidateKey(key string) error {
 	if key == "" {
-		return fmt.Errorf("empty metadata key")
+		return ErrEmptyKey
 	}
-	if strings.HasPrefix(key, "_") {
-		return fmt.Errorf("metadata key %q: reserved prefix '_'", key)
+	if strings.HasPrefix(key, reservedInternalPrefix) {
+		return fmt.Errorf("%w: %q starts with %q", ErrReservedPrefix, key, reservedInternalPrefix)
 	}
-	if strings.HasPrefix(key, "shared.") {
-		return fmt.Errorf("metadata key %q: reserved prefix 'shared.'", key)
+	if strings.HasPrefix(key, reservedSharedPrefix) {
+		return fmt.Errorf("%w: %q starts with %q", ErrReservedPrefix, key, reservedSharedPrefix)
 	}
 	return nil
 }

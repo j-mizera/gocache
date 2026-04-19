@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -169,7 +170,7 @@ func TestServer_Shutdown(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	case <-time.After(5 * time.Second):

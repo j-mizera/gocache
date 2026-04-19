@@ -81,7 +81,7 @@ func (c *Context) SetContext(ctx context.Context) {
 // into a Result, propagating any error. If the engine is stopped or the
 // command context is cancelled before fn runs, the returned Result carries
 // that error.
-func Dispatch(ctx *Context, fn func() interface{}) Result {
+func Dispatch(ctx *Context, fn func() any) Result {
 	if ctx.InBatch {
 		res := fn()
 		if err, ok := res.(error); ok {

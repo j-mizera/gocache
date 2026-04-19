@@ -2,6 +2,7 @@ package cmdhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,14 @@ import (
 	cmd "gocache/pkg/command"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/rex"
+)
+
+// Sentinel errors returned by the critical hook send path. Callers use
+// errors.Is to distinguish them from unexpected failures.
+var (
+	ErrPluginConnClosed     = errors.New("plugin connection closed")
+	ErrUnexpectedResponse   = errors.New("unexpected response type")
+	ErrHookTimeout          = errors.New("hook timeout")
 )
 
 // Executor dispatches hooks to plugins over IPC.
@@ -64,7 +73,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 		}
 		result, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 		if err != nil {
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical pre-hook failed, allowing command")
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical pre-hook failed, allowing command")
 			continue
 		}
 		if result.Deny {
@@ -104,7 +113,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 		}
 		_, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 		if err != nil {
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical post-hook failed")
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical post-hook failed")
 		}
 	}
 }
@@ -140,15 +149,15 @@ func (e *Executor) sendCriticalHook(ctx context.Context, h *HookEntry, phase gcp
 	select {
 	case resp, ok := <-respCh:
 		if !ok {
-			return nil, fmt.Errorf("plugin connection closed")
+			return nil, ErrPluginConnClosed
 		}
 		hookResp := resp.GetHookResponse()
 		if hookResp == nil {
-			return nil, fmt.Errorf("unexpected response type")
+			return nil, ErrUnexpectedResponse
 		}
 		return hookResp, nil
 	case <-hookCtx.Done():
 		h.Conn.DeletePending(reqID)
-		return nil, fmt.Errorf("hook timeout")
+		return nil, ErrHookTimeout
 	}
 }

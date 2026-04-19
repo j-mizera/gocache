@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"gocache/api/command"
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
@@ -33,9 +35,19 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// Entry-point defaults.
+const (
+	// defaultConfigFile is the config path used when --config is not passed.
+	defaultConfigFile = "gocache.yaml"
+	// serverShutdownTimeout is the time budget for the TCP server's
+	// graceful Shutdown step in handleShutdown. Distinct from the ctx-cancel
+	// path in pkg/server which has its own shorter timeout.
+	serverShutdownTimeout = 10 * time.Second
+)
+
 func main() {
 	// Define CLI flags — all optional; they override config file and env vars
-	pflag.String("config", "gocache.yaml", "path to config file (.yaml or .json)")
+	pflag.String("config", defaultConfigFile, "path to config file (.yaml or .json)")
 	pflag.String("address", "", "server listen address (overrides config)")
 	pflag.Int("port", 0, "server listen port (overrides config)")
 	pflag.String("snapshot-file", "", "snapshot file path (overrides config)")
@@ -137,8 +149,8 @@ func main() {
 	// LoadSnapshot operation.
 	if cfg.Persistence.LoadOnStartup {
 		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
-		snapOp.Enrich("_file", cfg.Persistence.SnapshotFile)
-		snapOp.Enrich("_trigger", "startup")
+		snapOp.Enrich(command.FileKey, cfg.Persistence.SnapshotFile)
+		snapOp.Enrich(command.TriggerKey, "startup")
 		snapCtx := ops.WithContext(ctx, snapOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
@@ -188,7 +200,7 @@ func main() {
 	v.WatchConfig()
 	v.OnConfigChange(func(e fsnotify.Event) {
 		reloadOp := tracker.Start(ops.TypeConfigReload, "")
-		reloadOp.Enrich("_file", e.Name)
+		reloadOp.Enrich(command.FileKey, e.Name)
 		reloadCtx := ops.WithContext(context.Background(), reloadOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(reloadCtx, reloadOp)
@@ -245,7 +257,7 @@ func main() {
 	serverErrChan := make(chan error, 1)
 	go func() {
 		logger.InfoNoCtx().Msg("server ready to accept connections")
-		if err := srv.Start(ctx); err != nil && err != context.Canceled {
+		if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			serverErrChan <- err
 		}
 	}()
@@ -299,9 +311,8 @@ func handleShutdown(
 	// Unblock all waiting BLPOP/BRPOP clients first so their connections can close.
 	blockingRegistry.Shutdown()
 
-	shutdownTimeout := 10 * time.Second
-	logger.Info(shutdownCtx).Str("step", "1/6").Dur("timeout", shutdownTimeout).Msg("shutting down server")
-	if err := srv.Shutdown(shutdownTimeout); err != nil {
+	logger.Info(shutdownCtx).Str("step", "1/6").Dur("timeout", serverShutdownTimeout).Msg("shutting down server")
+	if err := srv.Shutdown(serverShutdownTimeout); err != nil {
 		logger.Warn(shutdownCtx).Err(err).Msg("server shutdown error")
 	}
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,13 +13,27 @@ import (
 	"gocache/api/command"
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
+	apiplugin "gocache/api/plugin"
 	"gocache/sdk/pluginsdk"
 )
 
 const (
 	pluginName    = "gobservability"
 	pluginVersion = "0.1.0"
-	defaultPort   = ":9100"
+
+	// Environment variables consumed by the plugin.
+	envPort         = "GOBSERVABILITY_PORT"
+	envOTLPEndpoint = "GOBSERVABILITY_OTLP_ENDPOINT"
+	envOTELService  = "OTEL_SERVICE_NAME"
+
+	// Defaults — used when the corresponding env var is unset.
+	defaultPort        = ":9100"
+	defaultServiceName = "gocache"
+	defaultLogLevel    = "debug"
+
+	// HTTP timeouts for the /metrics /healthz /readyz server.
+	httpReadTimeout  = 5 * time.Second
+	httpWriteTimeout = 10 * time.Second
 )
 
 type gobservabilityPlugin struct {
@@ -40,10 +55,10 @@ func (p *gobservabilityPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (p *gobservabilityPlugin) OnShutdown(ctx context.Context) error {
-	p.log.InfoNoCtx().Msg("shutting down")
+	p.log.Info(ctx).Msg("shutting down")
 	if p.tracer != nil {
 		if err := p.tracer.Shutdown(ctx); err != nil {
-			p.log.ErrorNoCtx().Err(err).Msg("tracer shutdown error")
+			p.log.Error(ctx).Err(err).Msg("tracer shutdown error")
 		}
 	}
 	return p.server.Shutdown(ctx)
@@ -64,7 +79,14 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 
 	var elapsedNs uint64
 	if v, ok := req.Context[command.ElapsedNs]; ok {
-		elapsedNs, _ = strconv.ParseUint(v, 10, 64)
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			// Malformed ns value would silently record a zero-latency sample.
+			// Log and skip the record so the histogram isn't poisoned.
+			p.log.WarnNoCtx().Str("value", v).Err(err).Msg("invalid elapsed_ns in hook context; skipping metrics sample")
+			return nil
+		}
+		elapsedNs = n
 	}
 
 	isError := req.ResultError != ""
@@ -82,7 +104,7 @@ func (p *gobservabilityPlugin) OperationHooks() []pluginsdk.OperationHookDecl {
 }
 
 func (p *gobservabilityPlugin) HandleOperationHook(_ context.Context, req *pluginsdk.OperationHookRequest) *pluginsdk.OperationHookResponse {
-	if req.Phase == "start" {
+	if req.Phase == apiplugin.PhaseStart {
 		return p.onOperationStart(req)
 	}
 	p.onOperationComplete(req)
@@ -100,7 +122,7 @@ func (p *gobservabilityPlugin) onOperationStart(req *pluginsdk.OperationHookRequ
 	// Write the canonical traceparent back so all downstream sees it.
 	return &pluginsdk.OperationHookResponse{
 		ContextValues: map[string]string{
-			"shared.traceparent": traceparent,
+			ctxKeyTraceparent: traceparent,
 		},
 	}
 }
@@ -110,14 +132,11 @@ func (p *gobservabilityPlugin) onOperationComplete(req *pluginsdk.OperationHookR
 		return
 	}
 
-	status := "completed"
-	failReason := ""
-	if v, ok := req.Context["_error"]; ok && v != "" {
-		status = "failed"
-		failReason = v
-	}
+	// An empty failReason signals a successful completion; a non-empty string
+	// becomes the OTEL span's error description.
+	failReason := req.Context[command.ErrorKey]
 
-	p.tracer.CompleteOperation(req.OperationID, status, failReason, req.Context)
+	p.tracer.CompleteOperation(req.OperationID, failReason, req.Context)
 }
 
 // EventPlugin interface — subscribe to log.entry events for OTEL log export.
@@ -156,12 +175,18 @@ func (p *gobservabilityPlugin) Scopes() []string {
 }
 
 func main() {
-	port := os.Getenv("GOBSERVABILITY_PORT")
+	// Bind the signal context first so every subsequent initialization
+	// (OTEL exporter handshake, HTTP listener) can be interrupted by
+	// SIGTERM/SIGINT instead of hanging on a slow endpoint.
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	port := os.Getenv(envPort)
 	if port == "" {
 		port = defaultPort
 	}
 
-	plog := apilogger.New(os.Stdout, pluginName, "debug")
+	plog := apilogger.New(os.Stdout, pluginName, defaultLogLevel)
 
 	collector := NewCollector()
 
@@ -171,12 +196,12 @@ func main() {
 	}
 
 	// Initialize OTEL tracer if enabled.
-	if otlpEndpoint := os.Getenv("GOBSERVABILITY_OTLP_ENDPOINT"); otlpEndpoint != "" {
-		serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	if otlpEndpoint := os.Getenv(envOTLPEndpoint); otlpEndpoint != "" {
+		serviceName := os.Getenv(envOTELService)
 		if serviceName == "" {
-			serviceName = "gocache"
+			serviceName = defaultServiceName
 		}
-		tracer, err := NewTracer(otlpEndpoint, serviceName, plog)
+		tracer, err := NewTracer(ctx, otlpEndpoint, serviceName, plog)
 		if err != nil {
 			plog.ErrorNoCtx().Err(err).Msg("failed to initialize OTEL tracer")
 		} else {
@@ -193,21 +218,18 @@ func main() {
 	httpServer := &http.Server{
 		Addr:         port,
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
 	}
 
 	go func() {
 		plog.InfoNoCtx().Str("addr", port).Msg("metrics server listening")
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			plog.ErrorNoCtx().Err(err).Msg("metrics server error")
 		}
 	}()
 
 	plugin.server = httpServer
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
 
 	if err := pluginsdk.Run(ctx, plugin); err != nil {
 		plog.ErrorNoCtx().Err(err).Msg("plugin error")

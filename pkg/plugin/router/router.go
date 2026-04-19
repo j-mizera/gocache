@@ -103,9 +103,9 @@ func (pc *PluginConn) SendFireAndForget(env *gcpc.EnvelopeV1) {
 }
 
 // readLoop reads all incoming envelopes and dispatches responses
-// to the appropriate pending channel by request_id.
-// Handles both CommandResponseV1 and HookResponseV1 (and any future
-// response types that carry a request_id).
+// to the appropriate pending channel by request_id. Handles every
+// request/response type that flows through PluginConn: command,
+// command hook, and operation hook.
 func (pc *PluginConn) readLoop() {
 	defer pc.drainPending()
 	for {
@@ -132,6 +132,8 @@ func (pc *PluginConn) readLoop() {
 			reqID = env.GetCommandResponse().RequestId
 		case env.GetHookResponse() != nil:
 			reqID = env.GetHookResponse().RequestId
+		case env.GetOperationHookResponse() != nil:
+			reqID = env.GetOperationHookResponse().RequestId
 		default:
 			continue // not a response type we handle
 		}
@@ -302,9 +304,9 @@ func (r *Router) HasCommand(op string) bool {
 }
 
 // Route dispatches a command to the owning plugin and waits for the response.
-// Returns the result as an interface{} compatible with evaluator.Result.Value.
+// Returns the result as an any compatible with evaluator.Result.Value.
 // metadata carries REX metadata with bare keys (no shared.rex. prefix).
-func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string) (interface{}, error) {
+func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string) (any, error) {
 	r.mu.RLock()
 	route, pc, found := r.lookup(op)
 	r.mu.RUnlock()
@@ -347,24 +349,13 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 }
 
 // lookup finds a route and its connection. Must be called with r.mu held (read).
-// Tries direct lookup first, then REX namespace parsing (split on first ':').
+// The routes map is keyed by the full upper-case command name — REX-namespaced
+// entries are stored as "PLUGIN:CMD" at registration time, so a single
+// case-insensitive lookup covers both main-namespace and REX commands.
 func (r *Router) lookup(op string) (*PluginRoute, *PluginConn, bool) {
 	up := strings.ToUpper(op)
-
 	if route, ok := r.routes[up]; ok {
-		pc := r.conns[up]
-		return route, pc, true
+		return route, r.conns[up], true
 	}
-
-	// REX parse: "KAFKA:PUBLISH" → namespace="KAFKA", cmd="PUBLISH"
-	idx := strings.IndexByte(up, ':')
-	if idx > 0 && idx < len(up)-1 {
-		rexKey := up // already upper
-		if route, ok := r.routes[rexKey]; ok {
-			pc := r.conns[rexKey]
-			return route, pc, true
-		}
-	}
-
 	return nil, nil, false
 }

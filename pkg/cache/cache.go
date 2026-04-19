@@ -37,6 +37,9 @@ func ParseEvictionPolicy(s string) EvictionPolicy {
 // for map bucket amortization, the Entry struct, and the LRU list node.
 const entryOverhead = 128
 
+// bytesPerMB converts a megabyte limit to bytes for the cache's byte budget.
+const bytesPerMB int64 = 1024 * 1024
+
 type ValueState int
 type ValueType int
 
@@ -82,7 +85,7 @@ func New() *Cache {
 func NewWithConfig(maxMemoryMB int64, policy EvictionPolicy) *Cache {
 	var maxBytes int64
 	if maxMemoryMB > 0 {
-		maxBytes = maxMemoryMB * 1024 * 1024
+		maxBytes = maxMemoryMB * bytesPerMB
 	}
 	return newCache(maxBytes, policy)
 }
@@ -127,7 +130,7 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if maxMemoryMB > 0 {
-		c.maxBytes = maxMemoryMB * 1024 * 1024
+		c.maxBytes = maxMemoryMB * bytesPerMB
 	} else {
 		c.maxBytes = 0
 	}
@@ -170,7 +173,7 @@ func (c *Cache) MaxBytes() int64 {
 // ErrOutOfMemory (EvictionNone) when the limit would be exceeded.
 // Must be called while holding the cache write lock. ctx carries the
 // operation (command, cleanup, etc.) for log correlation.
-func (c *Cache) RawSet(ctx context.Context, key string, value interface{}, expiration int64) error {
+func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration int64) error {
 	if c.maxBytes > 0 {
 		newSize := estimateSize(key, value)
 		oldSize := c.sizes[key]
@@ -185,25 +188,24 @@ func (c *Cache) RawSet(ctx context.Context, key string, value interface{}, expir
 			}
 		}
 	}
-	c.setInternal(key, value, expiration)
+	c.setInternal(key, value, expiration, false)
 	return nil
 }
 
 // RawLoad stores a key-value pair, bypassing the memory limit check.
 // Intended for snapshot loading only. Still maintains LRU and size tracking.
-// Must be called while holding the cache write lock.
-// RawLoad stores a key-value pair, bypassing the memory limit check.
-// Intended for snapshot loading only. Still maintains LRU and size tracking.
-// The OnMutate callback is suppressed since this is a bulk load, not a client mutation.
-func (c *Cache) RawLoad(key string, value interface{}, expiration int64) {
-	saved := c.OnMutate
-	c.OnMutate = nil
-	c.setInternal(key, value, expiration)
-	c.OnMutate = saved
+// Must be called while holding the cache write lock. The OnMutate callback
+// is suppressed since this is a bulk load, not a client mutation — the
+// previous implementation stashed and restored c.OnMutate around the call,
+// which left the callback nil if setInternal ever panicked.
+func (c *Cache) RawLoad(key string, value any, expiration int64) {
+	c.setInternal(key, value, expiration, true)
 }
 
 // setInternal performs the raw storage operation, updating LRU and size tracking.
-func (c *Cache) setInternal(key string, value interface{}, expiration int64) {
+// When suppressMutate is true the OnMutate callback is not invoked (used by
+// snapshot loads that bulk-populate without triggering WATCH dirty marks).
+func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
 	newSize := estimateSize(key, value)
 	oldSize := c.sizes[key]
 	c.usedBytes += newSize - oldSize
@@ -238,7 +240,7 @@ func (c *Cache) setInternal(key string, value interface{}, expiration int64) {
 	} else {
 		delete(c.ttl, key)
 	}
-	if c.OnMutate != nil {
+	if !suppressMutate && c.OnMutate != nil {
 		c.OnMutate(key)
 	}
 }
@@ -274,17 +276,31 @@ func (c *Cache) RawDelete(key string) {
 	c.delete(key)
 }
 
+// TTLInternal returns the remaining TTL and a ValueState for key.
+//
+// States:
+//
+//	ValuePresent   — key exists with a future expiration (ttl > 0)
+//	ValueExpired   — key has a TTL that has already passed (caller should
+//	                 lazyExpire to clean it up)
+//	ValueNoExpire  — key exists but no TTL is set
+//	ValueAbsent    — key does not exist in the cache
+//
+// Callers that need to distinguish "missing" from "no TTL" (TTL/PTTL) can
+// rely on ValueAbsent vs ValueNoExpire directly. Must be called while
+// holding the cache read lock.
 func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
-	expiration, found := c.ttl[key]
-	if !found {
-		return 0, ValueAbsent
+	if expiration, found := c.ttl[key]; found {
+		expirationTime := time.Unix(0, expiration)
+		if expirationTime.Before(time.Now()) {
+			return 0, ValueExpired
+		}
+		return time.Until(expirationTime), ValuePresent
 	}
-	expirationTime := time.Unix(0, expiration)
-	if expirationTime.Before(time.Now()) {
-		return 0, ValueExpired
+	if _, exists := c.items[key]; exists {
+		return 0, ValueNoExpire
 	}
-
-	return time.Until(expirationTime), ValuePresent
+	return 0, ValueAbsent
 }
 
 func (c *Cache) delete(key string) {
@@ -331,7 +347,7 @@ func (c *Cache) Clear(ctx context.Context) {
 }
 
 // estimateSize returns an approximate memory usage in bytes for a key-value pair.
-func estimateSize(key string, value interface{}) int64 {
+func estimateSize(key string, value any) int64 {
 	size := int64(entryOverhead) + int64(len(key))
 	switch v := value.(type) {
 	case string:

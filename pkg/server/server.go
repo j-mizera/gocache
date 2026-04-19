@@ -27,6 +27,10 @@ import (
 	"gocache/pkg/watch"
 )
 
+// ctxCancelShutdownTimeout is the window granted to drain active connections
+// when the server's context is cancelled (vs an explicit Shutdown call).
+const ctxCancelShutdownTimeout = 5 * time.Second
+
 type Server struct {
 	addr             string
 	cache            *cache.Cache
@@ -36,8 +40,7 @@ type Server struct {
 	shutdownChan     chan struct{}
 	connectionWg     sync.WaitGroup
 	shutdownOnce     sync.Once
-	isShuttingDown   bool
-	mu               sync.RWMutex
+	isShuttingDown   atomic.Bool
 	requirePass      string
 	blockingRegistry *blocking.Registry
 	watchManager     *watch.Manager
@@ -108,9 +111,7 @@ func (srv *Server) EmitEvent(evt events.Event) {
 // ServerStateProvider methods — used by the plugin manager for server query responses.
 
 func (srv *Server) IsShuttingDown() bool {
-	srv.mu.RLock()
-	defer srv.mu.RUnlock()
-	return srv.isShuttingDown
+	return srv.isShuttingDown.Load()
 }
 
 func (srv *Server) StartTime() time.Time   { return srv.startTime }
@@ -137,7 +138,7 @@ func (srv *Server) Start(ctx context.Context) error {
 	case <-srv.shutdownChan:
 		return nil
 	case <-ctx.Done():
-		srv.Shutdown(5 * time.Second)
+		srv.Shutdown(ctxCancelShutdownTimeout)
 		return ctx.Err()
 	}
 }
@@ -147,11 +148,7 @@ func (srv *Server) acceptConnections(ctx context.Context) {
 	for {
 		conn, err := srv.listener.Accept()
 		if err != nil {
-			srv.mu.RLock()
-			shuttingDown := srv.isShuttingDown
-			srv.mu.RUnlock()
-
-			if shuttingDown {
+			if srv.isShuttingDown.Load() {
 				return
 			}
 			logger.ErrorNoCtx().Err(err).Msg("failed to accept connection")
@@ -170,9 +167,7 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 		logger.InfoNoCtx().Msg("initiating graceful shutdown")
 
 		// Mark as shutting down
-		srv.mu.Lock()
-		srv.isShuttingDown = true
-		srv.mu.Unlock()
+		srv.isShuttingDown.Store(true)
 
 		// Stop accepting new connections
 		if srv.listener != nil {
@@ -210,7 +205,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
-	connOp.Enrich("_remote_addr", remoteAddr)
+	connOp.Enrich(command.RemoteAddrKey, remoteAddr)
 	connCtx := ops.WithContext(serverCtx, connOp)
 	if srv.opHookExecutor != nil {
 		srv.opHookExecutor.RunStartHooks(connCtx, connOp)
@@ -236,7 +231,11 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	reader := resp.NewReader(conn)
 	writer := resp.NewWriter(conn)
-	defer writer.Flush()
+	defer func() {
+		if err := writer.Flush(); err != nil {
+			logger.Debug(connCtx).Err(err).Msg("final flush on connection close")
+		}
+	}()
 
 	// Per-command metadata accumulator. META lines fill this map;
 	// the next non-META command consumes and clears it.
@@ -244,25 +243,23 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	for {
 		// Check if server is shutting down
-		srv.mu.RLock()
-		shuttingDown := srv.isShuttingDown
-		srv.mu.RUnlock()
-
-		if shuttingDown {
-			_ = writer.Write(resp.MarshalError("ERR: Server is shutting down"))
+		if srv.isShuttingDown.Load() {
+			if err := writer.Write(resp.MarshalError("ERR Server is shutting down")); err != nil {
+				logger.Debug(connCtx).Err(err).Msg("write shutdown notice failed")
+			}
 			return
 		}
 
 		val, err := reader.Read()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				logger.DebugNoCtx().Err(err).Msg("connection read error")
+				logger.Debug(connCtx).Err(err).Msg("connection read error")
 			}
 			return
 		}
 
 		if val.Type != resp.Array {
-			if err := writer.Write(resp.MarshalError("ERR: Protocol error: expected array")); err != nil {
+			if err := writer.Write(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
 				return
 			}
 			if reader.Buffered() == 0 {
@@ -317,7 +314,9 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		}
 
 		if op == "QUIT" {
-			_ = writer.Write(resp.OK())
+			if err := writer.Write(resp.OK()); err != nil {
+				logger.Debug(connCtx).Err(err).Msg("write QUIT ack failed")
+			}
 			return
 		}
 
@@ -375,7 +374,7 @@ func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res command.Result) r
 	return srv.mapValueToResp(ctx, res.Value)
 }
 
-func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val interface{}) resp.Value {
+func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val any) resp.Value {
 	proto := ctx.ProtoVersion
 
 	switch v := val.(type) {
@@ -390,7 +389,7 @@ func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val interface{})
 			return resp.MarshalDouble(v)
 		}
 		return resp.MarshalBulkString(fmt.Sprintf("%g", v))
-	case []interface{}:
+	case []any:
 		respArray := make([]resp.Value, len(v))
 		for i, item := range v {
 			respArray[i] = srv.mapValueToResp(ctx, item)
@@ -412,7 +411,7 @@ func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val interface{})
 			arr = append(arr, resp.MarshalBulkString(key), resp.MarshalBulkString(value))
 		}
 		return resp.ValueArray(arr...)
-	case map[string]interface{}:
+	case map[string]any:
 		if proto >= 3 {
 			pairs := make([]resp.Value, 0, len(v)*2)
 			for key, value := range v {

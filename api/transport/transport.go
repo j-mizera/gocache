@@ -17,6 +17,10 @@ import (
 // MaxFrameSize is the maximum allowed size for a single protobuf frame (1 MB).
 const MaxFrameSize = 1 << 20
 
+// frameHeaderSize is the length in bytes of the big-endian uint32 length
+// prefix that precedes every framed protobuf payload.
+const frameHeaderSize = 4
+
 var (
 	ErrFrameTooLarge = errors.New("frame exceeds maximum size")
 	ErrConnClosed    = errors.New("connection closed")
@@ -43,7 +47,7 @@ func (c *Conn) Send(env *gcpc.EnvelopeV1) error {
 		return ErrFrameTooLarge
 	}
 
-	header := make([]byte, 4)
+	header := make([]byte, frameHeaderSize)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 
 	c.mu.Lock()
@@ -60,7 +64,7 @@ func (c *Conn) Send(env *gcpc.EnvelopeV1) error {
 
 // Recv reads a length-prefixed frame and unmarshals it into an Envelope.
 func (c *Conn) Recv() (*gcpc.EnvelopeV1, error) {
-	header := make([]byte, 4)
+	header := make([]byte, frameHeaderSize)
 	if _, err := io.ReadFull(c.conn, header); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, ErrConnClosed
@@ -120,11 +124,17 @@ func (l *Listener) Accept() (*Conn, error) {
 	return NewConn(conn), nil
 }
 
-// Close closes the listener and removes the socket file.
+// Close closes the listener and removes the socket file. Errors from both
+// operations are joined via errors.Join so neither is silently lost; an
+// os.ErrNotExist on Remove is expected (double-close or listener never
+// bound) and is filtered out.
 func (l *Listener) Close() error {
-	err := l.ln.Close()
-	_ = os.Remove(l.sockPath)
-	return err
+	closeErr := l.ln.Close()
+	removeErr := os.Remove(l.sockPath)
+	if errors.Is(removeErr, os.ErrNotExist) {
+		removeErr = nil
+	}
+	return errors.Join(closeErr, removeErr)
 }
 
 // Addr returns the socket path.

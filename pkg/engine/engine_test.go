@@ -22,7 +22,7 @@ func newTestEngine(t *testing.T) (*Engine, *cache.Cache) {
 func TestDispatchWithResult(t *testing.T) {
 	e, _ := newTestEngine(t)
 
-	res, err := e.DispatchWithResult(context.Background(), func() interface{} {
+	res, err := e.DispatchWithResult(context.Background(), func() any {
 		return 42
 	})
 	if err != nil {
@@ -57,7 +57,7 @@ func TestDispatchWithResult_Serialization(t *testing.T) {
 
 	go func() {
 		for range n {
-			_, _ = e.DispatchWithResult(context.Background(), func() interface{} {
+			_, _ = e.DispatchWithResult(context.Background(), func() any {
 				counter++
 				return nil
 			})
@@ -84,7 +84,7 @@ func TestStop_ReturnsEngineStopped(t *testing.T) {
 	e.Stop()
 
 	// After stop, DispatchWithResult should return ErrEngineStopped.
-	res, err := e.DispatchWithResult(context.Background(), func() interface{} {
+	res, err := e.DispatchWithResult(context.Background(), func() any {
 		return "should not run"
 	})
 	if res != nil {

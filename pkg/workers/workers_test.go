@@ -57,7 +57,7 @@ func TestCleanupWorker_RemovesExpired(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	res, err := e.DispatchWithResult(context.Background(), func() interface{} {
+	res, err := e.DispatchWithResult(context.Background(), func() any {
 		_, found := c.RawGet("expired")
 		return found
 	})
@@ -68,7 +68,7 @@ func TestCleanupWorker_RemovesExpired(t *testing.T) {
 		t.Error("expected expired key to be cleaned up")
 	}
 
-	res, err = e.DispatchWithResult(context.Background(), func() interface{} {
+	res, err = e.DispatchWithResult(context.Background(), func() any {
 		_, found := c.RawGet("alive")
 		return found
 	})

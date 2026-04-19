@@ -30,7 +30,7 @@ func Registrations() map[string]command.Registration {
 		resp.CmdLPop:   reg(HandleLpop, 1, 1),
 		resp.CmdRPop:   reg(HandleRpop, 1, 1),
 		resp.CmdLLen:   reg(HandleLlen, 1, 1),
-		resp.CmdLRange: reg(HandleLrange, 3, 3),
+		resp.CmdLRange: reg(HandleLRange, 3, 3),
 		resp.CmdBLPop:  reg(HandleBlpop, 2, -1),
 		resp.CmdBRPop:  reg(HandleBrpop, 2, -1),
 
@@ -74,7 +74,7 @@ func Registrations() map[string]command.Registration {
 		resp.CmdLoadSnapshot: reg(HandleLoadSnapshot, 1, 1),
 
 		// Server commands
-		resp.CmdDBSize:   reg(HandleDbsize, 0, 0),
+		resp.CmdDBSize:   reg(HandleDBSize, 0, 0),
 		resp.CmdInfo:     reg(HandleInfo, 0, 1),
 		resp.CmdHello:    reg(HandleHello, 1, -1),
 		resp.CmdPing:     reg(HandlePing, 0, 1),

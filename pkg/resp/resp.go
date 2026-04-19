@@ -2,7 +2,6 @@ package resp
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -35,6 +34,10 @@ const (
 	// maxArrayElements caps the number of elements in an Array/Map/Set.
 	// Prevents memory exhaustion via `*<huge>\r\n` and downstream makes.
 	maxArrayElements = 1024 * 1024 // 1 M elements
+
+	// defaultWriterBufSize is the bufio.Writer buffer size used to batch
+	// small RESP writes (pipelined replies) into larger syscalls.
+	defaultWriterBufSize = 16 * 1024
 )
 
 type Value struct {
@@ -331,7 +334,7 @@ type Writer struct {
 }
 
 func NewWriter(w io.Writer) *Writer {
-	return &Writer{writer: bufio.NewWriterSize(w, 16384)}
+	return &Writer{writer: bufio.NewWriterSize(w, defaultWriterBufSize)}
 }
 
 func (w *Writer) Flush() error {
@@ -364,7 +367,7 @@ func (w *Writer) Write(v Value) error {
 	case Set:
 		b = w.marshalSet(v)
 	default:
-		return errors.New("unknown type")
+		return ErrUnknownType
 	}
 
 	_, err := w.writer.Write(b)
@@ -518,8 +521,10 @@ func MarshalError(s string) Value {
 	return Value{Type: Error, Str: s}
 }
 
+// MarshalNull returns the RESP2 null bulk string ($-1\r\n). Equivalent to
+// helpers.Nil(); prefer that name inside the resp package.
 func MarshalNull() Value {
-	return Value{Type: BulkString, IsNull: true}
+	return Nil()
 }
 
 func MarshalSimpleString(s string) Value {

@@ -13,17 +13,23 @@ import (
 	"gocache/pkg/resp"
 )
 
+const (
+	// defaultScanCount is the page size used by SCAN when COUNT is omitted.
+	defaultScanCount = 10
+	// embstrMaxLen is the Redis-compatible boundary between "embstr" and
+	// "raw" string encodings (strings <= 44 bytes report as embstr).
+	embstrMaxLen = 44
+)
+
 // HandleType implements TYPE key.
 func HandleType(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return resp.Value{Type: resp.SimpleString, Str: "none"}
 		}
-		_, state := cmdCtx.Cache.TTLInternal(key)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(key)
+		if lazyExpire(cmdCtx.Cache, key) {
 			return resp.Value{Type: resp.SimpleString, Str: "none"}
 		}
 		var typeName string
@@ -50,14 +56,12 @@ func HandleType(cmdCtx *command.Context) command.Result {
 func HandleRename(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(src)
 		if !found {
 			return resp.MarshalError("ERR no such key")
 		}
-		_, state := cmdCtx.Cache.TTLInternal(src)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(src)
+		if lazyExpire(cmdCtx.Cache, src) {
 			return resp.MarshalError("ERR no such key")
 		}
 		ttl := cmdCtx.Cache.RawTTL(src)
@@ -82,26 +86,21 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(src)
 		if !found {
 			return resp.MarshalError("ERR no such key")
 		}
-		_, state := cmdCtx.Cache.TTLInternal(src)
-		if state == cache.ValueExpired {
-			cmdCtx.Cache.RawDelete(src)
+		if lazyExpire(cmdCtx.Cache, src) {
 			return resp.MarshalError("ERR no such key")
 		}
 
 		// Check if destination already exists.
-		_, dstFound := cmdCtx.Cache.RawGet(dst)
-		if dstFound {
-			_, dstState := cmdCtx.Cache.TTLInternal(dst)
-			if dstState != cache.ValueExpired {
+		if _, dstFound := cmdCtx.Cache.RawGet(dst); dstFound {
+			// Live (non-expired) destination blocks RENAMENX; expired dst is lazily deleted.
+			if !lazyExpire(cmdCtx.Cache, dst) {
 				return 0
 			}
-			// Destination is expired — treat as absent.
-			cmdCtx.Cache.RawDelete(dst)
 		}
 
 		ttl := cmdCtx.Cache.RawTTL(src)
@@ -122,7 +121,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 // HandleKeys implements KEYS pattern.
 func HandleKeys(cmdCtx *command.Context) command.Result {
 	pattern := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		var keys []string
 		now := time.Now().UnixNano()
 		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
@@ -156,7 +155,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 
 	// Parse optional MATCH and COUNT arguments.
 	pattern := ""
-	count := 10
+	count := defaultScanCount
 	args := cmdCtx.Args[1:]
 	for i := 0; i < len(args); i++ {
 		switch strings.ToUpper(args[i]) {
@@ -176,7 +175,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 		}
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		now := time.Now().UnixNano()
 
 		// Collect all non-expired keys.
@@ -205,7 +204,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 		total := len(filtered)
 		if cursor >= total {
 			// Past end: return empty with cursor 0.
-			return []interface{}{"0", []string{}}
+			return []any{"0", []string{}}
 		}
 
 		end := cursor + count
@@ -219,14 +218,14 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 			nextCursor = 0
 		}
 
-		return []interface{}{strconv.Itoa(nextCursor), page}
+		return []any{strconv.Itoa(nextCursor), page}
 	}
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
 // HandleRandomKey implements RANDOMKEY.
 func HandleRandomKey(cmdCtx *command.Context) command.Result {
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		now := time.Now().UnixNano()
 		var found string
 		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
@@ -253,20 +252,18 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			return command.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
-		return command.Dispatch(cmdCtx, func() interface{} {
+		return command.Dispatch(cmdCtx, func() any {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
 				return nil
 			}
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
 				s, _ := entry.Value.(string)
-				if len(s) <= 44 {
+				if len(s) <= embstrMaxLen {
 					return "embstr"
 				}
 				return "raw"
@@ -287,14 +284,12 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			return command.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
-		return command.Dispatch(cmdCtx, func() interface{} {
+		return command.Dispatch(cmdCtx, func() any {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
 				return nil
 			}
-			_, state := cmdCtx.Cache.TTLInternal(key)
-			if state == cache.ValueExpired {
-				cmdCtx.Cache.RawDelete(key)
+			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
 			idle := int(time.Since(entry.LastAccessed).Seconds())

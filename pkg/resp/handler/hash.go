@@ -13,7 +13,7 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 	}
 
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		var hash map[string]string
 		added := 0
@@ -50,7 +50,7 @@ func HandleHget(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	field := cmdCtx.Args[1]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
@@ -75,7 +75,7 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	fields := cmdCtx.Args[1:]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -114,7 +114,7 @@ func HandleHexists(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	field := cmdCtx.Args[1]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -138,7 +138,7 @@ func HandleHexists(cmdCtx *command.Context) command.Result {
 func HandleHgetall(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return map[string]string{}
@@ -158,10 +158,10 @@ func HandleHgetall(cmdCtx *command.Context) command.Result {
 func HandleHkeys(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
-			return []interface{}{}
+			return []any{}
 		}
 
 		if entry.ValueType != cache.ObjTypeHash {
@@ -169,7 +169,7 @@ func HandleHkeys(cmdCtx *command.Context) command.Result {
 		}
 
 		hash := entry.Value.(map[string]string)
-		result := make([]interface{}, 0, len(hash))
+		result := make([]any, 0, len(hash))
 
 		for field := range hash {
 			result = append(result, field)
@@ -185,10 +185,10 @@ func HandleHkeys(cmdCtx *command.Context) command.Result {
 func HandleHvals(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
-			return []interface{}{}
+			return []any{}
 		}
 
 		if entry.ValueType != cache.ObjTypeHash {
@@ -196,7 +196,7 @@ func HandleHvals(cmdCtx *command.Context) command.Result {
 		}
 
 		hash := entry.Value.(map[string]string)
-		result := make([]interface{}, 0, len(hash))
+		result := make([]any, 0, len(hash))
 
 		for _, value := range hash {
 			result = append(result, value)
@@ -212,7 +212,7 @@ func HandleHvals(cmdCtx *command.Context) command.Result {
 func HandleHlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0

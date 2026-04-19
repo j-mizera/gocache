@@ -4,9 +4,10 @@ import "errors"
 
 // Sentinel errors for type-safe error handling via errors.Is.
 var (
-	ErrWrongType  = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
-	ErrNotInteger = errors.New("value is not an integer or out of range")
-	ErrNotFloat   = errors.New("value is not a valid float")
+	ErrWrongType   = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
+	ErrNotInteger  = errors.New("value is not an integer or out of range")
+	ErrNotFloat    = errors.New("value is not a valid float")
+	ErrUnknownType = errors.New("unknown RESP value type")
 )
 
 func OK() Value     { return Value{Type: SimpleString, Str: "OK"} }

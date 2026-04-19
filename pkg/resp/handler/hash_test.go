@@ -67,7 +67,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("HKEYS failed: %v", res.Err)
 	}
-	keys := res.Value.([]interface{})
+	keys := res.Value.([]any)
 	if len(keys) != 3 {
 		t.Errorf("Expected 3 keys, got %d", len(keys))
 	}
@@ -77,7 +77,7 @@ func TestEvaluator_Hash(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("HVALS failed: %v", res.Err)
 	}
-	vals := res.Value.([]interface{})
+	vals := res.Value.([]any)
 	if len(vals) != 3 {
 		t.Errorf("Expected 3 values, got %d", len(vals))
 	}

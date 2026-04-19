@@ -174,8 +174,8 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 	// Inject server context into operation.
 	cmdOp.Enrich(command.StartNs, strconv.FormatInt(startNs, 10))
 	cmdOp.Enrich(command.OperationID, cmdOp.ID)
-	cmdOp.Enrich("_command", op)
-	cmdOp.Enrich("_arg_count", strconv.Itoa(len(args)))
+	cmdOp.Enrich(command.CommandKey, op)
+	cmdOp.Enrich(command.ArgCountKey, strconv.Itoa(len(args)))
 
 	// Inject REX metadata into operation context.
 	if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
@@ -256,9 +256,9 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 	resultVal, resultErr := resultToHookStrings(result)
 
 	cmdOp.Enrich(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
-	cmdOp.Enrich("_result", resultVal)
+	cmdOp.Enrich(command.ResultKey, resultVal)
 	if resultErr != "" {
-		cmdOp.Enrich("_error", resultErr)
+		cmdOp.Enrich(command.ErrorKey, resultErr)
 	}
 
 	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
@@ -285,13 +285,15 @@ func (b *BaseEvaluator) routeToPlugin(parentCtx context.Context, client *clientc
 
 	val, err := b.pluginRouter.Route(ctx, op, args, metadata)
 	if err != nil {
+		// Known sentinels produce stable wire messages; the mapToResp pipeline
+		// formats the default "ERR <msg>" for anything else via Result.Err.
 		if errors.Is(err, router.ErrPluginTimeout) {
 			return command.Result{Value: resp.MarshalError("ERR plugin timeout")}
 		}
 		if errors.Is(err, router.ErrPluginDown) {
 			return command.Result{Value: resp.MarshalError("ERR plugin unavailable")}
 		}
-		return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
+		return command.Result{Err: err}
 	}
 	if e, ok := val.(error); ok {
 		return command.Result{Err: e}

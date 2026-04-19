@@ -60,9 +60,9 @@ func TestHandler_Transactions(t *testing.T) {
 
 	// EXEC
 	res = handler.HandleExec(makeCtx("EXEC", nil))
-	results, ok := res.Value.([]interface{})
+	results, ok := res.Value.([]any)
 	if !ok {
-		t.Fatalf("EXEC: expected []interface{}, got %T", res.Value)
+		t.Fatalf("EXEC: expected []any, got %T", res.Value)
 	}
 	if len(results) != 2 || results[0] != "OK" || results[1] != "OK" {
 		t.Errorf("EXEC: expected [OK OK], got %v", results)

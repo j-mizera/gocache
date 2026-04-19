@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"gocache/api/command"
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
@@ -56,7 +57,7 @@ func (w *baseWorker) startOp(parentCtx context.Context, opType ops.Type) (*ops.O
 		return nil, parentCtx
 	}
 	op := w.tracker.Start(opType, "")
-	op.Enrich("_trigger", "scheduled")
+	op.Enrich(command.TriggerKey, "scheduled")
 	opCtx := ops.WithContext(parentCtx, op)
 	if w.opHookExecutor != nil && w.opHookExecutor.HasAny() {
 		w.opHookExecutor.RunStartHooks(opCtx, op)
@@ -153,7 +154,7 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 				file := w.file
 				op, opCtx := w.startOp(parentCtx, ops.TypeSnapshot)
 				if op != nil {
-					op.Enrich("_file", file)
+					op.Enrich(command.FileKey, file)
 				}
 				if err := w.engine.Dispatch(opCtx, func() {
 					if err := persistence.SaveSnapshot(opCtx, file, w.cache); err != nil {
