@@ -62,7 +62,11 @@ jobs:
         run: |
           VERSION=$(cat cmd/server/VERSION 2>/dev/null | tr -d '[:space:]' || echo "dev")
           COMMIT=$(git rev-parse --short HEAD)
+          # SemVer form ("+" as build-metadata separator) goes into the
+          # binary and OCI labels.
           echo "version=${VERSION}+${COMMIT}" >> "$GITHUB_OUTPUT"
+          # Docker tags reject "+" — use "-" as a tag-safe variant.
+          echo "tag_version=${VERSION}-${COMMIT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -83,7 +87,7 @@ jobs:
           base=$(echo "$base" | tr '[:upper:]' '[:lower:]')
 
           tags="${base}:${{ matrix.variant }}"
-          tags="${tags},${base}:${{ matrix.variant }}-${{ steps.version.outputs.version }}"
+          tags="${tags},${base}:${{ matrix.variant }}-${{ steps.version.outputs.tag_version }}"
 
           if [ -n "${{ matrix.extra_tags }}" ]; then
             for extra in $(echo "${{ matrix.extra_tags }}" | tr ',' ' '); do
