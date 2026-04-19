@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -199,7 +200,7 @@ func main() {
 
 	go func() {
 		plog.InfoNoCtx().Str("addr", port).Msg("metrics server listening")
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			plog.ErrorNoCtx().Err(err).Msg("metrics server error")
 		}
 	}()

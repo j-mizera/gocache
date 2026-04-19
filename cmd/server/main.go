@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -245,7 +246,7 @@ func main() {
 	serverErrChan := make(chan error, 1)
 	go func() {
 		logger.InfoNoCtx().Msg("server ready to accept connections")
-		if err := srv.Start(ctx); err != nil && err != context.Canceled {
+		if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			serverErrChan <- err
 		}
 	}()
