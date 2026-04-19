@@ -13,6 +13,31 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Default values shared between DefaultConfig and viper.SetDefault. Keeping
+// them as named constants guarantees the struct-literal defaults and the
+// viper-registered defaults never drift out of sync.
+const (
+	defaultAddress           = "0.0.0.0"
+	defaultPort              = 6379
+	defaultLogLevel          = "info"
+	defaultSnapshotFile      = "snapshot.dat"
+	defaultSnapshotInterval  = 5 * time.Minute
+	defaultLoadOnStartup     = true
+	defaultMaxMemoryMB       = int64(1024)
+	defaultEvictionPolicy    = "lru"
+	defaultCleanupInterval   = time.Minute
+	defaultPluginsEnabled    = false
+	defaultPluginsDir        = "plugins"
+	defaultPluginsSocketPath = "/tmp/gocache-plugins.sock"
+	defaultHealthInterval    = 10 * time.Second
+	defaultShutdownTimeout   = 5 * time.Second
+	defaultMaxRestarts       = 3
+	defaultConnectTimeout    = 10 * time.Second
+
+	envPrefix         = "GOCACHE"
+	defaultConfigName = "gocache"
+)
+
 // Config holds all configuration for the GoCache server
 type Config struct {
 	Server      ServerConfig         `yaml:"server"      mapstructure:"server"`
@@ -52,22 +77,37 @@ type WorkersConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Address:  "0.0.0.0",
-			Port:     6379,
-			LogLevel: "info",
+			Address:  defaultAddress,
+			Port:     defaultPort,
+			LogLevel: defaultLogLevel,
 		},
 		Persistence: PersistenceConfig{
-			SnapshotFile:     "snapshot.dat",
-			SnapshotInterval: 5 * time.Minute,
-			LoadOnStartup:    true,
+			SnapshotFile:     defaultSnapshotFile,
+			SnapshotInterval: defaultSnapshotInterval,
+			LoadOnStartup:    defaultLoadOnStartup,
 		},
 		Memory: MemoryConfig{
-			MaxMemoryMB:    1024,
-			EvictionPolicy: "lru",
+			MaxMemoryMB:    defaultMaxMemoryMB,
+			EvictionPolicy: defaultEvictionPolicy,
 		},
 		Workers: WorkersConfig{
-			CleanupInterval: 1 * time.Minute,
+			CleanupInterval: defaultCleanupInterval,
 		},
+	}
+}
+
+// bindFlag wraps viper.BindPFlag. Callers that register a subset of flags
+// (e.g., integration tests with only `--config`) are tolerated: a missing
+// flag is a no-op. A BindPFlag error on a non-nil flag is a programmer bug
+// and panics so the typo is surfaced at startup instead of being silently
+// swallowed by `_ = v.BindPFlag(...)`.
+func bindFlag(v *viper.Viper, key string, flags *pflag.FlagSet, flagName string) {
+	f := flags.Lookup(flagName)
+	if f == nil {
+		return
+	}
+	if err := v.BindPFlag(key, f); err != nil {
+		panic(fmt.Sprintf("config: BindPFlag(%s → %s): %v", key, flagName, err))
 	}
 }
 
@@ -77,31 +117,31 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v := viper.New()
 
 	// Defaults
-	v.SetDefault("server.address", "0.0.0.0")
-	v.SetDefault("server.port", 6379)
-	v.SetDefault("server.log_level", "info")
+	v.SetDefault("server.address", defaultAddress)
+	v.SetDefault("server.port", defaultPort)
+	v.SetDefault("server.log_level", defaultLogLevel)
 	v.SetDefault("server.require_pass", "")
-	v.SetDefault("persistence.snapshot_file", "snapshot.dat")
-	v.SetDefault("persistence.snapshot_interval", "5m")
-	v.SetDefault("persistence.load_on_startup", true)
-	v.SetDefault("memory.max_memory_mb", 1024)
-	v.SetDefault("memory.eviction_policy", "lru")
-	v.SetDefault("workers.cleanup_interval", "1m")
+	v.SetDefault("persistence.snapshot_file", defaultSnapshotFile)
+	v.SetDefault("persistence.snapshot_interval", defaultSnapshotInterval)
+	v.SetDefault("persistence.load_on_startup", defaultLoadOnStartup)
+	v.SetDefault("memory.max_memory_mb", defaultMaxMemoryMB)
+	v.SetDefault("memory.eviction_policy", defaultEvictionPolicy)
+	v.SetDefault("workers.cleanup_interval", defaultCleanupInterval)
 
 	// Plugin defaults
-	v.SetDefault("plugins.enabled", false)
-	v.SetDefault("plugins.dir", "plugins")
-	v.SetDefault("plugins.socket_path", "/tmp/gocache-plugins.sock")
-	v.SetDefault("plugins.health_interval", "10s")
-	v.SetDefault("plugins.shutdown_timeout", "5s")
-	v.SetDefault("plugins.max_restarts", 3)
-	v.SetDefault("plugins.connect_timeout", "10s")
+	v.SetDefault("plugins.enabled", defaultPluginsEnabled)
+	v.SetDefault("plugins.dir", defaultPluginsDir)
+	v.SetDefault("plugins.socket_path", defaultPluginsSocketPath)
+	v.SetDefault("plugins.health_interval", defaultHealthInterval)
+	v.SetDefault("plugins.shutdown_timeout", defaultShutdownTimeout)
+	v.SetDefault("plugins.max_restarts", defaultMaxRestarts)
+	v.SetDefault("plugins.connect_timeout", defaultConnectTimeout)
 
 	// Config file — auto-detect format by extension (.yaml/.yml or .json)
 	if cfgFile, err := flags.GetString("config"); err == nil && cfgFile != "" {
 		v.SetConfigFile(cfgFile)
 	} else {
-		v.SetConfigName("gocache")
+		v.SetConfigName(defaultConfigName)
 		v.AddConfigPath(".")
 	}
 	if err := v.ReadInConfig(); err != nil {
@@ -112,20 +152,20 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	}
 
 	// Env vars: GOCACHE_SERVER_ADDRESS, GOCACHE_SERVER_PORT, etc.
-	v.SetEnvPrefix("GOCACHE")
+	v.SetEnvPrefix(envPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	// Bind CLI flags (only active when the flag is explicitly set)
-	_ = v.BindPFlag("server.address", flags.Lookup("address"))
-	_ = v.BindPFlag("server.port", flags.Lookup("port"))
-	_ = v.BindPFlag("server.log_level", flags.Lookup("log-level"))
-	_ = v.BindPFlag("persistence.snapshot_file", flags.Lookup("snapshot-file"))
-	_ = v.BindPFlag("persistence.snapshot_interval", flags.Lookup("snapshot-interval"))
-	_ = v.BindPFlag("persistence.load_on_startup", flags.Lookup("load-on-startup"))
-	_ = v.BindPFlag("memory.max_memory_mb", flags.Lookup("max-memory-mb"))
-	_ = v.BindPFlag("memory.eviction_policy", flags.Lookup("eviction-policy"))
-	_ = v.BindPFlag("workers.cleanup_interval", flags.Lookup("cleanup-interval"))
+	bindFlag(v, "server.address", flags, "address")
+	bindFlag(v, "server.port", flags, "port")
+	bindFlag(v, "server.log_level", flags, "log-level")
+	bindFlag(v, "persistence.snapshot_file", flags, "snapshot-file")
+	bindFlag(v, "persistence.snapshot_interval", flags, "snapshot-interval")
+	bindFlag(v, "persistence.load_on_startup", flags, "load-on-startup")
+	bindFlag(v, "memory.max_memory_mb", flags, "max-memory-mb")
+	bindFlag(v, "memory.eviction_policy", flags, "eviction-policy")
+	bindFlag(v, "workers.cleanup_interval", flags, "cleanup-interval")
 
 	cfg, err := Unmarshal(v)
 	return cfg, v, err
@@ -157,11 +197,11 @@ func Unmarshal(v *viper.Viper) (*Config, error) {
 func (c *ServerConfig) GetAddr() string {
 	port := c.Port
 	if port == 0 {
-		port = 6379
+		port = defaultPort
 	}
 	addr := c.Address
 	if addr == "" {
-		addr = "0.0.0.0"
+		addr = defaultAddress
 	}
 	return fmt.Sprintf("%s:%d", addr, port)
 }
