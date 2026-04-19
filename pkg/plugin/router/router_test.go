@@ -456,3 +456,64 @@ func TestReregisterAfterUnregister(t *testing.T) {
 		t.Error("PUBLISH should be registered after re-registration")
 	}
 }
+
+// TestPluginConnOperationHookRoundtrip guards against a regression where
+// PluginConn.readLoop did not route OperationHookResponseV1 envelopes to
+// pending channels, causing every synchronous operation start hook to
+// block until its timeout before falling open.
+func TestPluginConnOperationHookRoundtrip(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	pc := NewPluginConn("op-hook-plugin", serverConn)
+	defer pc.Close()
+
+	// Simulated plugin: when it sees an OperationHookRequest, reply immediately.
+	go func() {
+		for {
+			env, err := clientConn.Recv()
+			if err != nil {
+				return
+			}
+			req := env.GetOperationHookRequest()
+			if req == nil {
+				continue
+			}
+			resp := gcpc.NewOperationHookResponse(req.RequestId, map[string]string{"shared.ok": "1"})
+			_ = clientConn.Send(resp)
+		}
+	}()
+
+	reqID := NextRequestID()
+	req := gcpc.NewOperationHookRequest(reqID, "op_1", "command", "", "start", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	respCh, err := pc.Send(ctx, req, reqID)
+	if err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	select {
+	case env := <-respCh:
+		elapsed := time.Since(start)
+		if elapsed > 50*time.Millisecond {
+			t.Errorf("response took %v, want <50ms — readLoop may not be routing OperationHookResponse", elapsed)
+		}
+		resp := env.GetOperationHookResponse()
+		if resp == nil {
+			t.Fatalf("expected OperationHookResponse payload, got %T", env.Payload)
+		}
+		if resp.RequestId != reqID {
+			t.Errorf("request_id mismatch: got %q, want %q", resp.RequestId, reqID)
+		}
+		if resp.ContextValues["shared.ok"] != "1" {
+			t.Errorf("context value not round-tripped: got %v", resp.ContextValues)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for OperationHookResponse — readLoop dropped the envelope")
+	}
+}

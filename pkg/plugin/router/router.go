@@ -103,9 +103,9 @@ func (pc *PluginConn) SendFireAndForget(env *gcpc.EnvelopeV1) {
 }
 
 // readLoop reads all incoming envelopes and dispatches responses
-// to the appropriate pending channel by request_id.
-// Handles both CommandResponseV1 and HookResponseV1 (and any future
-// response types that carry a request_id).
+// to the appropriate pending channel by request_id. Handles every
+// request/response type that flows through PluginConn: command,
+// command hook, and operation hook.
 func (pc *PluginConn) readLoop() {
 	defer pc.drainPending()
 	for {
@@ -132,6 +132,8 @@ func (pc *PluginConn) readLoop() {
 			reqID = env.GetCommandResponse().RequestId
 		case env.GetHookResponse() != nil:
 			reqID = env.GetHookResponse().RequestId
+		case env.GetOperationHookResponse() != nil:
+			reqID = env.GetOperationHookResponse().RequestId
 		default:
 			continue // not a response type we handle
 		}
