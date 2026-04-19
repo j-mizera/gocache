@@ -62,6 +62,13 @@ func (l *Logger) Error(ctx context.Context) *OpEvent {
 	return &OpEvent{event: l.zl.Error(), op: ops.FromContext(ctx)}
 }
 
+// Fatal logs at fatal level with operation context, then exits the process
+// after the message is written. The os.Exit(1) happens inside zerolog's
+// Msg/Msgf call — Msg MUST be invoked for the exit to occur.
+func (l *Logger) Fatal(ctx context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Fatal(), op: ops.FromContext(ctx)}
+}
+
 // --- NoCtx methods (WITHOUT operation context) ---
 // For boundaries with no operation: early startup, plugin loading, config loading.
 
@@ -172,6 +179,7 @@ func Debug(ctx context.Context) *OpEvent { return Default().Debug(ctx) }
 func Info(ctx context.Context) *OpEvent  { return Default().Info(ctx) }
 func Warn(ctx context.Context) *OpEvent  { return Default().Warn(ctx) }
 func Error(ctx context.Context) *OpEvent { return Default().Error(ctx) }
+func Fatal(ctx context.Context) *OpEvent { return Default().Fatal(ctx) }
 
 // --- Package-level convenience functions (NO context, delegate to Default()) ---
 

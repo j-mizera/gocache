@@ -14,9 +14,11 @@ import (
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
 	"gocache/api/transport"
 	serverEvents "gocache/pkg/events"
+	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/cmdhooks"
 	"gocache/pkg/plugin/ophooks"
@@ -25,6 +27,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 )
+
+// pluginNameKey is the operation context key for the plugin name.
+// Underscore prefix marks it as server-owned (not filtered from plugin view).
+const pluginNameKey = "_plugin"
 
 // LogCollector is the interface for adding log sources.
 // Defined here to avoid importing pkg/logcollector from the manager.
@@ -50,6 +56,7 @@ type Manager struct {
 	queryRegistry  *QueryRegistry
 	eventBus       *serverEvents.Bus
 	logCollector   LogCollector
+	tracker        *serverOps.Tracker
 
 	// cancel terminates the lifecycle context derived inside Start.
 	// nil before Start; reset to nil by Shutdown.
@@ -110,6 +117,68 @@ func (m *Manager) SetEventBus(bus *serverEvents.Bus) {
 // SetLogCollector sets the log collector. Plugin stdout will be piped to it.
 func (m *Manager) SetLogCollector(lc LogCollector) {
 	m.logCollector = lc
+}
+
+// SetTracker wires an operation tracker so the manager creates a per-plugin
+// lifecycle operation on each launch. Optional: when nil, plugin lifecycle
+// goroutines fall back to NoCtx logging just as before.
+func (m *Manager) SetTracker(t *serverOps.Tracker) {
+	m.tracker = t
+}
+
+// startPluginLifecycleOp creates the lifecycle operation for a plugin instance
+// and stores it on the instance. A fresh op is created on every launch (first
+// launch + every restart) so each lifecycle has a distinct ID. No-op when no
+// tracker is wired.
+func (m *Manager) startPluginLifecycleOp(inst *PluginInstance) {
+	if m.tracker == nil {
+		return
+	}
+	op := m.tracker.Start(ops.TypePluginStart, "")
+	op.Enrich(pluginNameKey, inst.Name)
+	inst.SetLifecycleOp(op)
+	if m.eventBus != nil {
+		m.eventBus.Emit(events.NewOperationStart(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
+	}
+}
+
+// finishPluginLifecycleOp completes (or fails) the op attached to inst and
+// emits the corresponding OperationComplete event. Clears the op pointer so
+// a restart can attach a fresh one. Safe to call when no op is attached.
+func (m *Manager) finishPluginLifecycleOp(inst *PluginInstance, failReason string) {
+	op := inst.LifecycleOp()
+	if op == nil {
+		return
+	}
+	status := "completed"
+	if failReason != "" {
+		op.Fail(failReason)
+		status = "failed"
+	} else {
+		op.Complete()
+	}
+	if m.eventBus != nil {
+		m.eventBus.Emit(events.NewOperationComplete(op.ID, string(op.Type),
+			uint64(op.Duration().Nanoseconds()), status, failReason, op.ContextSnapshot(false)))
+	}
+	if m.tracker != nil {
+		if failReason != "" {
+			m.tracker.Fail(op.ID, failReason)
+		} else {
+			m.tracker.Complete(op.ID)
+		}
+	}
+	inst.SetLifecycleOp(nil)
+}
+
+// pluginCtx derives a context carrying the plugin's lifecycle op (if any) from
+// parentCtx. Returns parentCtx unchanged when no op is attached — downstream
+// logging then naturally falls back to the parent's context (NoCtx if it has none).
+func (m *Manager) pluginCtx(parentCtx context.Context, inst *PluginInstance) context.Context {
+	if op := inst.LifecycleOp(); op != nil {
+		return ops.WithContext(parentCtx, op)
+	}
+	return parentCtx
 }
 
 // EventBus returns the event bus.
@@ -186,7 +255,7 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 		}
 		if c := inst.Conn(); c != nil {
 			if err := c.Send(gcpcv1.NewShutdown(deadline)); err != nil {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Err(err).Msg("failed to send shutdown")
+				logger.Warn(m.pluginCtx(context.Background(), inst)).Str("plugin", inst.Name).Err(err).Msg("failed to send shutdown")
 			}
 		}
 	}
@@ -215,7 +284,7 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 				continue
 			}
 			if c := inst.Cmd(); c != nil && c.Process != nil {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Msg("force killing plugin")
+				logger.Warn(m.pluginCtx(context.Background(), inst)).Str("plugin", inst.Name).Msg("force killing plugin")
 				_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 			}
 		}
@@ -227,12 +296,13 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 	}
 	m.wg.Wait()
 
-	// Clean up all connections.
+	// Clean up all connections and close out lifecycle ops.
 	for _, inst := range m.registry.All() {
 		if c := inst.Conn(); c != nil {
 			_ = c.Close()
 		}
 		inst.SetState(StateShutdown)
+		m.finishPluginLifecycleOp(inst, "")
 	}
 }
 
@@ -240,6 +310,10 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 // context and binds the subprocess lifetime via exec.CommandContext.
 func (m *Manager) launchPlugin(ctx context.Context, inst *PluginInstance) {
 	inst.SetState(StateStarting)
+	// Create the lifecycle op before anything can log — later steps derive
+	// their ctx from this op so every log line carries operation_id.
+	m.startPluginLifecycleOp(inst)
+	pluginCtx := m.pluginCtx(ctx, inst)
 
 	cmd := exec.CommandContext(ctx, inst.BinPath)
 	cmd.Env = append(os.Environ(), apiplugin.EnvSocketPath+"="+m.cfg.SocketPath)
@@ -251,7 +325,7 @@ func (m *Manager) launchPlugin(ctx context.Context, inst *PluginInstance) {
 	if m.logCollector != nil {
 		pr, pw, err := os.Pipe()
 		if err != nil {
-			logger.ErrorNoCtx().Str("plugin", inst.Name).Err(err).Msg("failed to create stdout pipe")
+			logger.Error(pluginCtx).Str("plugin", inst.Name).Err(err).Msg("failed to create stdout pipe")
 			cmd.Stdout = os.Stdout // fallback
 		} else {
 			cmd.Stdout = pw
@@ -262,14 +336,15 @@ func (m *Manager) launchPlugin(ctx context.Context, inst *PluginInstance) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		logger.ErrorNoCtx().Str("plugin", inst.Name).Err(err).Msg("failed to start plugin")
+		logger.Error(pluginCtx).Str("plugin", inst.Name).Err(err).Msg("failed to start plugin")
 		// Pipe not handed to collector yet — close both ends to avoid leaking fds/goroutines.
 		if logPipeW != nil {
 			_ = logPipeW.Close()
 			_ = logPipeR.Close()
 		}
+		m.finishPluginLifecycleOp(inst, "process start failed: "+err.Error())
 		if inst.Critical() {
-			logger.FatalNoCtx().Str("plugin", inst.Name).Msg("critical plugin failed to start")
+			logger.Fatal(pluginCtx).Str("plugin", inst.Name).Msg("critical plugin failed to start")
 		}
 		return
 	}
@@ -281,7 +356,7 @@ func (m *Manager) launchPlugin(ctx context.Context, inst *PluginInstance) {
 	}
 
 	inst.SetCmd(cmd)
-	logger.InfoNoCtx().Str("plugin", inst.Name).Int("pid", cmd.Process.Pid).Msg("plugin process started")
+	logger.Info(pluginCtx).Str("plugin", inst.Name).Int("pid", cmd.Process.Pid).Msg("plugin process started")
 
 	// Monitor process exit in background.
 	m.wg.Add(1)
@@ -291,7 +366,7 @@ func (m *Manager) launchPlugin(ctx context.Context, inst *PluginInstance) {
 		if ctx.Err() != nil {
 			return // shutting down, ignore
 		}
-		logger.WarnNoCtx().Str("plugin", inst.Name).Err(err).Msg("plugin process exited unexpectedly")
+		logger.Warn(m.pluginCtx(ctx, inst)).Str("plugin", inst.Name).Err(err).Msg("plugin process exited unexpectedly")
 		m.handlePluginExit(ctx, inst)
 	}()
 }
@@ -306,6 +381,8 @@ func (m *Manager) acceptLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return // shutting down
 			}
+			// No lifecycle op resolvable here — accept errors happen before a
+			// connection belongs to any plugin instance. Legitimately NoCtx.
 			logger.ErrorNoCtx().Err(err).Msg("plugin accept error")
 			continue
 		}
@@ -323,6 +400,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	// Expect Register as first message.
 	env, err := conn.Recv()
 	if err != nil {
+		// Pre-handshake — no plugin identity known yet.
 		logger.ErrorNoCtx().Err(err).Msg("failed to read register message")
 		_ = conn.Close()
 		return
@@ -345,10 +423,14 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		return
 	}
 
+	// From here on we have an instance — derive a ctx that carries its
+	// lifecycle op so downstream logs carry operation_id.
+	pluginCtx := m.pluginCtx(ctx, inst)
+
 	// --- Scope validation ---
 	grantedScopes, err := m.validateScopes(reg.Name, reg.RequestedScopes)
 	if err != nil {
-		logger.ErrorNoCtx().Str("plugin", reg.Name).Err(err).Msg("scope validation failed")
+		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("scope validation failed")
 		_ = conn.Send(gcpcv1.NewRegisterAck(false, "scope validation failed: "+err.Error(), nil))
 		_ = conn.Close()
 		return
@@ -363,7 +445,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	// Register plugin commands with the router.
 	if len(reg.Commands) > 0 {
 		if err := m.router.RegisterPlugin(reg.Name, conn, reg.Commands); err != nil {
-			logger.ErrorNoCtx().Str("plugin", reg.Name).Err(err).Msg("command registration failed")
+			logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("command registration failed")
 			m.scopeRegistry.Unregister(reg.Name)
 			_ = conn.Send(gcpcv1.NewRegisterAck(false, "command registration failed: "+err.Error(), nil))
 			_ = conn.Close()
@@ -383,7 +465,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 			m.hookRegistry.Register(reg.Name, int(reg.Priority), inst.Critical(), pc, filteredHooks)
 		}
 		if dropped := len(reg.Hooks) - len(filteredHooks); dropped > 0 {
-			logger.WarnNoCtx().Str("plugin", reg.Name).Int("dropped", dropped).Msg("hooks dropped due to missing scope")
+			logger.Warn(pluginCtx).Str("plugin", reg.Name).Int("dropped", dropped).Msg("hooks dropped due to missing scope")
 		}
 	}
 
@@ -404,7 +486,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 		m.opHookRegistry.Register(reg.Name, priority, pc, patterns)
 	} else if len(reg.OperationHooks) > 0 {
-		logger.WarnNoCtx().Str("plugin", reg.Name).Int("dropped", len(reg.OperationHooks)).
+		logger.Warn(pluginCtx).Str("plugin", reg.Name).Int("dropped", len(reg.OperationHooks)).
 			Msg("operation hooks dropped due to missing 'operation:hook' scope")
 	}
 
@@ -412,7 +494,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 
 	grantedStrings := permissions.ScopeStrings(grantedScopes)
 	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings)); err != nil {
-		logger.ErrorNoCtx().Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
+		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
 		m.router.UnregisterPlugin(reg.Name)
 		m.scopeRegistry.Unregister(reg.Name)
 		_ = conn.Close()
@@ -421,7 +503,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 
 	inst.SetState(StateRunning)
 	critical := inst.Critical()
-	logger.InfoNoCtx().Str("plugin", reg.Name).Str("version", reg.Version).Bool("critical", critical).Int("commands", len(reg.Commands)).Strs("scopes", grantedStrings).Msg("plugin registered")
+	logger.Info(pluginCtx).Str("plugin", reg.Name).Str("version", reg.Version).Bool("critical", critical).Int("commands", len(reg.Commands)).Strs("scopes", grantedStrings).Msg("plugin registered")
 
 	if m.eventBus != nil {
 		m.eventBus.Emit(events.NewPluginRegistered(reg.Name, reg.Version, critical))
@@ -520,7 +602,7 @@ func (m *Manager) healthLoop(ctx context.Context, inst *PluginInstance) {
 				return
 			}
 			if err := c.Send(gcpcv1.NewHealthCheck()); err != nil {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Err(err).Msg("health check send failed")
+				logger.Warn(m.pluginCtx(ctx, inst)).Str("plugin", inst.Name).Err(err).Msg("health check send failed")
 				inst.SetState(StateUnhealthy)
 				return
 			}
@@ -534,6 +616,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 	if conn == nil {
 		return
 	}
+	loopCtx := m.pluginCtx(ctx, inst)
 	for {
 		env, err := conn.Recv()
 		if err != nil {
@@ -541,7 +624,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 				return // shutting down
 			}
 			if inst.State() == StateRunning {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Err(err).Msg("plugin connection lost")
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Err(err).Msg("plugin connection lost")
 				m.deregisterPlugin(inst.Name)
 				inst.SetState(StateUnhealthy)
 				if m.eventBus != nil {
@@ -557,22 +640,22 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 			if resp.Ok {
 				inst.SetLastHealth(time.Now())
 			} else {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Str("status", resp.Status).Msg("plugin reported unhealthy")
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Str("status", resp.Status).Msg("plugin reported unhealthy")
 				inst.SetState(StateUnhealthy)
 				return
 			}
 		case *gcpcv1.EnvelopeV1_ShutdownAck:
-			logger.InfoNoCtx().Str("plugin", inst.Name).Msg("plugin acknowledged shutdown")
+			logger.Info(loopCtx).Str("plugin", inst.Name).Msg("plugin acknowledged shutdown")
 			inst.SetState(StateShutdown)
 			return
 		case *gcpcv1.EnvelopeV1_EventSubscribe:
 			sub := env.GetEventSubscribe()
 			if !m.scopeRegistry.HasScope(inst.Name, permissions.ScopeEvents) {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Msg("event subscription denied: missing 'events' scope")
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("event subscription denied: missing 'events' scope")
 				continue
 			}
 			if m.eventBus == nil {
-				logger.WarnNoCtx().Str("plugin", inst.Name).Msg("event subscription failed: event bus not set")
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("event subscription failed: event bus not set")
 				continue
 			}
 			types := make([]events.Type, len(sub.Types))
@@ -607,7 +690,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 			}
 			_ = conn.Send(gcpcv1.NewServerQueryResponse(query.RequestId, data, errMsg))
 		default:
-			logger.DebugNoCtx().Str("plugin", inst.Name).Msg("unexpected message from plugin")
+			logger.Debug(loopCtx).Str("plugin", inst.Name).Msg("unexpected message from plugin")
 		}
 	}
 }
@@ -628,25 +711,30 @@ func (m *Manager) deregisterPlugin(name string) {
 
 // handlePluginExit handles unexpected plugin process termination.
 func (m *Manager) handlePluginExit(ctx context.Context, inst *PluginInstance) {
+	exitCtx := m.pluginCtx(ctx, inst)
 	m.deregisterPlugin(inst.Name)
 	critical := inst.Critical()
 	if m.eventBus != nil {
 		m.eventBus.Emit(events.NewPluginCrashed(inst.Name, critical, "process exited unexpectedly"))
 	}
 
+	// Close the current lifecycle op before deciding what to do next —
+	// a subsequent relaunch will start a fresh op.
+	m.finishPluginLifecycleOp(inst, "process exited unexpectedly")
+
 	if critical {
-		logger.FatalNoCtx().Str("plugin", inst.Name).Msg("critical plugin crashed — shutting down server")
+		logger.Fatal(exitCtx).Str("plugin", inst.Name).Msg("critical plugin crashed — shutting down server")
 		return
 	}
 
 	if restarts := inst.Restarts(); restarts >= inst.MaxRestarts {
-		logger.ErrorNoCtx().Str("plugin", inst.Name).Int("restarts", restarts).Msg("max restarts exceeded, giving up")
+		logger.Error(exitCtx).Str("plugin", inst.Name).Int("restarts", restarts).Msg("max restarts exceeded, giving up")
 		inst.SetState(StateShutdown)
 		return
 	}
 
 	attempt := inst.IncrementRestarts()
-	logger.InfoNoCtx().Str("plugin", inst.Name).Int("attempt", attempt).Msg("restarting non-critical plugin")
+	logger.Info(exitCtx).Str("plugin", inst.Name).Int("attempt", attempt).Msg("restarting non-critical plugin")
 	inst.SetState(StateRestarting)
 
 	if c := inst.Conn(); c != nil {
