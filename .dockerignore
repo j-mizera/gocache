@@ -1,0 +1,35 @@
+# Version control
+.git
+.gitignore
+
+# Claude + editor state
+.claude
+.idea
+.vscode
+*.swp
+
+# Build outputs
+bin/
+dist/
+*.out
+
+# Test artifacts
+coverage.txt
+*.test
+*.prof
+
+# Local data
+snapshot.dat
+boot.state
+crashes/
+plugins/*/bin
+*.sock
+
+# Docs + non-essential for build
+docs/
+*.md
+!README.md
+
+# OS junk
+.DS_Store
+Thumbs.db
