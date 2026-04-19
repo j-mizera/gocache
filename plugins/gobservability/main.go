@@ -117,7 +117,16 @@ func (p *gobservabilityPlugin) onOperationStart(req *pluginsdk.OperationHookRequ
 	}
 
 	// Start a span — tracer reads traceparent from context or generates one.
-	traceparent := p.tracer.StartOperation(req.OperationID, req.OperationType, req.Context)
+	// For replayed hooks the server ignores any response (live enrichment
+	// window is closed), so we still propagate the traceparent back but
+	// don't rely on it landing in the op context.
+	traceparent := p.tracer.StartOperation(req.OperationID, req.OperationType, req.Context, req.Replayed, req.ReplayStartUnixNs)
+
+	if req.Replayed {
+		// Server ignores replayed-start responses — returning nil keeps
+		// the wire clean and matches the SDK's fire-and-forget path.
+		return nil
+	}
 
 	// Write the canonical traceparent back so all downstream sees it.
 	return &pluginsdk.OperationHookResponse{

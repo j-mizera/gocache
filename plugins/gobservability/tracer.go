@@ -31,6 +31,7 @@ const (
 	attrOperationID   = "gocache.operation.id"
 	attrOperationType = "gocache.operation.type"
 	attrLogLevel      = "log.level"
+	attrReplayed      = "gocache.replayed" // true when the span was reconstructed from a late subscribe
 
 	// componentValue is the value stored under attrComponent.
 	componentValue = "gobservability"
@@ -107,7 +108,14 @@ func NewTracer(ctx context.Context, endpoint, serviceName string, log *apilogger
 // StartOperation creates a span for an operation. Reads traceparent from
 // context (shared.traceparent or shared.rex.traceparent), or generates one.
 // Returns the traceparent string to write back into the operation context.
-func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string) string {
+//
+// If replayed is true, startUnixNs anchors the span at the operation's
+// actual wall-clock start and the span carries a gocache.replayed=true
+// attribute so dashboards can distinguish reconstructed spans from live
+// ones. A zero startUnixNs in replay mode falls back to time.Now() (the
+// server would never emit zero for a real replayed op, but defaulting
+// defensively avoids surprises from future SDK callers).
+func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string, replayed bool, startUnixNs int64) string {
 	if t == nil {
 		return ""
 	}
@@ -127,16 +135,28 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 		}
 	}
 
-	_, span := t.tracer.Start(ctx, spanNamePrefix+opType,
+	spanStart := time.Now()
+	spanOpts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
 			attribute.String(attrOperationID, opID),
 			attribute.String(attrOperationType, opType),
 		),
-	)
+	}
+	if replayed {
+		if startUnixNs > 0 {
+			spanStart = time.Unix(0, startUnixNs)
+		}
+		spanOpts = append(spanOpts,
+			trace.WithTimestamp(spanStart),
+			trace.WithAttributes(attribute.Bool(attrReplayed, true)),
+		)
+	}
+
+	_, span := t.tracer.Start(ctx, spanNamePrefix+opType, spanOpts...)
 
 	t.mu.Lock()
-	t.inflight[opID] = inflightSpan{span: span, startTime: time.Now()}
+	t.inflight[opID] = inflightSpan{span: span, startTime: spanStart}
 	t.mu.Unlock()
 
 	// Emit a traceparent from the new span if none existed.

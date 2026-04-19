@@ -2905,17 +2905,17 @@ func (x *OperationHookDeclV1) GetPriority() int32 {
 // already passed its live start phase), so replay is effectively
 // fire-and-forget. Plugins can detect replay via the `replayed` field.
 type OperationHookRequestV1 struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	OperationId    string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
-	OperationType  string                 `protobuf:"bytes,3,opt,name=operation_type,json=operationType,proto3" json:"operation_type,omitempty"`
-	ParentId       string                 `protobuf:"bytes,4,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	Phase          string                 `protobuf:"bytes,5,opt,name=phase,proto3" json:"phase,omitempty"`                                                                               // "start" or "complete"
-	Context        map[string]string      `protobuf:"bytes,6,rep,name=context,proto3" json:"context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // filtered for this plugin's visibility
-	Replayed       bool                   `protobuf:"varint,7,opt,name=replayed,proto3" json:"replayed,omitempty"`                                                                        // true when synthesized for a late subscriber
-	ReplayOffsetNs int64                  `protobuf:"varint,8,opt,name=replay_offset_ns,json=replayOffsetNs,proto3" json:"replay_offset_ns,omitempty"`                                    // ns since process start when the op actually began (0 for live)
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	OperationId       string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	OperationType     string                 `protobuf:"bytes,3,opt,name=operation_type,json=operationType,proto3" json:"operation_type,omitempty"`
+	ParentId          string                 `protobuf:"bytes,4,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	Phase             string                 `protobuf:"bytes,5,opt,name=phase,proto3" json:"phase,omitempty"`                                                                               // "start" or "complete"
+	Context           map[string]string      `protobuf:"bytes,6,rep,name=context,proto3" json:"context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // filtered for this plugin's visibility
+	Replayed          bool                   `protobuf:"varint,7,opt,name=replayed,proto3" json:"replayed,omitempty"`                                                                        // true when synthesized for a late subscriber
+	ReplayStartUnixNs int64                  `protobuf:"varint,8,opt,name=replay_start_unix_ns,json=replayStartUnixNs,proto3" json:"replay_start_unix_ns,omitempty"`                         // op's wall-clock start as Unix ns — plugin can use directly as OTEL span start (0 for live)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *OperationHookRequestV1) Reset() {
@@ -2997,9 +2997,9 @@ func (x *OperationHookRequestV1) GetReplayed() bool {
 	return false
 }
 
-func (x *OperationHookRequestV1) GetReplayOffsetNs() int64 {
+func (x *OperationHookRequestV1) GetReplayStartUnixNs() int64 {
 	if x != nil {
-		return x.ReplayOffsetNs
+		return x.ReplayStartUnixNs
 	}
 	return 0
 }
@@ -3297,7 +3297,7 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"E\n" +
 	"\x13OperationHookDeclV1\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1a\n" +
-	"\bpriority\x18\x02 \x01(\x05R\bpriority\"\xfe\x02\n" +
+	"\bpriority\x18\x02 \x01(\x05R\bpriority\"\x85\x03\n" +
 	"\x16OperationHookRequestV1\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
@@ -3306,8 +3306,8 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\tparent_id\x18\x04 \x01(\tR\bparentId\x12\x14\n" +
 	"\x05phase\x18\x05 \x01(\tR\x05phase\x12F\n" +
 	"\acontext\x18\x06 \x03(\v2,.gcpc.v1.OperationHookRequestV1.ContextEntryR\acontext\x12\x1a\n" +
-	"\breplayed\x18\a \x01(\bR\breplayed\x12(\n" +
-	"\x10replay_offset_ns\x18\b \x01(\x03R\x0ereplayOffsetNs\x1a:\n" +
+	"\breplayed\x18\a \x01(\bR\breplayed\x12/\n" +
+	"\x14replay_start_unix_ns\x18\b \x01(\x03R\x11replayStartUnixNs\x1a:\n" +
 	"\fContextEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd6\x01\n" +

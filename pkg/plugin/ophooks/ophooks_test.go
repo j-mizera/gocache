@@ -232,7 +232,6 @@ drain:
 func TestExecutor_ReplayDeliversActiveOpsInStartOrder(t *testing.T) {
 	registry := NewRegistry()
 	tracker := serverOps.NewTracker()
-	processStart := time.Now().Add(-1 * time.Second) // op offsets will be ~1s
 
 	// Three active ops that started before the plugin subscribes. Stagger
 	// their StartTime via small sleeps so sort-by-start-order is observable.
@@ -244,7 +243,6 @@ func TestExecutor_ReplayDeliversActiveOpsInStartOrder(t *testing.T) {
 
 	exec := NewExecutor(registry, 100*time.Millisecond)
 	exec.SetTracker(tracker)
-	exec.SetProcessStartTime(processStart)
 
 	s, c := testPipe()
 	defer c.Close()
@@ -279,8 +277,12 @@ func TestExecutor_ReplayDeliversActiveOpsInStartOrder(t *testing.T) {
 		if hr.OperationId != wantIDs[i] {
 			t.Errorf("envelope[%d] op_id=%q, want %q", i, hr.OperationId, wantIDs[i])
 		}
-		if hr.ReplayOffsetNs <= 0 {
-			t.Errorf("envelope[%d] ReplayOffsetNs=%d, want >0", i, hr.ReplayOffsetNs)
+		// Absolute wall-clock: must be within the test window, not zero.
+		if hr.ReplayStartUnixNs <= 0 {
+			t.Errorf("envelope[%d] ReplayStartUnixNs=%d, want >0", i, hr.ReplayStartUnixNs)
+		}
+		if hr.ReplayStartUnixNs < time.Now().Add(-1*time.Minute).UnixNano() {
+			t.Errorf("envelope[%d] ReplayStartUnixNs=%d unreasonably old", i, hr.ReplayStartUnixNs)
 		}
 	}
 }
@@ -290,7 +292,6 @@ func TestExecutor_ReplaySkipsOpsStartedAfterRegister(t *testing.T) {
 	tracker := serverOps.NewTracker()
 	exec := NewExecutor(registry, 100*time.Millisecond)
 	exec.SetTracker(tracker)
-	exec.SetProcessStartTime(time.Now())
 
 	// Capture the regTime via a wrapper that also starts a fresh op after
 	// registration lands. This op should NOT be in the replay set.
@@ -332,7 +333,6 @@ func TestExecutor_ReplayFiltersByPluginPattern(t *testing.T) {
 	tracker := serverOps.NewTracker()
 	exec := NewExecutor(registry, 100*time.Millisecond)
 	exec.SetTracker(tracker)
-	exec.SetProcessStartTime(time.Now().Add(-1 * time.Second))
 
 	_ = tracker.Start(ops.TypeCommand, "")  // should be replayed
 	_ = tracker.Start(ops.TypeCleanup, "")  // should NOT match cmdonly
@@ -380,12 +380,95 @@ func TestExecutor_ReplayNoOpWhenTrackerUnset(t *testing.T) {
 	}
 }
 
+func TestExecutor_ReplaySuppressedWithinRestartWindow(t *testing.T) {
+	registry := NewRegistry()
+	tracker := serverOps.NewTracker()
+	exec := NewExecutor(registry, 100*time.Millisecond)
+	exec.SetTracker(tracker)
+	exec.SetMinRestartInterval(1 * time.Second)
+
+	tracker.Start(ops.TypeCommand, "")
+
+	s1, c1 := testPipe()
+	defer c1.Close()
+	defer s1.Close()
+	pc1 := router.NewPluginConn("flappy", s1)
+	defer pc1.Close()
+
+	registry.SetOnRegister(exec.Replay)
+	ch1 := startReader(t, c1)
+
+	// First register fires a replay.
+	registry.Register("flappy", 10, pc1, []string{"command"})
+	envs := collect(t, ch1, 1, 500*time.Millisecond)
+	if len(envs) != 1 {
+		t.Fatalf("first register: expected 1 replayed env, got %d", len(envs))
+	}
+
+	// Second register within the suppression window: no replay. Use a
+	// fresh pipe + PluginConn — a real re-register would come after the
+	// previous conn died; reusing the first conn would race with its
+	// reader goroutine on close.
+	s2, c2 := testPipe()
+	defer c2.Close()
+	defer s2.Close()
+	pc2 := router.NewPluginConn("flappy", s2)
+	defer pc2.Close()
+	// Unregister simulates the crash, then re-register to mimic restart.
+	registry.Unregister("flappy")
+	ch2 := startReader(t, c2)
+	registry.Register("flappy", 10, pc2, []string{"command"})
+
+	envs2 := collect(t, ch2, 1, 300*time.Millisecond)
+	if len(envs2) != 0 {
+		t.Errorf("re-register within window should skip replay, got %d envelopes", len(envs2))
+	}
+}
+
+func TestExecutor_ReplayResumesAfterRestartWindow(t *testing.T) {
+	registry := NewRegistry()
+	tracker := serverOps.NewTracker()
+	exec := NewExecutor(registry, 100*time.Millisecond)
+	exec.SetTracker(tracker)
+	exec.SetMinRestartInterval(50 * time.Millisecond)
+
+	tracker.Start(ops.TypeCommand, "")
+
+	s1, c1 := testPipe()
+	defer c1.Close()
+	defer s1.Close()
+	pc1 := router.NewPluginConn("eventual", s1)
+	defer pc1.Close()
+
+	registry.SetOnRegister(exec.Replay)
+	ch1 := startReader(t, c1)
+	registry.Register("eventual", 10, pc1, []string{"command"})
+	if len(collect(t, ch1, 1, 500*time.Millisecond)) != 1 {
+		t.Fatal("first register expected a replay")
+	}
+
+	// Wait out the window then re-register on a new conn. Replay should fire again.
+	time.Sleep(80 * time.Millisecond)
+
+	s2, c2 := testPipe()
+	defer c2.Close()
+	defer s2.Close()
+	pc2 := router.NewPluginConn("eventual", s2)
+	defer pc2.Close()
+	registry.Unregister("eventual")
+	ch2 := startReader(t, c2)
+	registry.Register("eventual", 10, pc2, []string{"command"})
+
+	if got := len(collect(t, ch2, 1, 500*time.Millisecond)); got != 1 {
+		t.Errorf("replay should resume after window, got %d envelopes", got)
+	}
+}
+
 func TestExecutor_ReplayWildcardMatchesEveryType(t *testing.T) {
 	registry := NewRegistry()
 	tracker := serverOps.NewTracker()
 	exec := NewExecutor(registry, 100*time.Millisecond)
 	exec.SetTracker(tracker)
-	exec.SetProcessStartTime(time.Now().Add(-1 * time.Second))
 
 	tracker.Start(ops.TypeCommand, "")
 	tracker.Start(ops.TypeCleanup, "")

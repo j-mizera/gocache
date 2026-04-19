@@ -310,8 +310,8 @@ message OperationHookRequestV1 {
   string              parent_id        = 4;
   string              phase            = 5; // "start" or "complete"
   map<string, string> context          = 6; // filtered for this plugin's visibility
-  bool                replayed         = 7; // true when synthesized for a late subscriber
-  int64               replay_offset_ns = 8; // ns since process start when the op actually began (0 for live)
+  bool                replayed            = 7; // true when synthesized for a late subscriber
+  int64               replay_start_unix_ns = 8; // op's wall-clock start as Unix ns — plugin can use directly as OTEL span start (0 for live)
 }
 
 // OperationHookResponseV1 is the plugin's response to an operation start hook.

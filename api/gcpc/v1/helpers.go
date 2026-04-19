@@ -185,27 +185,27 @@ func NewOperationHookRequest(requestID, opID, opType, parentID, phase string, ct
 }
 
 // NewOperationHookReplay builds a synthetic PhaseStart hook for a late
-// subscriber. replayOffsetNs is "ns since process start when the op
-// actually began" so plugins reconstructing spans can place them at the
-// correct wall-clock position instead of at subscribe time.
-func NewOperationHookReplay(requestID, opID, opType, parentID string, ctx map[string]string, replayOffsetNs int64) *EnvelopeV1 {
-	return newOperationHookRequest(requestID, opID, opType, parentID, "start", ctx, true, replayOffsetNs)
+// subscriber. startUnixNs is the op's absolute wall-clock start time so
+// plugins reconstructing OTEL/Jaeger spans can place them at the correct
+// position without needing to know the server's process-start anchor.
+func NewOperationHookReplay(requestID, opID, opType, parentID string, ctx map[string]string, startUnixNs int64) *EnvelopeV1 {
+	return newOperationHookRequest(requestID, opID, opType, parentID, "start", ctx, true, startUnixNs)
 }
 
-func newOperationHookRequest(requestID, opID, opType, parentID, phase string, ctx map[string]string, replayed bool, replayOffsetNs int64) *EnvelopeV1 {
+func newOperationHookRequest(requestID, opID, opType, parentID, phase string, ctx map[string]string, replayed bool, startUnixNs int64) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
 		Payload: &EnvelopeV1_OperationHookRequest{
 			OperationHookRequest: &OperationHookRequestV1{
-				RequestId:      requestID,
-				OperationId:    opID,
-				OperationType:  opType,
-				ParentId:       parentID,
-				Phase:          phase,
-				Context:        ctx,
-				Replayed:       replayed,
-				ReplayOffsetNs: replayOffsetNs,
+				RequestId:         requestID,
+				OperationId:       opID,
+				OperationType:     opType,
+				ParentId:          parentID,
+				Phase:             phase,
+				Context:           ctx,
+				Replayed:          replayed,
+				ReplayStartUnixNs: startUnixNs,
 			},
 		},
 	}

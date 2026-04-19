@@ -34,6 +34,7 @@ const (
 	defaultShutdownTimeout   = 5 * time.Second
 	defaultMaxRestarts       = 3
 	defaultConnectTimeout    = 10 * time.Second
+	defaultMinRestartInterval = 30 * time.Second
 
 	envPrefix         = "GOCACHE"
 	defaultConfigName = "gocache"
@@ -151,6 +152,7 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v.SetDefault("plugins.shutdown_timeout", defaultShutdownTimeout)
 	v.SetDefault("plugins.max_restarts", defaultMaxRestarts)
 	v.SetDefault("plugins.connect_timeout", defaultConnectTimeout)
+	v.SetDefault("plugins.min_restart_interval_for_replay", defaultMinRestartInterval)
 
 	// Config file — auto-detect format by extension (.yaml/.yml or .json)
 	if cfgFile, err := flags.GetString("config"); err == nil && cfgFile != "" {
