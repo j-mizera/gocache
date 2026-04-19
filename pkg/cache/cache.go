@@ -188,25 +188,24 @@ func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration in
 			}
 		}
 	}
-	c.setInternal(key, value, expiration)
+	c.setInternal(key, value, expiration, false)
 	return nil
 }
 
 // RawLoad stores a key-value pair, bypassing the memory limit check.
 // Intended for snapshot loading only. Still maintains LRU and size tracking.
-// Must be called while holding the cache write lock.
-// RawLoad stores a key-value pair, bypassing the memory limit check.
-// Intended for snapshot loading only. Still maintains LRU and size tracking.
-// The OnMutate callback is suppressed since this is a bulk load, not a client mutation.
+// Must be called while holding the cache write lock. The OnMutate callback
+// is suppressed since this is a bulk load, not a client mutation — the
+// previous implementation stashed and restored c.OnMutate around the call,
+// which left the callback nil if setInternal ever panicked.
 func (c *Cache) RawLoad(key string, value any, expiration int64) {
-	saved := c.OnMutate
-	c.OnMutate = nil
-	c.setInternal(key, value, expiration)
-	c.OnMutate = saved
+	c.setInternal(key, value, expiration, true)
 }
 
 // setInternal performs the raw storage operation, updating LRU and size tracking.
-func (c *Cache) setInternal(key string, value any, expiration int64) {
+// When suppressMutate is true the OnMutate callback is not invoked (used by
+// snapshot loads that bulk-populate without triggering WATCH dirty marks).
+func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
 	newSize := estimateSize(key, value)
 	oldSize := c.sizes[key]
 	c.usedBytes += newSize - oldSize
@@ -241,7 +240,7 @@ func (c *Cache) setInternal(key string, value any, expiration int64) {
 	} else {
 		delete(c.ttl, key)
 	}
-	if c.OnMutate != nil {
+	if !suppressMutate && c.OnMutate != nil {
 		c.OnMutate(key)
 	}
 }

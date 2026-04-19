@@ -240,7 +240,11 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	reader := resp.NewReader(conn)
 	writer := resp.NewWriter(conn)
-	defer writer.Flush()
+	defer func() {
+		if err := writer.Flush(); err != nil {
+			logger.Debug(connCtx).Err(err).Msg("final flush on connection close")
+		}
+	}()
 
 	// Per-command metadata accumulator. META lines fill this map;
 	// the next non-META command consumes and clears it.
@@ -253,7 +257,9 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		srv.mu.RUnlock()
 
 		if shuttingDown {
-			_ = writer.Write(resp.MarshalError("ERR Server is shutting down"))
+			if err := writer.Write(resp.MarshalError("ERR Server is shutting down")); err != nil {
+				logger.Debug(connCtx).Err(err).Msg("write shutdown notice failed")
+			}
 			return
 		}
 
@@ -321,7 +327,9 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		}
 
 		if op == "QUIT" {
-			_ = writer.Write(resp.OK())
+			if err := writer.Write(resp.OK()); err != nil {
+				logger.Debug(connCtx).Err(err).Msg("write QUIT ack failed")
+			}
 			return
 		}
 

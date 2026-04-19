@@ -271,14 +271,3 @@ func TestRecordLog_NilTracer(t *testing.T) {
 	tracer.RecordLog("cmd_1", "info", "test", nil)
 }
 
-func TestGenerateTraceparent(t *testing.T) {
-	tp := GenerateTraceparent()
-	if len(tp) == 0 {
-		t.Fatal("expected non-empty traceparent")
-	}
-	// Should be parseable.
-	_, valid := parseTraceparent(tp)
-	if !valid {
-		t.Errorf("generated traceparent %q is not valid", tp)
-	}
-}

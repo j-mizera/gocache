@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -212,15 +211,6 @@ func (t *Tracer) RecordLog(operationID, level, message string, fields map[string
 	}
 
 	entry.span.AddEvent(message, trace.WithAttributes(attrs...))
-}
-
-// GenerateTraceparent creates a new W3C traceparent string.
-func GenerateTraceparent() string {
-	var traceID [16]byte
-	var spanID [8]byte
-	rand.Read(traceID[:])
-	rand.Read(spanID[:])
-	return fmt.Sprintf(traceparentFormat, hex.EncodeToString(traceID[:]), hex.EncodeToString(spanID[:]))
 }
 
 // Shutdown flushes pending spans and shuts down the exporter.

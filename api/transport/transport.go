@@ -124,11 +124,17 @@ func (l *Listener) Accept() (*Conn, error) {
 	return NewConn(conn), nil
 }
 
-// Close closes the listener and removes the socket file.
+// Close closes the listener and removes the socket file. Errors from both
+// operations are joined via errors.Join so neither is silently lost; an
+// os.ErrNotExist on Remove is expected (double-close or listener never
+// bound) and is filtered out.
 func (l *Listener) Close() error {
-	err := l.ln.Close()
-	_ = os.Remove(l.sockPath)
-	return err
+	closeErr := l.ln.Close()
+	removeErr := os.Remove(l.sockPath)
+	if errors.Is(removeErr, os.ErrNotExist) {
+		removeErr = nil
+	}
+	return errors.Join(closeErr, removeErr)
 }
 
 // Addr returns the socket path.

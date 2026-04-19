@@ -79,7 +79,14 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 
 	var elapsedNs uint64
 	if v, ok := req.Context[command.ElapsedNs]; ok {
-		elapsedNs, _ = strconv.ParseUint(v, 10, 64)
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			// Malformed ns value would silently record a zero-latency sample.
+			// Log and skip the record so the histogram isn't poisoned.
+			p.log.WarnNoCtx().Str("value", v).Err(err).Msg("invalid elapsed_ns in hook context; skipping metrics sample")
+			return nil
+		}
+		elapsedNs = n
 	}
 
 	isError := req.ResultError != ""
