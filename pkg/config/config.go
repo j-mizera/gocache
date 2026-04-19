@@ -26,6 +26,7 @@ const (
 	defaultMaxMemoryMB       = int64(1024)
 	defaultEvictionPolicy    = "lru"
 	defaultCleanupInterval   = time.Minute
+	defaultEventsReplayCapacity = 10_000
 	defaultPluginsEnabled    = false
 	defaultPluginsDir        = "plugins"
 	defaultPluginsSocketPath = "/tmp/gocache-plugins.sock"
@@ -44,6 +45,7 @@ type Config struct {
 	Persistence PersistenceConfig    `yaml:"persistence" mapstructure:"persistence"`
 	Memory      MemoryConfig         `yaml:"memory"      mapstructure:"memory"`
 	Workers     WorkersConfig        `yaml:"workers"     mapstructure:"workers"`
+	Events      EventsConfig         `yaml:"events"      mapstructure:"events"`
 	Plugins     plugin.PluginsConfig `yaml:"plugins"     mapstructure:"plugins"`
 }
 
@@ -73,6 +75,15 @@ type WorkersConfig struct {
 	CleanupInterval time.Duration `yaml:"cleanup_interval" mapstructure:"cleanup_interval"`
 }
 
+// EventsConfig holds event bus configuration.
+//
+// ReplayCapacity bounds the ring of retained events used to catch up
+// subscribers that connect after boot. 0 disables replay; the bus then
+// only forwards live events, mirroring pre-ring behaviour.
+type EventsConfig struct {
+	ReplayCapacity int `yaml:"replay_capacity" mapstructure:"replay_capacity"`
+}
+
 // DefaultConfig returns a configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -92,6 +103,9 @@ func DefaultConfig() *Config {
 		},
 		Workers: WorkersConfig{
 			CleanupInterval: defaultCleanupInterval,
+		},
+		Events: EventsConfig{
+			ReplayCapacity: defaultEventsReplayCapacity,
 		},
 	}
 }
@@ -127,6 +141,7 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v.SetDefault("memory.max_memory_mb", defaultMaxMemoryMB)
 	v.SetDefault("memory.eviction_policy", defaultEvictionPolicy)
 	v.SetDefault("workers.cleanup_interval", defaultCleanupInterval)
+	v.SetDefault("events.replay_capacity", defaultEventsReplayCapacity)
 
 	// Plugin defaults
 	v.SetDefault("plugins.enabled", defaultPluginsEnabled)

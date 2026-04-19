@@ -155,3 +155,182 @@ func TestBus_MultipleEventTypes(t *testing.T) {
 		t.Errorf("expected 3, got %d", received.Load())
 	}
 }
+
+// --- Replay ring ---
+
+func TestBus_ReplayDeliversRetainedEventsInFIFOOrder(t *testing.T) {
+	bus := NewBusWithCapacity(10)
+
+	// Emit before anyone subscribes — the ring must hold these.
+	bus.Emit(apiEvents.NewConnectionOpen("a"))
+	bus.Emit(apiEvents.NewConnectionOpen("b"))
+	bus.Emit(apiEvents.NewConnectionOpen("c"))
+
+	var got []string
+	bus.Subscribe("late", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		got = append(got, evt.Proto.GetConnectionOpen().RemoteAddr)
+	})
+
+	want := []string{"a", "b", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("replay: got %d events, want %d (%v)", len(got), len(want), got)
+	}
+	for i, v := range want {
+		if got[i] != v {
+			t.Errorf("replay[%d] = %q, want %q", i, got[i], v)
+		}
+	}
+}
+
+func TestBus_ReplayFiltersByType(t *testing.T) {
+	bus := NewBusWithCapacity(10)
+
+	bus.Emit(apiEvents.NewServerStart("addr", "v1"))
+	bus.Emit(apiEvents.NewConnectionOpen("a"))
+	bus.Emit(apiEvents.NewConnectionClose("a", 1))
+
+	var count int
+	bus.Subscribe("only-conn-open", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		count++
+	})
+
+	if count != 1 {
+		t.Errorf("expected only ConnectionOpen replayed, got %d total events", count)
+	}
+}
+
+func TestBus_ReplayNoDuplicatesWithConcurrentEmit(t *testing.T) {
+	bus := NewBusWithCapacity(200)
+	// Pre-seed 10 events.
+	for i := range 10 {
+		_ = i
+		bus.Emit(apiEvents.NewConnectionOpen("x"))
+	}
+
+	var received atomic.Int32
+	// Subscribe while concurrent emits are racing. The lock in Subscribe
+	// prevents a live Emit from interleaving — any post-Subscribe emit
+	// lands live, any pre-Subscribe emit lands in the replay snapshot.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range 40 {
+			_ = i
+			bus.Emit(apiEvents.NewConnectionOpen("y"))
+		}
+	}()
+
+	bus.Subscribe("counter", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		received.Add(1)
+	})
+	wg.Wait()
+
+	// Exactly 50 emits total (10 pre + 40 concurrent). Replay covers every
+	// emit that committed before Subscribe grabbed the lock; live delivery
+	// covers everything after. No event should be seen twice.
+	if got := received.Load(); got != 50 {
+		t.Errorf("expected 50 total events, got %d", got)
+	}
+}
+
+func TestBus_OverflowDropsOldestAndEmitsReplayGap(t *testing.T) {
+	bus := NewBusWithCapacity(3)
+
+	bus.Emit(apiEvents.NewConnectionOpen("a")) // dropped
+	bus.Emit(apiEvents.NewConnectionOpen("b")) // dropped
+	bus.Emit(apiEvents.NewConnectionOpen("c"))
+	bus.Emit(apiEvents.NewConnectionOpen("d"))
+	bus.Emit(apiEvents.NewConnectionOpen("e"))
+
+	var addrs []string
+	var gapCount uint64
+	bus.Subscribe("late",
+		[]apiEvents.Type{apiEvents.ConnectionOpen, apiEvents.ReplayGap},
+		func(evt apiEvents.Event) {
+			switch apiEvents.Type(evt.Proto.Type) {
+			case apiEvents.ReplayGap:
+				// Dropped count is smuggled in LogEntry fields in Phase B.
+				fields := evt.Proto.GetLogEntry().GetFields()
+				if v, ok := fields["_dropped_count"]; ok {
+					var n uint64
+					for _, ch := range v {
+						n = n*10 + uint64(ch-'0')
+					}
+					gapCount = n
+				}
+			case apiEvents.ConnectionOpen:
+				addrs = append(addrs, evt.Proto.GetConnectionOpen().RemoteAddr)
+			}
+		})
+
+	if gapCount != 2 {
+		t.Errorf("expected dropped count 2, got %d", gapCount)
+	}
+	want := []string{"c", "d", "e"}
+	if len(addrs) != len(want) {
+		t.Fatalf("addrs = %v, want %v", addrs, want)
+	}
+	for i, v := range want {
+		if addrs[i] != v {
+			t.Errorf("addrs[%d] = %q, want %q", i, addrs[i], v)
+		}
+	}
+}
+
+func TestBus_ZeroCapacityDisablesReplay(t *testing.T) {
+	bus := NewBusWithCapacity(0)
+	bus.Emit(apiEvents.NewConnectionOpen("a"))
+
+	var received atomic.Int32
+	bus.Subscribe("late", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		received.Add(1)
+	})
+	if received.Load() != 0 {
+		t.Errorf("expected zero replay events, got %d", received.Load())
+	}
+
+	// Live delivery still works.
+	bus.Emit(apiEvents.NewConnectionOpen("b"))
+	if received.Load() != 1 {
+		t.Errorf("expected 1 live event, got %d", received.Load())
+	}
+}
+
+func TestBus_ReplayGapOnlyWhenSubscribed(t *testing.T) {
+	bus := NewBusWithCapacity(2)
+	bus.Emit(apiEvents.NewConnectionOpen("a")) // dropped
+	bus.Emit(apiEvents.NewConnectionOpen("b"))
+	bus.Emit(apiEvents.NewConnectionOpen("c"))
+
+	// Subscriber does NOT list ReplayGap — it should see conn events only.
+	var saw []string
+	bus.Subscribe("no-gap", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		saw = append(saw, evt.Proto.Type)
+	})
+	for _, s := range saw {
+		if s == string(apiEvents.ReplayGap) {
+			t.Fatalf("unsubscribed type delivered: %v", saw)
+		}
+	}
+	if len(saw) != 2 {
+		t.Errorf("expected 2 retained events, got %d", len(saw))
+	}
+}
+
+func TestBus_UpdateSubscriptionDoesNotReplay(t *testing.T) {
+	bus := NewBusWithCapacity(10)
+	var received atomic.Int32
+	bus.Subscribe("same", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		received.Add(1)
+	})
+	bus.Emit(apiEvents.NewConnectionOpen("a"))
+	bus.Emit(apiEvents.NewConnectionOpen("b"))
+	// Re-register under the same name — assumed already caught up.
+	bus.Subscribe("same", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
+		received.Add(1)
+	})
+	if received.Load() != 2 {
+		t.Errorf("expected 2 events (live only, no replay on update), got %d", received.Load())
+	}
+}

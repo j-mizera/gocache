@@ -8,6 +8,7 @@
 package events
 
 import (
+	"strconv"
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
@@ -40,6 +41,12 @@ const (
 
 	OperationStart    Type = "operation.start"
 	OperationComplete Type = "operation.complete"
+
+	// ReplayGap marks that the event bus's replay ring dropped events before
+	// a subscriber connected. The payload is a LogEntryEventV1 whose fields
+	// carry the dropped count so Phase B subscribers route by Type without
+	// requiring protobuf regen; Phase C will introduce a dedicated oneof.
+	ReplayGap Type = "replay.gap"
 )
 
 // Event is a structured notification emitted by the server.
@@ -161,6 +168,23 @@ func NewLogEntry(level, message, caller string, fields map[string]string) Event 
 	e := newEventProto(LogEntry)
 	e.Data = &gcpc.EventV1_LogEntry{LogEntry: &gcpc.LogEntryEventV1{
 		Level: level, Message: message, Caller: caller, Fields: fields,
+	}}
+	return Event{Proto: e}
+}
+
+// NewReplayGap creates a replay.gap event. Carries the dropped count and
+// subscriber name as LogEntryEventV1 fields — see the ReplayGap type comment.
+func NewReplayGap(subscriber string, dropped uint64) Event {
+	e := newEventProto(ReplayGap)
+	fields := map[string]string{
+		"_kind":          "replay_gap",
+		"_dropped_count": strconv.FormatUint(dropped, 10),
+		"_subscriber":    subscriber,
+	}
+	e.Data = &gcpc.EventV1_LogEntry{LogEntry: &gcpc.LogEntryEventV1{
+		Level:   "warn",
+		Message: "event replay gap",
+		Fields:  fields,
 	}}
 	return Event{Proto: e}
 }

@@ -193,7 +193,7 @@ func main() {
 	cacheInstance.OnMutateAll = watchManager.NotifyAll
 
 	// tracker was created above main() for the crashdump defer; reuse it.
-	eventBus := serverEvents.NewBus()
+	eventBus := serverEvents.NewBusWithCapacity(cfg.Events.ReplayCapacity)
 	logCollector := logcollector.New(eventBus)
 	logCollector.AddSource("server", logPipeR)
 
