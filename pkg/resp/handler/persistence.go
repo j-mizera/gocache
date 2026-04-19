@@ -8,7 +8,6 @@ import (
 	"gocache/api/logger"
 	"gocache/pkg/command"
 	"gocache/pkg/persistence"
-	"gocache/pkg/resp"
 )
 
 func HandleSnapshot(cmdCtx *command.Context) command.Result {
@@ -34,7 +33,7 @@ func HandleLoadSnapshot(cmdCtx *command.Context) command.Result {
 	// server user.
 	filename, err := sanitizeSnapshotPath(cmdCtx.SnapshotFile, requested)
 	if err != nil {
-		return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
+		return command.Result{Err: err}
 	}
 
 	executeFn := func() any {

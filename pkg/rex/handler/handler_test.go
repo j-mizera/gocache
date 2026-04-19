@@ -47,8 +47,8 @@ func TestHandleRexMeta_SetValueWithSpaces(t *testing.T) {
 func TestHandleRexMeta_SetReservedKeyFails(t *testing.T) {
 	ctx := makeCtx("SET", "_reserved", "val")
 	res := rexhandler.HandleRexMeta(ctx)
-	if v, ok := res.Value.(resp.Value); !ok || v.Type != resp.Error {
-		t.Errorf("expected error for reserved key, got %v", res.Value)
+	if res.Err == nil {
+		t.Errorf("expected error for reserved key, got nil (value=%v)", res.Value)
 	}
 }
 

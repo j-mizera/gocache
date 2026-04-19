@@ -36,7 +36,7 @@ func HandleRexMeta(cmdCtx *command.Context) command.Result {
 		value := strings.Join(cmdCtx.Args[2:], " ")
 		store := ensureRexStore(cmdCtx)
 		if err := store.Set(key, value); err != nil {
-			return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
+			return command.Result{Err: err}
 		}
 		return command.Result{Value: "OK"}
 
@@ -48,7 +48,7 @@ func HandleRexMeta(cmdCtx *command.Context) command.Result {
 		pairs := cmdCtx.Args[1:]
 		for i := 0; i < len(pairs); i += 2 {
 			if err := store.Set(pairs[i], pairs[i+1]); err != nil {
-				return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
+				return command.Result{Err: err}
 			}
 		}
 		return command.Result{Value: "OK"}

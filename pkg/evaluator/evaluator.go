@@ -285,13 +285,15 @@ func (b *BaseEvaluator) routeToPlugin(parentCtx context.Context, client *clientc
 
 	val, err := b.pluginRouter.Route(ctx, op, args, metadata)
 	if err != nil {
+		// Known sentinels produce stable wire messages; the mapToResp pipeline
+		// formats the default "ERR <msg>" for anything else via Result.Err.
 		if errors.Is(err, router.ErrPluginTimeout) {
 			return command.Result{Value: resp.MarshalError("ERR plugin timeout")}
 		}
 		if errors.Is(err, router.ErrPluginDown) {
 			return command.Result{Value: resp.MarshalError("ERR plugin unavailable")}
 		}
-		return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
+		return command.Result{Err: err}
 	}
 	if e, ok := val.(error); ok {
 		return command.Result{Err: e}
