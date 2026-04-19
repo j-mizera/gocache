@@ -127,3 +127,48 @@ func TestDiscover_EmptyDirConfig(t *testing.T) {
 		t.Error("expected nil for empty dir config")
 	}
 }
+
+func TestPluginOverride_IsCritical(t *testing.T) {
+	cases := []struct {
+		name     string
+		override PluginOverride
+		want     bool
+	}{
+		{"zero value → non-critical", PluginOverride{}, false},
+		{"FailurePolicy halt_server → critical", PluginOverride{FailurePolicy: FailurePolicyHaltServer}, true},
+		{"FailurePolicy continue → non-critical", PluginOverride{FailurePolicy: FailurePolicyContinue}, false},
+		{"legacy Critical true → critical (deprecated)", PluginOverride{Critical: true}, true},
+		{"legacy Critical false → non-critical", PluginOverride{Critical: false}, false},
+		{"FailurePolicy halt_server + legacy Critical false → halt wins", PluginOverride{FailurePolicy: FailurePolicyHaltServer, Critical: false}, true},
+		{"FailurePolicy continue + legacy Critical true → continue wins", PluginOverride{FailurePolicy: FailurePolicyContinue, Critical: true}, false},
+		{"unknown FailurePolicy → falls back to legacy", PluginOverride{FailurePolicy: "garbage", Critical: true}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.override.IsCritical(); got != c.want {
+				t.Errorf("IsCritical() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestDiscover_AppliesOverrides_FailurePolicy(t *testing.T) {
+	dir := t.TempDir()
+	execPath := filepath.Join(dir, "auth")
+	if err := os.WriteFile(execPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := PluginsConfig{
+		Dir: dir,
+		Overrides: map[string]PluginOverride{
+			"auth": {FailurePolicy: FailurePolicyHaltServer, Priority: 1},
+		},
+	}
+	plugins, err := Discover(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plugins[0].Critical {
+		t.Error("expected Critical=true via FailurePolicy: halt_server")
+	}
+}

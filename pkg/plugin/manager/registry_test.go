@@ -2,6 +2,8 @@ package manager
 
 import (
 	"testing"
+
+	ops "gocache/api/operations"
 )
 
 func TestRegistry_AddGetRemove(t *testing.T) {
@@ -60,6 +62,25 @@ func TestRegistry_Len(t *testing.T) {
 	r.Add(&PluginInstance{Name: "p"})
 	if r.Len() != 1 {
 		t.Error("expected 1")
+	}
+}
+
+func TestPluginInstance_LifecycleOp(t *testing.T) {
+	inst := &PluginInstance{Name: "test"}
+
+	if got := inst.LifecycleOp(); got != nil {
+		t.Fatalf("new instance should have no lifecycle op, got %v", got)
+	}
+
+	op := ops.New(ops.TypePluginStart, "")
+	inst.SetLifecycleOp(op)
+	if got := inst.LifecycleOp(); got != op {
+		t.Fatalf("LifecycleOp returned %v, want %v", got, op)
+	}
+
+	inst.SetLifecycleOp(nil)
+	if got := inst.LifecycleOp(); got != nil {
+		t.Fatalf("after clear, LifecycleOp should be nil, got %v", got)
 	}
 }
 

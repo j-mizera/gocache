@@ -1,0 +1,118 @@
+name: Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/server/**"
+      - "pkg/**"
+      - "api/**"
+      - "plugins/**"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push to registry"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Three canonical variants. Users who want a custom mix
+          # rebuild locally via `docker build --build-arg PLUGINS=...`.
+          - variant: minimal
+            plugins: ""
+            extra_tags: ""
+          - variant: default
+            plugins: "crashdump"
+            # :latest points at the default build so a plain
+            # `docker pull ghcr.io/<repo>:latest` gets sensible defaults.
+            extra_tags: "latest"
+          - variant: full
+            plugins: "crashdump,otlp"
+            extra_tags: ""
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for `git describe`
+
+      - name: Resolve version string
+        id: version
+        run: |
+          VERSION=$(cat cmd/server/VERSION 2>/dev/null | tr -d '[:space:]' || echo "dev")
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "version=${VERSION}+${COMMIT}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' || inputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          base="${REGISTRY}/${IMAGE_NAME}"
+          # Lowercase owner/repo — required by GHCR.
+          base=$(echo "$base" | tr '[:upper:]' '[:lower:]')
+
+          tags="${base}:${{ matrix.variant }}"
+          tags="${tags},${base}:${{ matrix.variant }}-${{ steps.version.outputs.version }}"
+
+          if [ -n "${{ matrix.extra_tags }}" ]; then
+            for extra in $(echo "${{ matrix.extra_tags }}" | tr ',' ' '); do
+              tags="${tags},${base}:${extra}"
+            done
+          fi
+
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Tags: ${tags}"
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' || inputs.push == 'true' }}
+          build-args: |
+            PLUGINS=${{ matrix.plugins }}
+            VERSION=${{ steps.version.outputs.version }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.title=gocache (${{ matrix.variant }})
+            org.opencontainers.image.description=gocache with embedded plugins [${{ matrix.plugins }}]

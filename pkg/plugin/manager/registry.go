@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
+	ops "gocache/api/operations"
 	"gocache/api/transport"
 )
 
@@ -72,6 +73,12 @@ type PluginInstance struct {
 	restarts      int
 	commands      []*gcpc.CommandDeclV1
 	grantedScopes []string
+	// lifecycleOp spans a single launch-to-exit cycle. A new op is created at
+	// each launchPlugin invocation (first launch + every restart) and completed
+	// or failed when the plugin exits / is shut down. Goroutines owned by this
+	// plugin (readLoop, healthLoop, the cmd.Wait monitor) derive their context
+	// from this op so their log lines carry the plugin's operation_id.
+	lifecycleOp *ops.Operation
 }
 
 // State returns the plugin's current lifecycle state.
@@ -160,6 +167,23 @@ func (p *PluginInstance) IncrementRestarts() int {
 	n := p.restarts
 	p.mu.Unlock()
 	return n
+}
+
+// LifecycleOp returns the operation tracking this plugin's current launch cycle,
+// or nil if no tracker was wired or the instance has not yet been launched.
+func (p *PluginInstance) LifecycleOp() *ops.Operation {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.lifecycleOp
+}
+
+// SetLifecycleOp assigns the operation tracking the current launch cycle.
+// Pass nil to clear after the op has been completed/failed (so a subsequent
+// restart can assign a fresh op without confusion).
+func (p *PluginInstance) SetLifecycleOp(op *ops.Operation) {
+	p.mu.Lock()
+	p.lifecycleOp = op
+	p.mu.Unlock()
 }
 
 // GrantedScopes returns a snapshot of the scopes granted at registration.
