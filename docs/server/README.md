@@ -57,6 +57,9 @@ memory:
 workers:
   cleanup_interval: 1m
 
+events:
+  replay_capacity: 10000   # bounded ring for late subscribers; 0 disables
+
 plugins:
   enabled: false
   dir: "bin/plugins"
@@ -65,14 +68,46 @@ plugins:
   shutdown_timeout: 5s
   max_restarts: 3
   connect_timeout: 10s
+  min_restart_interval_for_replay: 30s     # ophook replay skipped if plugin re-registers within window
   overrides:
     auth:
-      critical: true
+      failure_policy: halt_server          # canonical — replaces legacy `critical: true`
       priority: 1
       scopes: ["hook:pre", "read"]
 ```
 
 Configuration is hot-reloadable via fsnotify. Changes to memory limits, eviction policy, snapshot interval, cleanup interval, and log level take effect without restart. Address and port changes require a restart.
+
+### Embedded plugins (compile-time-linked)
+
+A narrow set of capabilities must be active before config loads or before any IPC plugin can connect — crashdump collection, OTLP emission from t=0. These ship as **embedded plugins** linked in via build tags:
+
+```bash
+# Default: no embedded plugins (15 MB).
+go build ./cmd/server
+
+# With embedded crashdump scanner and OTLP exporter (~24 MB).
+go build -tags "crashdump otlp" ./cmd/server
+
+# Docker: per-variant image matrix published to GHCR on every main push.
+docker pull ghcr.io/<org>/gocache:minimal   # no embedded
+docker pull ghcr.io/<org>/gocache:default   # crashdump
+docker pull ghcr.io/<org>/gocache:full      # crashdump + otlp
+docker pull ghcr.io/<org>/gocache:latest    # alias for :default
+```
+
+Embedded-plugin env vars (all optional):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `GOCACHE_CRASHDUMP_DIR` | `crashes/` | Directory for JSON panic dumps |
+| `GOCACHE_CRASHDUMP_DISABLED` | `false` | Skip crashdump writes (tests) |
+| `GOCACHE_BOOT_STATE_FILE` | `boot.state` | Atomic stage marker file |
+| `GOCACHE_EMBEDDED_OTLP_ENDPOINT` | _(unset)_ | Required for OTLP; unset = dormant |
+| `GOCACHE_EMBEDDED_OTLP_SERVICE` | `gocache` | `service.name` resource attribute |
+| `GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS` | `3000` | Export timeout |
+| `GOCACHE_EMBEDDED_OTLP_INSECURE` | auto | True for `http://` endpoints |
+| `GOCACHE_EMBEDDED_OTLP_DISABLED` | `false` | Hard off-switch |
 
 ## Supported Commands
 
@@ -164,7 +199,7 @@ task test
 
 ## Design Documentation
 
-- Server diagrams: `docs/server/design/` (12 diagrams -- components, sequences, state machines)
-- GCPC protocol diagrams: `docs/gcpc/design/` (14 diagrams)
+- Server diagrams: `docs/server/design/` — components, sequences, state machines (including `state_embedded_plugin_lifecycle.puml`, `components_event_bus_ring.puml`, `sequence_boot_crash_survivability.puml`)
+- GCPC protocol diagrams: `docs/gcpc/design/` (including `sequence_ophook_replay_on_subscribe.puml`, `state_ophook_replay_suppression.puml`)
 - Full diagram index with links: [SOLUTION_ARCHITECTURE.md](SOLUTION_ARCHITECTURE.md#design-diagrams)
 - GCPC protocol specification: [docs/gcpc/README.md](../gcpc/README.md)

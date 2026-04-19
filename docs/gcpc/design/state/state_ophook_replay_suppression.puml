@@ -1,0 +1,37 @@
+@startuml state_ophook_replay_suppression
+
+!include ../../../design/theme.iuml
+
+frame "Replay + restart-storm suppression (per plugin)" as F {
+
+    state "Never registered" as Never
+
+    state "Replaying" as Replaying : Active-op snapshot\ntype-filter + sort\nsynchronous sends
+
+    state "Live" as Live : Receives PhaseStart\nand PhaseComplete\nfor new ops
+
+    state "Crashed / disconnected" as Crashed : GCPC conn gone\nRegistry.Unregister
+
+    state "Suppression window" as Suppressed : regTime - lastReplay\n< min_restart_interval_for_replay
+
+    [*] --> Never
+    Never --> Replaying : Register\n(first time)
+    Replaying --> Live : Replay done
+
+    Live --> Crashed : conn loss / panic
+    Crashed --> Suppressed : Re-register within window
+    Crashed --> Replaying : Re-register after window\n(lastReplay cleared by time)
+
+    Suppressed --> Live : skip replay + log\n"replay suppressed —\nrestart-storm window"
+}
+
+note bottom of Suppressed
+  Config: plugins.min_restart_interval_for_replay
+  Default: 30s. Zero disables suppression
+  (every register gets a full replay).
+  lastReplay is recorded before the mutex
+  is released so two near-simultaneous
+  re-registers can't both pass the check.
+end note
+
+@enduml

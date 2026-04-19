@@ -65,6 +65,22 @@ The correlation ID enables multiplexed dispatch -- multiple commands can be in-f
 | HookRequest | Server -> Plugin | Pre/post hook invocation with command context and metadata |
 | HookResponse | Plugin -> Server | Allow/deny decision (pre-hooks) or acknowledgement (post-hooks) |
 
+### Operation Hooks (field numbers 80-81)
+
+| Message | Direction | Purpose |
+|---------|-----------|---------|
+| OperationHookRequest | Server -> Plugin | Operation lifecycle notification (phase=start/complete, filtered context, optional `replayed` + `replay_start_unix_ns`) |
+| OperationHookResponse | Plugin -> Server | Context enrichment for live PhaseStart; ignored for PhaseComplete and replayed starts |
+
+The `replayed` and `replay_start_unix_ns` fields (tags 7/8) are used when a plugin registers while operations are already active. The server synthesizes a PhaseStart for each tracker-active op that started before the plugin's registration watermark, filtered by the plugin's declared type patterns. `replay_start_unix_ns` is the op's absolute wall-clock start time in Unix nanoseconds — pass directly into OTEL `trace.WithTimestamp` to anchor the reconstructed span at its real occurrence time. Replayed starts are fire-and-forget; the server does not wait for a response since the live enrichment window has already closed.
+
+### Events (field numbers 70-71)
+
+| Message | Direction | Purpose |
+|---------|-----------|---------|
+| EventSubscribe | Plugin -> Server | Declares which event types the plugin consumes |
+| Event | Server -> Plugin | Fire-and-forget delivery — server also retains every Event in a bounded replay ring so a plugin subscribing mid-run catches up on history before switching to live. See the Event Replay section below. |
+
 ## Registration Handshake
 
 1. Plugin connects to the server's Unix domain socket (path provided via `GOCACHE_PLUGIN_SOCK` environment variable)
@@ -236,6 +252,27 @@ The `REX.META` handler lives in `pkg/rex/handler/handler.go` and is registered b
 
 The hook executor extracts `shared.rex.*` keys from the hook context into the dedicated `metadata` field on `HookRequestV1` (prefix-stripped). The command router receives bare-key metadata from the evaluator and forwards it on `CommandRequestV1`.
 
+## Event Replay
+
+The server retains every emitted event in a bounded FIFO ring (`events.replay_capacity`, default 10 000). When a plugin subscribes via `EventSubscribe`, the server:
+
+1. Snapshots the ring under the same write lock that gates `Emit`, filtering by the subscribed types.
+2. Delivers the retained events synchronously in FIFO order **before** the first live event is dispatched.
+3. Switches the subscription to live-only delivery.
+
+This lets an IPC plugin that connects at t=500 ms still observe events emitted at t=0. When overflow occurs (ring saturated), the oldest entry is dropped and a synthetic `replay.gap` event is delivered ahead of the retained events so subscribers can alert on misses. Setting `events.replay_capacity: 0` disables the ring entirely.
+
+## Operation Hook Replay
+
+When an `OperationHookPlugin` registers while operations are already active, the server synthesizes a PhaseStart for each `tracker.Active()` entry whose `StartTime` precedes the registration watermark and whose type matches the plugin's declared patterns. Replayed envelopes carry `replayed=true` and `replay_start_unix_ns` — the op's absolute wall-clock start in Unix ns.
+
+- **Delivery**: synchronous, in start-time order (parent before child) so span reconstruction sees operations in their natural tree order.
+- **Response**: replayed PhaseStart is fire-and-forget — the server does not wait for enrichment because the live enrichment window has already closed.
+- **Suppression**: `plugins.min_restart_interval_for_replay` (default 30 s) skips replay for a plugin that re-registers inside that window, preventing crash-looping plugins from drowning in synthetic starts.
+- **Wall-clock anchoring**: plugins typically pass `time.Unix(0, replay_start_unix_ns)` directly into OTEL's `trace.WithTimestamp` so reconstructed spans land at their actual occurrence time rather than subscribe time.
+
+Replay is "active ops only" by design — ops that started and completed before subscribe do not manifest via the ophook channel; they surface through the event bus replay ring as `OperationStart` + `OperationComplete` event pairs.
+
 ## Scope Negotiation
 
 Plugins declare requested scopes in the `Register` message. The server validates against the configuration-defined allowlist and returns the granted set in `RegisterAck`.
@@ -268,6 +305,8 @@ The full Protobuf schema is at `proto/gcpc/v1/gcpc.proto`.
 | Sequence | [REX Metadata](design/sequence/sequence_rex_metadata.puml) | HELLO REXV negotiation, META accumulation, hook context injection |
 | Sequence | [Scope Registration](design/sequence/sequence_scope_registration.puml) | Scope negotiation during registration |
 | Sequence | [Scope Enforcement](design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
+| Sequence | [OpHook Replay on Subscribe](design/sequence/sequence_ophook_replay_on_subscribe.puml) | Synthetic PhaseStart delivery for late subscribers |
 | State | [Plugin Lifecycle](design/state/state_plugin_lifecycle.puml) | Plugin FSM: Loaded -> Running -> Shutdown |
 | State | [Hook Execution](design/state/state_hook_execution.puml) | Hook dispatch state machine |
 | State | [Scope Resolution](design/state/state_scope_resolution.puml) | Scope validation and granting FSM |
+| State | [OpHook Replay Suppression](design/state/state_ophook_replay_suppression.puml) | Replay vs restart-storm suppression per plugin |

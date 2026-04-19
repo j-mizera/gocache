@@ -1,0 +1,58 @@
+@startuml sequence_ophook_replay_on_subscribe
+!include ../../../design/theme.iuml
+
+title OperationHook replay-on-subscribe for a late IPC plugin
+
+participant "Server" as S
+participant "ophooks.Registry" as R
+participant "ophooks.Executor" as E
+participant "operations.Tracker" as T
+participant "PluginConn" as C
+participant "gobservability\n(late subscriber)" as P
+
+== Boot phase — plugin not yet connected ==
+S -> T : Start(TypeStartup) → bootOp
+S -> T : Start(TypeCommand) → cmd_1 (long-running)
+S -> T : Start(TypeConnection) → conn_3
+S -> E : RunStartHooks(bootOp) → no matches
+
+== Plugin connects ==
+P -> S : GCPC handshake + Register\n(operation_hooks = [{*, 10}])
+S -> R : Register("gobs", 10, conn, ["*"])
+activate R
+note right of R : Register acquires write lock\nappends hook entries\ncaptures regTime INSIDE the lock
+R --> S : unlocked; invoke onRegister(pluginName, regTime)
+deactivate R
+S -> E : Replay("gobs", regTime)
+
+activate E
+E -> T : Active()
+T --> E : [bootOp, cmd_1, conn_3, ...]
+E -> E : filter StartTime < regTime\nAND pattern matches "*"
+E -> E : sort by StartTime (parent → child)
+
+loop for each retained op (sync, in order)
+    E -> C : SendFireAndForget(NewOperationHookReplay(\n  reqID, op.ID, op.Type, op.ParentID,\n  filteredCtx, op.StartTime.UnixNano()))
+    C -> P : OperationHookRequestV1 { replayed=true,\n  replay_start_unix_ns=<absolute ns> }
+    P -> P : StartOperation(..., replayed=true, startUnixNs)
+    note right of P
+      Span anchored at
+      time.Unix(0, startUnixNs).
+      Attribute gocache.replayed=true.
+      No response sent — server is
+      not waiting for enrichment.
+    end note
+end
+
+deactivate E
+
+== Live ops after regTime go via normal path ==
+S -> T : Start(TypeCommand) → cmd_42
+S -> E : RunStartHooks(cmd_42) → [gobs match]
+E -> C : Send(OperationHookRequestV1 { replayed=false }) — sync
+C -> P : live start
+P --> C : OperationHookResponseV1 { context_values }
+C --> E : context enrichment
+E -> S : op enriched
+
+@enduml

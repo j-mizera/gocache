@@ -1,0 +1,68 @@
+@startuml sequence_boot_crash_survivability
+!include ../../../design/theme.iuml
+
+title Boot + crash survivability (embedded plugins + bootstate + crashdump)
+
+participant "main()" as M
+participant "zerolog (stderr)" as L
+participant "embedded.Registry" as ER
+participant "bootstate" as BS
+participant "config.Load" as C
+participant "crashdump" as CD
+participant "runtime" as R
+
+M -> L : InitStderr — JSON from line 1
+M -> BS : Write(stage=embedded_boot)
+M -> M : defer { recover → crashdump.WriteFromPanic }
+note right of M
+  Registered FIRST — survives
+  every later defer, including
+  embedded.ShutdownAll.
+end note
+
+M -> ER : BootAll(ctx)
+activate ER
+ER -> ER : for each registered:\n  invoke(BootInit)\n  Strict panic → Fatal\n  Default panic → log + continue
+ER --> M
+deactivate ER
+M -> M : defer { embedded.ShutdownAll }
+
+M -> BS : Write(stage=config_load)
+M -> C : Load(flags)
+alt Config parse OK
+  C --> M : cfg
+  M -> ER : ConfigLoadedAll(ctx, cfg)
+  note right of ER
+    Crashdump embedded plugin scans
+    <dir>/crashes/ here (logger ready)
+    and emits events.
+    OTLP embedded plugin upgrades
+    endpoint from env to YAML.
+  end note
+else Panic during Load
+  C ->> M : panic
+  M -> M : deferred recover
+  M -> BS : Read(previous stage)
+  M -> CD : WriteFromPanic(stage=config_load, ...)
+  note right of CD
+    If mkdir/write fails, JSON
+    goes to stderr as fallback.
+  end note
+  M -> R : re-panic → stack trace + exit 2
+end
+
+M -> BS : Write(stage=core_init)
+M -> M : cache / engine / watch / tracker init
+M -> BS : Write(stage=plugin_load)
+M -> M : pluginManager.Start(ctx)
+M -> BS : Write(stage=snapshot_load)
+M -> BS : Write(stage=workers_start)
+M -> BS : Write(stage=listener_start)
+M -> BS : Write(stage=running)
+
+== On next boot (previous run crashed) ==
+M -> BS : Read
+BS --> M : stage != running
+M -> L : Warn "previous_run_stage=plugin_load crashed=true"
+
+@enduml
