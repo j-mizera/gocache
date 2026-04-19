@@ -210,7 +210,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
-	connOp.Enrich("_remote_addr", remoteAddr)
+	connOp.Enrich(command.RemoteAddrKey, remoteAddr)
 	connCtx := ops.WithContext(serverCtx, connOp)
 	if srv.opHookExecutor != nil {
 		srv.opHookExecutor.RunStartHooks(connCtx, connOp)

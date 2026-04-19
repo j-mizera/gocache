@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gocache/api/command"
 	ops "gocache/api/operations"
 
 	"github.com/rs/zerolog"
@@ -132,10 +133,10 @@ func (e *OpEvent) injectContext() {
 	if e.op == nil {
 		return
 	}
-	e.event = e.event.Str("_operation_id", e.op.ID)
+	e.event = e.event.Str(command.OperationID, e.op.ID)
 	ctx := e.op.ContextSnapshot(true) // redacted — secrets stripped
 	if len(ctx) > 0 {
-		e.event = e.event.Interface("_ctx", ctx)
+		e.event = e.event.Interface(command.CtxField, ctx)
 	}
 }
 

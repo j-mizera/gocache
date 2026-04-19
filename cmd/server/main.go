@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"gocache/api/command"
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
@@ -138,8 +139,8 @@ func main() {
 	// LoadSnapshot operation.
 	if cfg.Persistence.LoadOnStartup {
 		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
-		snapOp.Enrich("_file", cfg.Persistence.SnapshotFile)
-		snapOp.Enrich("_trigger", "startup")
+		snapOp.Enrich(command.FileKey, cfg.Persistence.SnapshotFile)
+		snapOp.Enrich(command.TriggerKey, "startup")
 		snapCtx := ops.WithContext(ctx, snapOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
@@ -189,7 +190,7 @@ func main() {
 	v.WatchConfig()
 	v.OnConfigChange(func(e fsnotify.Event) {
 		reloadOp := tracker.Start(ops.TypeConfigReload, "")
-		reloadOp.Enrich("_file", e.Name)
+		reloadOp.Enrich(command.FileKey, e.Name)
 		reloadCtx := ops.WithContext(context.Background(), reloadOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(reloadCtx, reloadOp)

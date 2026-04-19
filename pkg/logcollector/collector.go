@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 
+	"gocache/api/command"
 	"gocache/api/events"
 )
 
@@ -81,17 +82,17 @@ func (c *Collector) parseLine(sourceName string, line []byte) {
 	if source == "" {
 		source = sourceName
 	}
-	operationID := stringField(raw, "_operation_id")
+	operationID := stringField(raw, command.OperationID)
 
 	// Build the fields map directly: one allocation sized for the upper bound
 	// (raw keys + potential _ctx keys + "_source"). Unknown keys are written
 	// straight in; _ctx entries are flattened in-place rather than merged.
-	ctxMap, _ := raw["_ctx"].(map[string]interface{})
+	ctxMap, _ := raw[command.CtxField].(map[string]interface{})
 	fields := make(map[string]string, len(raw)+len(ctxMap)+1)
 	fields["_source"] = source
 	for k, v := range raw {
 		switch k {
-		case "level", "message", "time", "source", "_operation_id", "_ctx":
+		case "level", "message", "time", "source", command.OperationID, command.CtxField:
 			continue
 		default:
 			if s, ok := formatJSONValue(v); ok {

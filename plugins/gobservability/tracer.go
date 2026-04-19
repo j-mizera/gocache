@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"gocache/api/command"
 	opctx "gocache/api/context"
 	apilogger "gocache/api/logger"
 
@@ -138,7 +139,7 @@ func (t *Tracer) CompleteOperation(opID, status, failReason string, opContext ma
 	redacted := opctx.RedactSecrets(opContext)
 	for k, v := range redacted {
 		// Skip internal keys that are already set or too noisy.
-		if strings.HasPrefix(k, "_") && k != "_command" {
+		if strings.HasPrefix(k, "_") && k != command.CommandKey {
 			continue
 		}
 		span.SetAttributes(attribute.String(k, v))

@@ -113,7 +113,7 @@ func (p *gobservabilityPlugin) onOperationComplete(req *pluginsdk.OperationHookR
 
 	status := "completed"
 	failReason := ""
-	if v, ok := req.Context["_error"]; ok && v != "" {
+	if v, ok := req.Context[command.ErrorKey]; ok && v != "" {
 		status = "failed"
 		failReason = v
 	}
