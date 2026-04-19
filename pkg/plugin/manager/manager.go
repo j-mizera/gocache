@@ -14,6 +14,7 @@ import (
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
 	"gocache/api/logger"
+	apiplugin "gocache/api/plugin"
 	"gocache/api/transport"
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/plugin"
@@ -241,7 +242,7 @@ func (m *Manager) launchPlugin(ctx context.Context, inst *PluginInstance) {
 	inst.SetState(StateStarting)
 
 	cmd := exec.CommandContext(ctx, inst.BinPath)
-	cmd.Env = append(os.Environ(), "GOCACHE_PLUGIN_SOCK="+m.cfg.SocketPath)
+	cmd.Env = append(os.Environ(), apiplugin.EnvSocketPath+"="+m.cfg.SocketPath)
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 

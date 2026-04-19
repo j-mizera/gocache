@@ -11,6 +11,7 @@ import (
 
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
+	apiplugin "gocache/api/plugin"
 	"gocache/api/transport"
 )
 
@@ -175,9 +176,9 @@ func Run(ctx context.Context, p Plugin) error {
 	// Create a logger for this plugin, writing to stdout.
 	pluginLog := apilogger.New(os.Stdout, p.Name(), "debug")
 
-	sockPath := os.Getenv("GOCACHE_PLUGIN_SOCK")
+	sockPath := os.Getenv(apiplugin.EnvSocketPath)
 	if sockPath == "" {
-		return errors.New("GOCACHE_PLUGIN_SOCK not set")
+		return fmt.Errorf("%s not set", apiplugin.EnvSocketPath)
 	}
 
 	conn, err := net.Dial("unix", sockPath)
