@@ -17,6 +17,13 @@ import (
 	"gocache/api/events"
 )
 
+// Scanner buffer sizes — initial 64 KiB grows up to 256 KiB for long log
+// lines (large redacted _ctx maps can exceed the default bufio.Scanner cap).
+const (
+	scannerInitBuf = 64 * 1024
+	scannerMaxBuf  = 256 * 1024
+)
+
 // Collector reads JSON log lines from multiple sources and emits LogEntry events.
 type Collector struct {
 	emitter events.Emitter
@@ -50,7 +57,7 @@ func (c *Collector) Wait() {
 func (c *Collector) readSource(sourceName string, r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	// Increase buffer for long log lines (e.g. large _ctx).
-	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	scanner.Buffer(make([]byte, 0, scannerInitBuf), scannerMaxBuf)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()

@@ -2,6 +2,11 @@ package cache
 
 import "sort"
 
+// sortedSetMemberOverhead is the approximate per-member memory cost beyond
+// the member string itself: 8 bytes for the float64 score + ~16 bytes of
+// map bucket overhead.
+const sortedSetMemberOverhead = 24
+
 // SortedSet represents a sorted set with members and scores
 type SortedSet struct {
 	members map[string]float64 // member -> score
@@ -122,7 +127,7 @@ func (zset *SortedSet) Range(start, stop int) []ScoredMember {
 func (zset *SortedSet) EstimateSize() int64 {
 	var size int64
 	for member := range zset.members {
-		size += int64(len(member)) + 24 // 8 bytes float64 score + 16 bytes map overhead
+		size += int64(len(member)) + sortedSetMemberOverhead
 	}
 	return size
 }

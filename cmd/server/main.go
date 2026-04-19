@@ -35,9 +35,19 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// Entry-point defaults.
+const (
+	// defaultConfigFile is the config path used when --config is not passed.
+	defaultConfigFile = "gocache.yaml"
+	// serverShutdownTimeout is the time budget for the TCP server's
+	// graceful Shutdown step in handleShutdown. Distinct from the ctx-cancel
+	// path in pkg/server which has its own shorter timeout.
+	serverShutdownTimeout = 10 * time.Second
+)
+
 func main() {
 	// Define CLI flags — all optional; they override config file and env vars
-	pflag.String("config", "gocache.yaml", "path to config file (.yaml or .json)")
+	pflag.String("config", defaultConfigFile, "path to config file (.yaml or .json)")
 	pflag.String("address", "", "server listen address (overrides config)")
 	pflag.Int("port", 0, "server listen port (overrides config)")
 	pflag.String("snapshot-file", "", "snapshot file path (overrides config)")
@@ -301,9 +311,8 @@ func handleShutdown(
 	// Unblock all waiting BLPOP/BRPOP clients first so their connections can close.
 	blockingRegistry.Shutdown()
 
-	shutdownTimeout := 10 * time.Second
-	logger.Info(shutdownCtx).Str("step", "1/6").Dur("timeout", shutdownTimeout).Msg("shutting down server")
-	if err := srv.Shutdown(shutdownTimeout); err != nil {
+	logger.Info(shutdownCtx).Str("step", "1/6").Dur("timeout", serverShutdownTimeout).Msg("shutting down server")
+	if err := srv.Shutdown(serverShutdownTimeout); err != nil {
 		logger.Warn(shutdownCtx).Err(err).Msg("server shutdown error")
 	}
 

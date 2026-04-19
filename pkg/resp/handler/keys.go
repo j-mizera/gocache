@@ -13,6 +13,14 @@ import (
 	"gocache/pkg/resp"
 )
 
+const (
+	// defaultScanCount is the page size used by SCAN when COUNT is omitted.
+	defaultScanCount = 10
+	// embstrMaxLen is the Redis-compatible boundary between "embstr" and
+	// "raw" string encodings (strings <= 44 bytes report as embstr).
+	embstrMaxLen = 44
+)
+
 // HandleType implements TYPE key.
 func HandleType(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
@@ -156,7 +164,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 
 	// Parse optional MATCH and COUNT arguments.
 	pattern := ""
-	count := 10
+	count := defaultScanCount
 	args := cmdCtx.Args[1:]
 	for i := 0; i < len(args); i++ {
 		switch strings.ToUpper(args[i]) {
@@ -266,7 +274,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
 				s, _ := entry.Value.(string)
-				if len(s) <= 44 {
+				if len(s) <= embstrMaxLen {
 					return "embstr"
 				}
 				return "raw"

@@ -17,6 +17,10 @@ import (
 // MaxFrameSize is the maximum allowed size for a single protobuf frame (1 MB).
 const MaxFrameSize = 1 << 20
 
+// frameHeaderSize is the length in bytes of the big-endian uint32 length
+// prefix that precedes every framed protobuf payload.
+const frameHeaderSize = 4
+
 var (
 	ErrFrameTooLarge = errors.New("frame exceeds maximum size")
 	ErrConnClosed    = errors.New("connection closed")
@@ -43,7 +47,7 @@ func (c *Conn) Send(env *gcpc.EnvelopeV1) error {
 		return ErrFrameTooLarge
 	}
 
-	header := make([]byte, 4)
+	header := make([]byte, frameHeaderSize)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 
 	c.mu.Lock()
@@ -60,7 +64,7 @@ func (c *Conn) Send(env *gcpc.EnvelopeV1) error {
 
 // Recv reads a length-prefixed frame and unmarshals it into an Envelope.
 func (c *Conn) Recv() (*gcpc.EnvelopeV1, error) {
-	header := make([]byte, 4)
+	header := make([]byte, frameHeaderSize)
 	if _, err := io.ReadFull(c.conn, header); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, ErrConnClosed

@@ -35,6 +35,10 @@ const (
 	// maxArrayElements caps the number of elements in an Array/Map/Set.
 	// Prevents memory exhaustion via `*<huge>\r\n` and downstream makes.
 	maxArrayElements = 1024 * 1024 // 1 M elements
+
+	// defaultWriterBufSize is the bufio.Writer buffer size used to batch
+	// small RESP writes (pipelined replies) into larger syscalls.
+	defaultWriterBufSize = 16 * 1024
 )
 
 type Value struct {
@@ -331,7 +335,7 @@ type Writer struct {
 }
 
 func NewWriter(w io.Writer) *Writer {
-	return &Writer{writer: bufio.NewWriterSize(w, 16384)}
+	return &Writer{writer: bufio.NewWriterSize(w, defaultWriterBufSize)}
 }
 
 func (w *Writer) Flush() error {

@@ -21,6 +21,11 @@ import (
 // has been stopped before the work could be executed.
 var ErrEngineStopped = errors.New("engine stopped")
 
+// cmdChanCapacity sizes the buffered submission channel. Writers block when
+// the engine goroutine is behind; a modest buffer smooths microbursts without
+// allowing unbounded queueing.
+const cmdChanCapacity = 100
+
 type Command struct {
 	Execute func() interface{}
 	ResChan chan interface{}
@@ -36,7 +41,7 @@ type Engine struct {
 func New(c *cache.Cache) *Engine {
 	return &Engine{
 		cache:    c,
-		cmdChan:  make(chan Command, 100),
+		cmdChan:  make(chan Command, cmdChanCapacity),
 		stopChan: make(chan struct{}),
 	}
 }

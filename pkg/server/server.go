@@ -27,6 +27,10 @@ import (
 	"gocache/pkg/watch"
 )
 
+// ctxCancelShutdownTimeout is the window granted to drain active connections
+// when the server's context is cancelled (vs an explicit Shutdown call).
+const ctxCancelShutdownTimeout = 5 * time.Second
+
 type Server struct {
 	addr             string
 	cache            *cache.Cache
@@ -137,7 +141,7 @@ func (srv *Server) Start(ctx context.Context) error {
 	case <-srv.shutdownChan:
 		return nil
 	case <-ctx.Done():
-		srv.Shutdown(5 * time.Second)
+		srv.Shutdown(ctxCancelShutdownTimeout)
 		return ctx.Err()
 	}
 }

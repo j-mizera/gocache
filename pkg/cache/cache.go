@@ -37,6 +37,9 @@ func ParseEvictionPolicy(s string) EvictionPolicy {
 // for map bucket amortization, the Entry struct, and the LRU list node.
 const entryOverhead = 128
 
+// bytesPerMB converts a megabyte limit to bytes for the cache's byte budget.
+const bytesPerMB int64 = 1024 * 1024
+
 type ValueState int
 type ValueType int
 
@@ -82,7 +85,7 @@ func New() *Cache {
 func NewWithConfig(maxMemoryMB int64, policy EvictionPolicy) *Cache {
 	var maxBytes int64
 	if maxMemoryMB > 0 {
-		maxBytes = maxMemoryMB * 1024 * 1024
+		maxBytes = maxMemoryMB * bytesPerMB
 	}
 	return newCache(maxBytes, policy)
 }
@@ -127,7 +130,7 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if maxMemoryMB > 0 {
-		c.maxBytes = maxMemoryMB * 1024 * 1024
+		c.maxBytes = maxMemoryMB * bytesPerMB
 	} else {
 		c.maxBytes = 0
 	}

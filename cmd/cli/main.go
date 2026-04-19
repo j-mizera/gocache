@@ -8,11 +8,17 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
+const (
+	defaultHost = "localhost"
+	defaultPort = 6379
+)
+
 func main() {
-	conn, err := net.Dial("tcp", "localhost:6379")
+	conn, err := net.Dial("tcp", net.JoinHostPort(defaultHost, strconv.Itoa(defaultPort)))
 	if err != nil {
 		fmt.Printf("Failed to connect to server: %v\n", err)
 		os.Exit(1)
