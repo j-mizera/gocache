@@ -5,10 +5,16 @@ import (
 	"net/http"
 )
 
+// HTTP response content types.
+const (
+	contentTypeJSON       = "application/json"
+	contentTypePrometheus = "text/plain; version=0.0.4; charset=utf-8"
+)
+
 // metricsHandler returns an HTTP handler that serves Prometheus metrics.
 func metricsHandler(collector *Collector, name, version string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.Header().Set("Content-Type", contentTypePrometheus)
 		collector.WritePrometheus(w, name, version)
 	})
 }
@@ -17,7 +23,7 @@ func metricsHandler(collector *Collector, name, version string) http.Handler {
 // Queries the server's "health" topic via GCPC.
 func healthzHandler(p *gobservabilityPlugin) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", contentTypeJSON)
 
 		if p.session == nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -51,7 +57,7 @@ func healthzHandler(p *gobservabilityPlugin) http.Handler {
 // Queries both "health" and "plugins" topics to determine overall readiness.
 func readyzHandler(p *gobservabilityPlugin) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", contentTypeJSON)
 
 		if p.session == nil {
 			w.WriteHeader(http.StatusServiceUnavailable)

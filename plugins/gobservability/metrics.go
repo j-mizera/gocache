@@ -8,6 +8,9 @@ import (
 	"sync"
 )
 
+// nsPerSec converts nanoseconds to seconds for histogram observation.
+const nsPerSec = 1e9
+
 // Histogram bucket boundaries in seconds.
 var defaultBuckets = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0}
 
@@ -35,7 +38,7 @@ func NewCollector() *Collector {
 
 // Record registers a command execution with its duration and error status.
 func (c *Collector) Record(command string, elapsedNs uint64, isError bool) {
-	durationSec := float64(elapsedNs) / 1e9
+	durationSec := float64(elapsedNs) / nsPerSec
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

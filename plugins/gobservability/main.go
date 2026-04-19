@@ -19,7 +19,20 @@ import (
 const (
 	pluginName    = "gobservability"
 	pluginVersion = "0.1.0"
-	defaultPort   = ":9100"
+
+	// Environment variables consumed by the plugin.
+	envPort         = "GOBSERVABILITY_PORT"
+	envOTLPEndpoint = "GOBSERVABILITY_OTLP_ENDPOINT"
+	envOTELService  = "OTEL_SERVICE_NAME"
+
+	// Defaults — used when the corresponding env var is unset.
+	defaultPort        = ":9100"
+	defaultServiceName = "gocache"
+	defaultLogLevel    = "debug"
+
+	// HTTP timeouts for the /metrics /healthz /readyz server.
+	httpReadTimeout  = 5 * time.Second
+	httpWriteTimeout = 10 * time.Second
 )
 
 type gobservabilityPlugin struct {
@@ -101,7 +114,7 @@ func (p *gobservabilityPlugin) onOperationStart(req *pluginsdk.OperationHookRequ
 	// Write the canonical traceparent back so all downstream sees it.
 	return &pluginsdk.OperationHookResponse{
 		ContextValues: map[string]string{
-			"shared.traceparent": traceparent,
+			ctxKeyTraceparent: traceparent,
 		},
 	}
 }
@@ -157,12 +170,12 @@ func (p *gobservabilityPlugin) Scopes() []string {
 }
 
 func main() {
-	port := os.Getenv("GOBSERVABILITY_PORT")
+	port := os.Getenv(envPort)
 	if port == "" {
 		port = defaultPort
 	}
 
-	plog := apilogger.New(os.Stdout, pluginName, "debug")
+	plog := apilogger.New(os.Stdout, pluginName, defaultLogLevel)
 
 	collector := NewCollector()
 
@@ -172,10 +185,10 @@ func main() {
 	}
 
 	// Initialize OTEL tracer if enabled.
-	if otlpEndpoint := os.Getenv("GOBSERVABILITY_OTLP_ENDPOINT"); otlpEndpoint != "" {
-		serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	if otlpEndpoint := os.Getenv(envOTLPEndpoint); otlpEndpoint != "" {
+		serviceName := os.Getenv(envOTELService)
 		if serviceName == "" {
-			serviceName = "gocache"
+			serviceName = defaultServiceName
 		}
 		tracer, err := NewTracer(otlpEndpoint, serviceName, plog)
 		if err != nil {
@@ -194,8 +207,8 @@ func main() {
 	httpServer := &http.Server{
 		Addr:         port,
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
 	}
 
 	go func() {

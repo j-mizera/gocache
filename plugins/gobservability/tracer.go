@@ -22,6 +22,35 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// OTEL + W3C Trace Context constants.
+const (
+	// tracerName identifies this plugin's OTEL tracer instrument.
+	tracerName = "gocache.gobservability"
+
+	// Resource + span attribute keys.
+	attrComponent     = "gocache.component"
+	attrOperationID   = "gocache.operation.id"
+	attrOperationType = "gocache.operation.type"
+	attrLogLevel      = "log.level"
+
+	// componentValue is the value stored under attrComponent.
+	componentValue = "gobservability"
+
+	// spanNamePrefix prefixes every span name with a stable vendor namespace.
+	spanNamePrefix = "gocache."
+
+	// W3C Trace Context format: version-traceID-spanID-flags. Version "00"
+	// and flags "01" (sampled) are the only combination currently emitted.
+	traceparentFormat  = "00-%s-%s-01"
+	traceparentVersion = "00"
+
+	// Context keys where an incoming traceparent may be found.
+	// ctxKeyTraceparent is canonical; ctxKeyRexTraceparent is accepted as a
+	// fallback so REX-provided trace context still links client traces.
+	ctxKeyTraceparent    = "shared.traceparent"
+	ctxKeyRexTraceparent = "shared.rex.traceparent"
+)
+
 // Tracer wraps an OTEL TracerProvider and manages operation-based spans.
 type Tracer struct {
 	provider *sdktrace.TracerProvider
@@ -56,7 +85,7 @@ func NewTracer(endpoint, serviceName string, log *apilogger.Logger) (*Tracer, er
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
-			attribute.String("gocache.component", "gobservability"),
+			attribute.String(attrComponent, componentValue),
 		),
 	)
 	if err != nil {
@@ -70,7 +99,7 @@ func NewTracer(endpoint, serviceName string, log *apilogger.Logger) (*Tracer, er
 
 	return &Tracer{
 		provider: tp,
-		tracer:   tp.Tracer("gocache.gobservability"),
+		tracer:   tp.Tracer(tracerName),
 		log:      log,
 		inflight: make(map[string]inflightSpan),
 	}, nil
@@ -86,10 +115,11 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 
 	ctx := context.Background()
 
-	// Look for existing traceparent: shared.traceparent (canonical) then shared.rex.traceparent (REX fallback).
-	traceparent := opContext["shared.traceparent"]
+	// Look for an existing traceparent: ctxKeyTraceparent (canonical) then
+	// ctxKeyRexTraceparent (REX fallback).
+	traceparent := opContext[ctxKeyTraceparent]
 	if traceparent == "" {
-		traceparent = opContext["shared.rex.traceparent"]
+		traceparent = opContext[ctxKeyRexTraceparent]
 	}
 
 	if traceparent != "" {
@@ -98,11 +128,11 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 		}
 	}
 
-	_, span := t.tracer.Start(ctx, "gocache."+opType,
+	_, span := t.tracer.Start(ctx, spanNamePrefix+opType,
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
-			attribute.String("gocache.operation.id", opID),
-			attribute.String("gocache.operation.type", opType),
+			attribute.String(attrOperationID, opID),
+			attribute.String(attrOperationType, opType),
 		),
 	)
 
@@ -110,9 +140,9 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 	t.inflight[opID] = inflightSpan{span: span, startTime: time.Now()}
 	t.mu.Unlock()
 
-	// Generate traceparent from the new span if none existed.
+	// Emit a traceparent from the new span if none existed.
 	sc := span.SpanContext()
-	return fmt.Sprintf("00-%s-%s-01", sc.TraceID().String(), sc.SpanID().String())
+	return fmt.Sprintf(traceparentFormat, sc.TraceID().String(), sc.SpanID().String())
 }
 
 // CompleteOperation finalizes the span for an operation.
@@ -173,7 +203,7 @@ func (t *Tracer) RecordLog(operationID, level, message string, fields map[string
 	// Redact secrets from fields before attaching to span.
 	redacted := opctx.RedactSecrets(fields)
 	attrs := []attribute.KeyValue{
-		attribute.String("log.level", level),
+		attribute.String(attrLogLevel, level),
 	}
 	for k, v := range redacted {
 		attrs = append(attrs, attribute.String(k, v))
@@ -188,7 +218,7 @@ func GenerateTraceparent() string {
 	var spanID [8]byte
 	rand.Read(traceID[:])
 	rand.Read(spanID[:])
-	return fmt.Sprintf("00-%s-%s-01", hex.EncodeToString(traceID[:]), hex.EncodeToString(spanID[:]))
+	return fmt.Sprintf(traceparentFormat, hex.EncodeToString(traceID[:]), hex.EncodeToString(spanID[:]))
 }
 
 // Shutdown flushes pending spans and shuts down the exporter.
@@ -205,7 +235,7 @@ func parseTraceparent(tp string) (trace.SpanContext, bool) {
 	if len(parts) != 4 {
 		return trace.SpanContext{}, false
 	}
-	if parts[0] != "00" {
+	if parts[0] != traceparentVersion {
 		return trace.SpanContext{}, false
 	}
 
