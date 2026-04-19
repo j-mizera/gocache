@@ -89,7 +89,12 @@ func (b *Bus) Emit(evt apiEvents.Event) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					// Surface the originating operation_id so the panic can be
+					// correlated with the producer via Grafana/logs. No ctx is
+					// available at this callsite — the bus is upstream of any
+					// op lookup — so we lift op_id from the event itself.
 					logger.ErrorNoCtx().Str("subscriber", s.Name).Str("event", string(evtType)).
+						Str("operation_id", evt.Proto.OperationId).
 						Interface("panic", r).Msg("event handler panicked")
 				}
 			}()
