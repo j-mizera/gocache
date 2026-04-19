@@ -66,10 +66,10 @@ type inflightSpan struct {
 	startTime time.Time
 }
 
-// NewTracer creates a Tracer with an OTLP HTTP exporter.
-func NewTracer(endpoint, serviceName string, log *apilogger.Logger) (*Tracer, error) {
-	ctx := context.Background()
-
+// NewTracer creates a Tracer with an OTLP HTTP exporter. The caller's ctx is
+// used for the OTLP exporter handshake and resource discovery so process-level
+// cancellation can interrupt a hung endpoint during startup.
+func NewTracer(ctx context.Context, endpoint, serviceName string, log *apilogger.Logger) (*Tracer, error) {
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(endpoint),
 	}

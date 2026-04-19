@@ -55,10 +55,10 @@ func (p *gobservabilityPlugin) OnHealthCheck(_ context.Context) error {
 }
 
 func (p *gobservabilityPlugin) OnShutdown(ctx context.Context) error {
-	p.log.InfoNoCtx().Msg("shutting down")
+	p.log.Info(ctx).Msg("shutting down")
 	if p.tracer != nil {
 		if err := p.tracer.Shutdown(ctx); err != nil {
-			p.log.ErrorNoCtx().Err(err).Msg("tracer shutdown error")
+			p.log.Error(ctx).Err(err).Msg("tracer shutdown error")
 		}
 	}
 	return p.server.Shutdown(ctx)
@@ -168,6 +168,12 @@ func (p *gobservabilityPlugin) Scopes() []string {
 }
 
 func main() {
+	// Bind the signal context first so every subsequent initialization
+	// (OTEL exporter handshake, HTTP listener) can be interrupted by
+	// SIGTERM/SIGINT instead of hanging on a slow endpoint.
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
 	port := os.Getenv(envPort)
 	if port == "" {
 		port = defaultPort
@@ -188,7 +194,7 @@ func main() {
 		if serviceName == "" {
 			serviceName = defaultServiceName
 		}
-		tracer, err := NewTracer(otlpEndpoint, serviceName, plog)
+		tracer, err := NewTracer(ctx, otlpEndpoint, serviceName, plog)
 		if err != nil {
 			plog.ErrorNoCtx().Err(err).Msg("failed to initialize OTEL tracer")
 		} else {
@@ -217,9 +223,6 @@ func main() {
 	}()
 
 	plugin.server = httpServer
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
 
 	if err := pluginsdk.Run(ctx, plugin); err != nil {
 		plog.ErrorNoCtx().Err(err).Msg("plugin error")

@@ -48,7 +48,7 @@ func (e *Executor) RunStartHooks(ctx context.Context, op *ops.Operation) {
 		respCh, err := h.Conn.Send(hookCtx, env, reqID)
 		if err != nil {
 			cancel()
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("op", op.ID).Err(err).
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("op", op.ID).Err(err).
 				Msg("operation start hook send failed, continuing")
 			continue
 		}
@@ -69,7 +69,7 @@ func (e *Executor) RunStartHooks(ctx context.Context, op *ops.Operation) {
 		case <-hookCtx.Done():
 			cancel()
 			h.Conn.DeletePending(reqID)
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("op", op.ID).
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("op", op.ID).
 				Msg("operation start hook timed out, continuing")
 		}
 	}

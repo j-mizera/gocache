@@ -260,7 +260,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		val, err := reader.Read()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				logger.DebugNoCtx().Err(err).Msg("connection read error")
+				logger.Debug(connCtx).Err(err).Msg("connection read error")
 			}
 			return
 		}

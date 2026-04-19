@@ -64,7 +64,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, command string, args []strin
 		}
 		result, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, command, args, "", "", cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 		if err != nil {
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical pre-hook failed, allowing command")
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical pre-hook failed, allowing command")
 			continue
 		}
 		if result.Deny {
@@ -104,7 +104,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, command string, args []stri
 		}
 		_, err := e.sendCriticalHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, command, args, resultValue, resultError, cmd.FilterHookCtx(hookCtx, h.PluginName), metadata)
 		if err != nil {
-			logger.WarnNoCtx().Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical post-hook failed")
+			logger.Warn(ctx).Str("plugin", h.PluginName).Str("command", command).Err(err).Msg("critical post-hook failed")
 		}
 	}
 }

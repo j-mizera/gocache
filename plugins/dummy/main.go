@@ -22,8 +22,8 @@ func (d *dummyPlugin) OnHealthCheck(_ context.Context) error {
 	return nil
 }
 
-func (d *dummyPlugin) OnShutdown(_ context.Context) error {
-	d.log.InfoNoCtx().Msg("shutting down")
+func (d *dummyPlugin) OnShutdown(ctx context.Context) error {
+	d.log.Info(ctx).Msg("shutting down")
 	return nil
 }
 
