@@ -113,6 +113,21 @@ type OperationHookRequest struct {
 	ParentID      string
 	Phase         string            // apiplugin.PhaseStart or apiplugin.PhaseComplete
 	Context       map[string]string // filtered for this plugin's visibility
+
+	// Replayed is true when the server is catching this subscriber up
+	// with an operation that was already active at register time. The
+	// server does not wait for an enrichment response, so any
+	// ContextValues returned from HandleOperationHook are ignored.
+	// Plugins can use this flag to tag reconstructed observability
+	// artifacts (OTEL span attributes, log markers) as backfilled.
+	Replayed bool
+
+	// ReplayStartUnixNs is the absolute wall-clock start time of the
+	// operation, in Unix nanoseconds. Only set when Replayed is true.
+	// Pass directly to `trace.WithTimestamp` / span-start-time equivalents
+	// so reconstructed spans land at their actual occurrence time
+	// instead of at subscribe time.
+	ReplayStartUnixNs int64
 }
 
 // OperationHookResponse is the plugin's response to an operation start hook.
@@ -379,14 +394,17 @@ func Run(ctx context.Context, p Plugin) error {
 			}
 			req := env.GetOperationHookRequest()
 			hookReq := &OperationHookRequest{
-				OperationID:   req.OperationId,
-				OperationType: req.OperationType,
-				ParentID:      req.ParentId,
-				Phase:         req.Phase,
-				Context:       req.Context,
+				OperationID:       req.OperationId,
+				OperationType:     req.OperationType,
+				ParentID:          req.ParentId,
+				Phase:             req.Phase,
+				Context:           req.Context,
+				Replayed:          req.Replayed,
+				ReplayStartUnixNs: req.ReplayStartUnixNs,
 			}
-			if req.Phase == apiplugin.PhaseStart {
-				// Start phase: synchronous — server is waiting for response.
+			switch {
+			case req.Phase == apiplugin.PhaseStart && !req.Replayed:
+				// Live start: synchronous — server is waiting for response.
 				result := ohp.HandleOperationHook(ctx, hookReq)
 				var ctxValues map[string]string
 				if result != nil {
@@ -396,8 +414,12 @@ func Run(ctx context.Context, p Plugin) error {
 				if err := tc.Send(resp); err != nil {
 					pluginLog.ErrorNoCtx().Err(err).Msg("failed to send operation hook response")
 				}
-			} else {
-				// Complete phase: fire-and-forget.
+			default:
+				// Complete phase AND replayed start: both fire-and-forget.
+				// Replayed starts carry ReplayStartUnixNs so the plugin can
+				// reconstruct spans at wall-clock time; the server does not
+				// wait on the response since the live enrichment window is
+				// already closed.
 				handlerWg.Add(1)
 				go func() {
 					defer handlerWg.Done()

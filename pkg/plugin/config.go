@@ -41,7 +41,14 @@ type PluginsConfig struct {
 	ShutdownTimeout time.Duration             `yaml:"shutdown_timeout" mapstructure:"shutdown_timeout"`
 	MaxRestarts     int                       `yaml:"max_restarts"     mapstructure:"max_restarts"`
 	ConnectTimeout  time.Duration             `yaml:"connect_timeout"  mapstructure:"connect_timeout"`
-	Overrides       map[string]PluginOverride `yaml:"overrides"        mapstructure:"overrides"`
+	// MinRestartIntervalForReplay is the grace window during which a
+	// re-registering plugin is treated as "already caught up" and gets no
+	// operation-hook replay. A crash-looping plugin would otherwise see a
+	// full ring of synthetic PhaseStart events on every restart, stalling
+	// its own reconnect and drowning downstream observability. Zero
+	// disables suppression (every Register fires a full replay).
+	MinRestartIntervalForReplay time.Duration             `yaml:"min_restart_interval_for_replay" mapstructure:"min_restart_interval_for_replay"`
+	Overrides                   map[string]PluginOverride `yaml:"overrides"                       mapstructure:"overrides"`
 }
 
 // PluginOverride allows YAML to override plugin self-described properties.

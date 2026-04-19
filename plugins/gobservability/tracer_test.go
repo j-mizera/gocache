@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	apilogger "gocache/api/logger"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -62,7 +64,7 @@ func TestStartOperation_WithTraceparent(t *testing.T) {
 		"shared.traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
 	}
 
-	tp := tracer.StartOperation("cmd_1", "command", ctx)
+	tp := tracer.StartOperation("cmd_1", "command", ctx, false, 0)
 	if tp == "" {
 		t.Fatal("expected non-empty traceparent")
 	}
@@ -91,7 +93,7 @@ func TestStartOperation_WithoutTraceparent(t *testing.T) {
 	tracer, exporter := newTestTracer()
 	defer tracer.Shutdown(context.Background())
 
-	tp := tracer.StartOperation("cleanup_1", "cleanup", map[string]string{})
+	tp := tracer.StartOperation("cleanup_1", "cleanup", map[string]string{}, false, 0)
 	if tp == "" {
 		t.Fatal("expected generated traceparent")
 	}
@@ -120,7 +122,7 @@ func TestStartOperation_REXFallback(t *testing.T) {
 		"shared.rex.traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
 	}
 
-	tracer.StartOperation("cmd_2", "command", ctx)
+	tracer.StartOperation("cmd_2", "command", ctx, false, 0)
 	tracer.CompleteOperation("cmd_2", "", ctx)
 
 	spans := exporter.GetSpans()
@@ -137,7 +139,7 @@ func TestCompleteOperation_Failed(t *testing.T) {
 	tracer, exporter := newTestTracer()
 	defer tracer.Shutdown(context.Background())
 
-	tracer.StartOperation("snap_1", "snapshot", map[string]string{})
+	tracer.StartOperation("snap_1", "snapshot", map[string]string{}, false, 0)
 	tracer.CompleteOperation("snap_1", "disk full", map[string]string{})
 
 	spans := exporter.GetSpans()
@@ -156,7 +158,7 @@ func TestCompleteOperation_SecretsRedacted(t *testing.T) {
 	tracer, exporter := newTestTracer()
 	defer tracer.Shutdown(context.Background())
 
-	tracer.StartOperation("cmd_3", "command", map[string]string{})
+	tracer.StartOperation("cmd_3", "command", map[string]string{}, false, 0)
 
 	ctx := map[string]string{
 		"shared.username":   "john",
@@ -202,18 +204,75 @@ func TestCompleteOperation_Unknown(t *testing.T) {
 func TestNilTracer(t *testing.T) {
 	var tracer *Tracer
 	// Should not panic.
-	tp := tracer.StartOperation("cmd_1", "command", nil)
+	tp := tracer.StartOperation("cmd_1", "command", nil, false, 0)
 	if tp != "" {
 		t.Error("expected empty traceparent from nil tracer")
 	}
 	tracer.CompleteOperation("cmd_1", "", nil)
 }
 
+func TestStartOperation_ReplayedSpanCarriesMarkerAndWallClock(t *testing.T) {
+	tracer, exporter := newTestTracer()
+	defer tracer.Shutdown(context.Background())
+
+	// Pick an explicit wall-clock 90 seconds in the past — well outside
+	// anything that could be "now" so we can assert the span really
+	// landed at the replay offset, not at StartOperation's wall time.
+	wantStart := time.Now().Add(-90 * time.Second)
+
+	tracer.StartOperation("cmd_r1", "command", map[string]string{}, true, wantStart.UnixNano())
+	tracer.CompleteOperation("cmd_r1", "", map[string]string{})
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	sp := spans[0]
+
+	// gocache.replayed=true must appear in attributes.
+	var replayed bool
+	for _, a := range sp.Attributes {
+		if a.Key == attribute.Key(attrReplayed) {
+			replayed = a.Value.AsBool()
+		}
+	}
+	if !replayed {
+		t.Error("replayed span missing gocache.replayed=true attribute")
+	}
+
+	// Span start should match the caller-supplied wall-clock within a
+	// tight tolerance — the tracer uses time.Unix(0, startUnixNs) so the
+	// round-trip is lossless to nanosecond precision.
+	gotDelta := sp.StartTime.Sub(wantStart)
+	if gotDelta < -time.Millisecond || gotDelta > time.Millisecond {
+		t.Errorf("replayed span start drifted from supplied wall-clock: delta=%s", gotDelta)
+	}
+}
+
+func TestStartOperation_ReplayedZeroStartFallsBackToNow(t *testing.T) {
+	tracer, exporter := newTestTracer()
+	defer tracer.Shutdown(context.Background())
+
+	before := time.Now()
+	tracer.StartOperation("cmd_r2", "command", map[string]string{}, true, 0)
+	tracer.CompleteOperation("cmd_r2", "", map[string]string{})
+	after := time.Now()
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if spans[0].StartTime.Before(before) || spans[0].StartTime.After(after) {
+		t.Errorf("zero-start replayed span should fall back to time.Now(), got %s outside [%s,%s]",
+			spans[0].StartTime, before, after)
+	}
+}
+
 func TestRecordLog_AttachesToSpan(t *testing.T) {
 	tracer, exporter := newTestTracer()
 	defer tracer.Shutdown(context.Background())
 
-	tracer.StartOperation("cmd_10", "command", map[string]string{})
+	tracer.StartOperation("cmd_10", "command", map[string]string{}, false, 0)
 
 	tracer.RecordLog("cmd_10", "info", "cache hit", map[string]string{
 		"_source":           "server",

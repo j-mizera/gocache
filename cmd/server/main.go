@@ -193,7 +193,7 @@ func main() {
 	cacheInstance.OnMutateAll = watchManager.NotifyAll
 
 	// tracker was created above main() for the crashdump defer; reuse it.
-	eventBus := serverEvents.NewBus()
+	eventBus := serverEvents.NewBusWithCapacity(cfg.Events.ReplayCapacity)
 	logCollector := logcollector.New(eventBus)
 	logCollector.AddSource("server", logPipeR)
 
@@ -217,6 +217,13 @@ func main() {
 		srv.SetPluginRouter(pluginManager.Router())
 		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
 		opHookExec = ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout)
+		opHookExec.SetTracker(tracker)
+		opHookExec.SetMinRestartInterval(cfg.Plugins.MinRestartIntervalForReplay)
+		// Replay synthesizes PhaseStart for every active op that started
+		// before this plugin joined, so late IPC subscribers (gobservability
+		// and kin) can reconstruct spans rooted at process start instead of
+		// at their own connect time.
+		pluginManager.OpHookRegistry().SetOnRegister(opHookExec.Replay)
 		srv.SetOpHookExecutor(opHookExec)
 	}
 
