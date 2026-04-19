@@ -107,6 +107,11 @@ func main() {
 	// by the top-level crashdump recover (it snapshots Active() into the
 	// dump). Creating it here is cheap — it's a map + mutex.
 	tracker := serverOps.NewTracker()
+	// processStart anchors replay_offset_ns for late-subscribing op-hook
+	// plugins so reconstructed span timings match actual wall-clock order
+	// instead of subscribe time. Captured here so the first op (which
+	// tracker.Start creates moments later) gets a non-negative offset.
+	processStart := time.Now()
 
 	// Top-level crashdump defer — LAST line of defense. Registered first
 	// so it survives for the entire main() call, including BootAll.
@@ -217,6 +222,13 @@ func main() {
 		srv.SetPluginRouter(pluginManager.Router())
 		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
 		opHookExec = ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout)
+		opHookExec.SetTracker(tracker)
+		opHookExec.SetProcessStartTime(processStart)
+		// Replay synthesizes PhaseStart for every active op that started
+		// before this plugin joined, so late IPC subscribers (gobservability
+		// and kin) can reconstruct spans rooted at process start instead of
+		// at their own connect time.
+		pluginManager.OpHookRegistry().SetOnRegister(opHookExec.Replay)
 		srv.SetOpHookExecutor(opHookExec)
 	}
 

@@ -297,13 +297,21 @@ message OperationHookDeclV1 {
 // OperationHookRequestV1 is sent by the server when an operation starts or completes.
 // Start phase: synchronous — server waits for response with context enrichment.
 // Complete phase: fire-and-forget — response is ignored.
+//
+// Replayed hooks are synthetic PhaseStart notifications delivered when a
+// plugin registers while operations are already in flight. The server
+// IGNORES enrichment responses for replayed hooks (the operation has
+// already passed its live start phase), so replay is effectively
+// fire-and-forget. Plugins can detect replay via the `replayed` field.
 message OperationHookRequestV1 {
-  string              request_id     = 1;
-  string              operation_id   = 2;
-  string              operation_type = 3;
-  string              parent_id      = 4;
-  string              phase          = 5; // "start" or "complete"
-  map<string, string> context        = 6; // filtered for this plugin's visibility
+  string              request_id       = 1;
+  string              operation_id     = 2;
+  string              operation_type   = 3;
+  string              parent_id        = 4;
+  string              phase            = 5; // "start" or "complete"
+  map<string, string> context          = 6; // filtered for this plugin's visibility
+  bool                replayed         = 7; // true when synthesized for a late subscriber
+  int64               replay_offset_ns = 8; // ns since process start when the op actually began (0 for live)
 }
 
 // OperationHookResponseV1 is the plugin's response to an operation start hook.
