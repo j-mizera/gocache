@@ -253,7 +253,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		srv.mu.RUnlock()
 
 		if shuttingDown {
-			_ = writer.Write(resp.MarshalError("ERR: Server is shutting down"))
+			_ = writer.Write(resp.MarshalError("ERR Server is shutting down"))
 			return
 		}
 
@@ -266,7 +266,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		}
 
 		if val.Type != resp.Array {
-			if err := writer.Write(resp.MarshalError("ERR: Protocol error: expected array")); err != nil {
+			if err := writer.Write(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
 				return
 			}
 			if reader.Buffered() == 0 {
