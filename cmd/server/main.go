@@ -38,8 +38,10 @@ import (
 	// before config.Load and survive panics. See pkg/embedded for details.
 	// Add new embedded plugins as blank imports below (they self-register
 	// from init()). Build tags on individual plugin packages control which
-	// are actually compiled in.
+	// actually register: otlp only registers when built with
+	// -tags=otlp_embedded; crashdump is always on.
 	_ "gocache/plugins/embedded/crashdump"
+	_ "gocache/plugins/embedded/otlp"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
