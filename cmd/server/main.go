@@ -36,12 +36,13 @@ import (
 
 	// Embedded plugins — compile-time-linked observability hooks that run
 	// before config.Load and survive panics. See pkg/embedded for details.
-	// Add new embedded plugins as blank imports below (they self-register
-	// from init()). Build tags on individual plugin packages control which
-	// actually register: otlp only registers when built with
-	// -tags=otlp_embedded; crashdump is always on.
-	_ "gocache/plugins/embedded/crashdump"
-	_ "gocache/plugins/embedded/otlp"
+	// Each blank import resolves regardless of build tags (every plugin
+	// package carries a tagless doc.go); the tag-gated file inside the
+	// package is what actually registers init(). Pick which ones by
+	// setting the PLUGINS build arg on the Docker image, or by passing
+	// -tags=crashdump,otlp to `go build` directly.
+	_ "gocache/plugins/crashdump"
+	_ "gocache/plugins/otlp"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"

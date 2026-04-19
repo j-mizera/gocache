@@ -1,6 +1,8 @@
-// Package crashdump is an embedded plugin that surfaces crash dumps from
-// prior process runs so they show up in logs/observability pipelines
-// without requiring a human to notice files on disk.
+//go:build crashdump
+
+// This file carries the plugin implementation and the init() that
+// registers it. The package's doc.go is always compiled so blank imports
+// succeed regardless of tag state — see doc.go for the rationale.
 //
 // The actual dump-writing happens in cmd/server/main.go's top-level
 // deferred recover, which calls pkg/crashdump.WriteFromPanic directly.
@@ -8,6 +10,7 @@
 // on ConfigLoaded it lists dumps in the configured directory, logs each
 // at WARN (so log collector + gobservability pick them up), and deletes
 // successfully reported entries.
+
 package crashdump
 
 import (

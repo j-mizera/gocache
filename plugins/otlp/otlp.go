@@ -1,4 +1,4 @@
-//go:build otlp_embedded
+//go:build otlp
 
 package otlp
 
