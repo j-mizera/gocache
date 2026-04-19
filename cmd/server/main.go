@@ -16,8 +16,10 @@ import (
 	"gocache/api/logger"
 	ops "gocache/api/operations"
 	"gocache/pkg/blocking"
+	"gocache/pkg/bootstate"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
+	"gocache/pkg/crashdump"
 	"gocache/pkg/embedded"
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
@@ -37,10 +39,7 @@ import (
 	// Add new embedded plugins as blank imports below (they self-register
 	// from init()). Build tags on individual plugin packages control which
 	// are actually compiled in.
-	//
-	// Registrations:
-	// - (crashdump): always on — A.3
-	// - (otlp):      build tag `otlp_embedded` — A.4
+	_ "gocache/plugins/embedded/crashdump"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
@@ -54,6 +53,26 @@ const (
 	// graceful Shutdown step in handleShutdown. Distinct from the ctx-cancel
 	// path in pkg/server which has its own shorter timeout.
 	serverShutdownTimeout = 10 * time.Second
+
+	// Env overrides for the crash-survivability layer. Keeping them here
+	// (not in pkg/config) so they apply from line 1 of main(), before any
+	// YAML has been parsed.
+	envCrashdumpDir = "GOCACHE_CRASHDUMP_DIR"
+	envBootState    = "GOCACHE_BOOT_STATE_FILE"
+
+	defaultCrashdumpDir = "crashes"
+	defaultBootState    = "boot.state"
+
+	// Named boot stages written to the boot.state marker. A previous-run
+	// file that doesn't show StageRunning at startup means the prior
+	// process crashed at that stage.
+	stageEmbeddedBoot   = "embedded_boot"
+	stageConfigLoad     = "config_load"
+	stageCoreInit       = "core_init"
+	stagePluginLoad     = "plugin_load"
+	stageSnapshotLoad   = "snapshot_load"
+	stageWorkersStart   = "workers_start"
+	stageListenerStart  = "listener_start"
 )
 
 func main() {
@@ -76,6 +95,37 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Resolve crash-survivability paths from env — they must work even if
+	// config.Load later fails.
+	crashDir := envOr(envCrashdumpDir, defaultCrashdumpDir)
+	bootStateFile := envOr(envBootState, defaultBootState)
+
+	// Infrastructure hoisted above embedded.BootAll: the tracker is needed
+	// by the top-level crashdump recover (it snapshots Active() into the
+	// dump). Creating it here is cheap — it's a map + mutex.
+	tracker := serverOps.NewTracker()
+
+	// Top-level crashdump defer — LAST line of defense. Registered first
+	// so it survives for the entire main() call, including BootAll.
+	// Writes a JSON dump to disk on any panic, then re-raises so the
+	// runtime prints the stack trace and exits non-zero. The dump file
+	// is picked up by the crashdump embedded plugin on the next boot.
+	defer func() {
+		if r := recover(); r != nil {
+			stage := "unknown"
+			if s, err := bootstate.Read(bootStateFile); err == nil {
+				stage = s.Stage
+			}
+			_, _ = crashdump.WriteFromPanic(r, crashdump.Options{
+				Dir:       crashDir,
+				Version:   version.String(),
+				BootStage: stage,
+				ActiveOps: tracker.Active(),
+			})
+			panic(r) // re-raise so runtime stacktrace + non-zero exit still happen
+		}
+	}()
+
 	// Process-wide context — used for both embedded plugin lifecycle and the
 	// rest of boot. Declared early so embedded.BootAll runs under it.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,10 +135,12 @@ func main() {
 	// failures (e.g. a config parse error surfaces as an OTLP span). Defer
 	// ShutdownAll immediately so it fires on normal exit AND during a panic
 	// unwind — giving exporters a final flush even if main() crashes.
+	_ = bootstate.Write(bootStateFile, stageEmbeddedBoot)
 	embedded.BootAll(ctx)
 	defer embedded.ShutdownAll(ctx)
 
 	// Load configuration: CLI flags > env vars (GOCACHE_*) > config file > defaults
+	_ = bootstate.Write(bootStateFile, stageConfigLoad)
 	initialCfg, v, err := config.Load(pflag.CommandLine)
 	if err != nil {
 		// Initialize logger with default level for fatal message
@@ -126,6 +178,7 @@ func main() {
 	logger.InfoNoCtx().Str("addr", cfg.Server.GetAddr()).Msg("listening on")
 
 	// Initialize core components (no operations yet — infrastructure setup).
+	_ = bootstate.Write(bootStateFile, stageCoreInit)
 	cacheInstance := cache.NewWithConfig(
 		cfg.Memory.MaxMemoryMB,
 		cache.ParseEvictionPolicy(cfg.Memory.EvictionPolicy),
@@ -136,8 +189,7 @@ func main() {
 	cacheInstance.OnMutate = watchManager.NotifyMutation
 	cacheInstance.OnMutateAll = watchManager.NotifyAll
 
-	// Initialize infrastructure: tracker + event bus + log collector.
-	tracker := serverOps.NewTracker()
+	// tracker was created above main() for the crashdump defer; reuse it.
 	eventBus := serverEvents.NewBus()
 	logCollector := logcollector.New(eventBus)
 	logCollector.AddSource("server", logPipeR)
@@ -148,6 +200,7 @@ func main() {
 	srv.SetTracker(tracker)
 
 	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---
+	_ = bootstate.Write(bootStateFile, stagePluginLoad)
 	var pluginManager *pluginmgr.Manager
 	var opHookExec *ophooks.Executor
 	if cfg.Plugins.Enabled {
@@ -174,6 +227,7 @@ func main() {
 	eventBus.Emit(events.NewOperationStart(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
 
 	// LoadSnapshot operation.
+	_ = bootstate.Write(bootStateFile, stageSnapshotLoad)
 	if cfg.Persistence.LoadOnStartup {
 		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
 		snapOp.Enrich(command.FileKey, cfg.Persistence.SnapshotFile)
@@ -206,6 +260,7 @@ func main() {
 	go engineInstance.Run()
 
 	// Initialize and start workers.
+	_ = bootstate.Write(bootStateFile, stageWorkersStart)
 	snapshotWorker := workers.NewSnapshotWorker(
 		cacheInstance, engineInstance,
 		cfg.Persistence.SnapshotInterval,
@@ -281,6 +336,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	// Start server in a goroutine.
+	_ = bootstate.Write(bootStateFile, stageListenerStart)
 	serverErrChan := make(chan error, 1)
 	go func() {
 		logger.InfoNoCtx().Msg("server ready to accept connections")
@@ -288,6 +344,7 @@ func main() {
 			serverErrChan <- err
 		}
 	}()
+	_ = bootstate.Write(bootStateFile, bootstate.StageRunning)
 
 	// Wait for shutdown signal or server error
 	select {
@@ -303,6 +360,14 @@ func main() {
 	// Close the log pipe so the collector reader gets EOF.
 	logPipeW.Close()
 	logCollector.Wait()
+}
+
+// envOr returns the value of the named env var, or fallback when unset/empty.
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func handleShutdown(
