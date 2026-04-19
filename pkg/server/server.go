@@ -40,8 +40,7 @@ type Server struct {
 	shutdownChan     chan struct{}
 	connectionWg     sync.WaitGroup
 	shutdownOnce     sync.Once
-	isShuttingDown   bool
-	mu               sync.RWMutex
+	isShuttingDown   atomic.Bool
 	requirePass      string
 	blockingRegistry *blocking.Registry
 	watchManager     *watch.Manager
@@ -112,9 +111,7 @@ func (srv *Server) EmitEvent(evt events.Event) {
 // ServerStateProvider methods — used by the plugin manager for server query responses.
 
 func (srv *Server) IsShuttingDown() bool {
-	srv.mu.RLock()
-	defer srv.mu.RUnlock()
-	return srv.isShuttingDown
+	return srv.isShuttingDown.Load()
 }
 
 func (srv *Server) StartTime() time.Time   { return srv.startTime }
@@ -151,11 +148,7 @@ func (srv *Server) acceptConnections(ctx context.Context) {
 	for {
 		conn, err := srv.listener.Accept()
 		if err != nil {
-			srv.mu.RLock()
-			shuttingDown := srv.isShuttingDown
-			srv.mu.RUnlock()
-
-			if shuttingDown {
+			if srv.isShuttingDown.Load() {
 				return
 			}
 			logger.ErrorNoCtx().Err(err).Msg("failed to accept connection")
@@ -174,9 +167,7 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 		logger.InfoNoCtx().Msg("initiating graceful shutdown")
 
 		// Mark as shutting down
-		srv.mu.Lock()
-		srv.isShuttingDown = true
-		srv.mu.Unlock()
+		srv.isShuttingDown.Store(true)
 
 		// Stop accepting new connections
 		if srv.listener != nil {
@@ -252,11 +243,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	for {
 		// Check if server is shutting down
-		srv.mu.RLock()
-		shuttingDown := srv.isShuttingDown
-		srv.mu.RUnlock()
-
-		if shuttingDown {
+		if srv.isShuttingDown.Load() {
 			if err := writer.Write(resp.MarshalError("ERR Server is shutting down")); err != nil {
 				logger.Debug(connCtx).Err(err).Msg("write shutdown notice failed")
 			}

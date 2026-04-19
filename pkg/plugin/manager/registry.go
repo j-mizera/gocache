@@ -197,6 +197,10 @@ func (p *PluginInstance) Register(
 // setCriticalAtLoad is used by the manager during discovery to seed critical
 // from YAML/discovery before Register runs. Package-private because it has no
 // valid external use; external "override" paths should use SetCritical.
+//
+// No lock is acquired because this runs synchronously during Manager.Start
+// before any goroutine that might read p.critical has been spawned. Callers
+// outside that boot window MUST use SetCritical instead.
 func (p *PluginInstance) setCriticalAtLoad(c bool) {
 	p.critical = c
 }
