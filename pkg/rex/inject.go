@@ -1,9 +1,11 @@
 package rex
 
-// Prefix is the hook context key prefix for REX metadata.
-// All REX metadata is injected under "shared.rex." so that all plugins
-// can see it via the existing shared.* visibility in command.FilterHookCtx().
-const Prefix = "shared.rex."
+// Prefix is the hook context key prefix for REX metadata. All REX metadata
+// is injected under "shared.rex." so that all plugins can see it via the
+// existing shared.* visibility in command.FilterHookCtx(). Derived from
+// reservedSharedPrefix so the dependency on the "shared." namespace is
+// enforced by the compiler rather than convention.
+const Prefix = reservedSharedPrefix + "rex."
 
 // BuildMetadata merges connection-scoped defaults and per-command metadata
 // into a bare-key map (no shared.rex. prefix) suitable for GCPC metadata

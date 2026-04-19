@@ -11,6 +11,15 @@ import (
 	"sync"
 )
 
+// Reserved metadata key prefixes. User-supplied REX keys must not start with
+// either of these — the server uses "_" for its own context (see api/command
+// hook context keys) and "shared." for cross-plugin values (including the
+// REX Prefix, see inject.go).
+const (
+	reservedInternalPrefix = "_"
+	reservedSharedPrefix   = "shared."
+)
+
 // Store holds connection-scoped REX metadata. It is safe for concurrent use.
 // A Store is lazily initialized on the first REX.META SET/MSET command.
 type Store struct {
@@ -23,17 +32,17 @@ func NewStore() *Store {
 	return &Store{data: make(map[string]string)}
 }
 
-// ValidateKey checks that a metadata key is valid.
-// Keys starting with "_" are reserved for server-internal use.
+// ValidateKey checks that a metadata key is valid. Keys starting with the
+// reserved internal ("_") or shared ("shared.") prefixes are rejected.
 func ValidateKey(key string) error {
 	if key == "" {
 		return fmt.Errorf("empty metadata key")
 	}
-	if strings.HasPrefix(key, "_") {
-		return fmt.Errorf("metadata key %q: reserved prefix '_'", key)
+	if strings.HasPrefix(key, reservedInternalPrefix) {
+		return fmt.Errorf("metadata key %q: reserved prefix %q", key, reservedInternalPrefix)
 	}
-	if strings.HasPrefix(key, "shared.") {
-		return fmt.Errorf("metadata key %q: reserved prefix 'shared.'", key)
+	if strings.HasPrefix(key, reservedSharedPrefix) {
+		return fmt.Errorf("metadata key %q: reserved prefix %q", key, reservedSharedPrefix)
 	}
 	return nil
 }
