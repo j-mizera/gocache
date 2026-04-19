@@ -1,0 +1,55 @@
+@startuml components_event_bus_ring
+!include ../../../design/theme.iuml
+
+frame "Event Bus with Replay Ring" as F {
+
+    package "pkg/events" as EV {
+        component "Bus" as BUS
+        component "ring\n(bounded FIFO)" as RING
+        component "subscribers map" as SUBS
+    }
+
+    rectangle "Emitters" as EMIT {
+        component "Server boot logs" as BL
+        component "Command post-hooks" as CH
+        component "Connection open/close" as CL
+        component "Plugin lifecycle" as PL
+    }
+
+    rectangle "Subscribers" as SUB {
+        component "LogCollector\n(pkg/logcollector)" as LC
+        component "IPC plugins via GCPC\n(gobservability, custom)" as IPC
+        component "Embedded plugins\n(otlp, crashdump)" as EMB
+    }
+
+    BL --> BUS : Emit
+    CH --> BUS : Emit
+    CL --> BUS : Emit
+    PL --> BUS : Emit
+
+    BUS --> RING : push under write lock
+    BUS --> SUBS : dispatch live
+
+    BUS -> LC : Subscribe\n(snapshot + live)
+    BUS -> IPC : Subscribe\n(snapshot + live)
+    BUS -> EMB : Subscribe\n(usually early, gets few replays)
+}
+
+note bottom of RING
+  Capacity: events.replay_capacity
+  Default 10 000 (~5 MB @ 500B avg).
+  0 disables replay entirely.
+  Overflow drops oldest and emits a
+  synthetic ReplayGap event so late
+  subscribers can alert on misses.
+end note
+
+note top of BUS
+  Subscribe captures the ring snapshot
+  under the same write lock that gates
+  Emit, then delivers synchronously
+  before returning. No dup, no gap
+  across the replay/live boundary.
+end note
+
+@enduml

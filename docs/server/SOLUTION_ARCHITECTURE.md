@@ -239,14 +239,17 @@ Signal (SIGTERM/SIGINT)
 | Component | [Core Subsystems](design/component/components_core.puml) | Evaluator, engine, storage, workers |
 | Component | [Configuration](design/component/components_config.puml) | Config loading, layering, hot reload |
 | Component | [Memory & Eviction](design/component/components_memory_eviction.puml) | LRU eviction internals |
+| Component | [Event Bus + Replay Ring](design/component/components_event_bus_ring.puml) | Bounded ring for late subscriber catch-up |
 | Sequence | [Command Flow](design/sequence/sequence_command_flow.puml) | Core hot path with hooks and plugin fallback |
 | Sequence | [Transactions](design/sequence/sequence_transaction.puml) | MULTI/EXEC/DISCARD flow |
 | Sequence | [TTL Expiry](design/sequence/sequence_ttl_expiry.puml) | Dual strategy: passive + active sweep |
 | Sequence | [Persistence](design/sequence/sequence_persistence.puml) | Snapshot save and load |
 | Sequence | [Hot Reload](design/sequence/sequence_hot_reload.puml) | Config file change detection and application |
 | Sequence | [Graceful Shutdown](design/sequence/sequence_graceful_shutdown.puml) | 6-step shutdown sequence |
+| Sequence | [Boot + Crash Survivability](design/sequence/sequence_boot_crash_survivability.puml) | Embedded plugins, bootstate marker, crashdump defer |
 | State | [Connection Lifecycle](design/state/state_connection.puml) | Client connection FSM (auth, hooks) |
 | State | [Server Lifecycle](design/state/state_server.puml) | Server startup and shutdown FSM |
+| State | [Embedded Plugin Lifecycle](design/state/state_embedded_plugin_lifecycle.puml) | Compile-time-linked observability plugin FSM |
 
 ### GCPC Protocol
 
@@ -267,6 +270,8 @@ See [GCPC documentation](../gcpc/README.md) for protocol details and the followi
 | Sequence | [Hook Context Flow](../gcpc/design/sequence/sequence_hook_context.puml) | Context namespacing across multiple plugins |
 | Sequence | [Scope Registration](../gcpc/design/sequence/sequence_scope_registration.puml) | Scope negotiation |
 | Sequence | [Scope Enforcement](../gcpc/design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
+| Sequence | [OpHook Replay on Subscribe](../gcpc/design/sequence/sequence_ophook_replay_on_subscribe.puml) | Synthetic PhaseStart delivery for late subscribers |
 | State | [Plugin Lifecycle](../gcpc/design/state/state_plugin_lifecycle.puml) | Plugin FSM |
 | State | [Hook Execution](../gcpc/design/state/state_hook_execution.puml) | Hook dispatch FSM |
 | State | [Scope Resolution](../gcpc/design/state/state_scope_resolution.puml) | Scope validation FSM |
+| State | [OpHook Replay Suppression](../gcpc/design/state/state_ophook_replay_suppression.puml) | Per-plugin replay vs restart-storm suppression |

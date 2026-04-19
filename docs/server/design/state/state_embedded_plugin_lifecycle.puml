@@ -1,0 +1,51 @@
+@startuml state_embedded_plugin_lifecycle
+!include ../../../design/theme.iuml
+
+frame "Embedded Plugin Lifecycle (compile-time-linked, in-process)" as F {
+
+    state "Registered" as Registered : init() called\nviaPLUGINS build-arg\n(e.g. crashdump, otlp)
+
+    state "BootInit" as BootInit : Before config.Load\nOnly env vars available\nzerolog stderr wired
+
+    state "ConfigLoaded" as ConfigLoaded : After config parses\nmay upgrade settings\n(YAML > env)
+
+    state "Running" as Running : Alongside IPC plugins\nSees every event from t=0
+
+    state "ProcessShutdown" as ProcessShutdown : Deferred in main\nRuns even on panic\n(after crashdump write)
+
+    state "PanicRecover" as PanicRecover : invoke() recover\nStrict: halt server\nDefault: log and continue
+
+    [*] --> Registered
+    Registered --> BootInit : embedded.BootAll(ctx)
+    BootInit --> ConfigLoaded : embedded.ConfigLoadedAll
+    ConfigLoaded --> Running
+
+    BootInit -[#EF4444]-> PanicRecover : panic / err
+    ConfigLoaded -[#EF4444]-> PanicRecover : panic / err
+    PanicRecover --> Running : Register (non-strict)
+    PanicRecover -[#EF4444,bold]-> [*] : RegisterStrict (halt)
+
+    Running --> ProcessShutdown : SIGTERM / panic
+    ProcessShutdown --> [*]
+}
+
+note right of BootInit
+  Panic-unwind order (LIFO):
+  1. log pipe close + collector.Wait
+  2. embedded.ShutdownAll
+     — OTLP ForceFlush runs HERE
+  3. ctx cancel
+  4. crashdump.WriteFromPanic
+  5. re-raise for runtime stack
+end note
+
+note right of Registered
+  Registry: two tiers
+  - Register (default)    — recover, continue
+  - RegisterStrict        — halt on failure
+  Use strict only when you
+  truly need halt-on-fail
+  visibility from t=0.
+end note
+
+@enduml
