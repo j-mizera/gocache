@@ -24,10 +24,13 @@ workers:
 #   connect_timeout: 10s
 #   overrides:
 #     auth:
-#       critical: true
+#       # failure_policy: "continue" (default) or "halt_server".
+#       # halt_server: the server exits fatally if this plugin fails.
+#       # The legacy `critical: true` is still accepted but deprecated.
+#       failure_policy: "halt_server"
 #       priority: 1
 #       scopes: ["hook:pre", "read"]
 #     kafka:
-#       critical: false
+#       failure_policy: "continue"
 #       priority: 5
 #       scopes: ["write", "keys:kafka:*"]
