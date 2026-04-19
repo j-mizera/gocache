@@ -1,11 +1,13 @@
 package handler_test
 
 import (
+	"errors"
 	"testing"
 
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
+	"gocache/pkg/rex"
 	rexhandler "gocache/pkg/rex/handler"
 )
 
@@ -47,8 +49,8 @@ func TestHandleRexMeta_SetValueWithSpaces(t *testing.T) {
 func TestHandleRexMeta_SetReservedKeyFails(t *testing.T) {
 	ctx := makeCtx("SET", "_reserved", "val")
 	res := rexhandler.HandleRexMeta(ctx)
-	if res.Err == nil {
-		t.Errorf("expected error for reserved key, got nil (value=%v)", res.Value)
+	if !errors.Is(res.Err, rex.ErrReservedPrefix) {
+		t.Errorf("expected ErrReservedPrefix for reserved key, got %v (value=%v)", res.Err, res.Value)
 	}
 }
 
