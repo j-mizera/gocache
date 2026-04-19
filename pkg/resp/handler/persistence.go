@@ -12,7 +12,7 @@ import (
 )
 
 func HandleSnapshot(cmdCtx *command.Context) command.Result {
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		if err := persistence.SaveSnapshot(cmdCtx.Context(), cmdCtx.SnapshotFile, cmdCtx.Cache); err != nil {
 			return err
 		}
@@ -37,7 +37,7 @@ func HandleLoadSnapshot(cmdCtx *command.Context) command.Result {
 		return command.Result{Value: resp.MarshalError("ERR " + err.Error())}
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		if err := persistence.LoadSnapshot(cmdCtx.Context(), filename, cmdCtx.Cache); err != nil {
 			return err
 		}

@@ -15,7 +15,7 @@ import (
 func HandleLpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		var list []string
 		if !found {
@@ -47,7 +47,7 @@ func HandleLpush(cmdCtx *command.Context) command.Result {
 func HandleRpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		var list []string
 		if !found {
@@ -74,7 +74,7 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 
 func HandleLpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
@@ -102,7 +102,7 @@ func HandleLpop(cmdCtx *command.Context) command.Result {
 
 func HandleRpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
@@ -130,7 +130,7 @@ func HandleRpop(cmdCtx *command.Context) command.Result {
 
 func HandleLlen(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -153,7 +153,7 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 	if err != nil {
 		return command.Result{Err: resp.ErrNotInteger}
 	}
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
@@ -204,7 +204,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	keys := cmdCtx.Args[:len(cmdCtx.Args)-1]
 
 	// Phase 1: attempt an immediate non-blocking pop.
-	result := command.Dispatch(cmdCtx, func() interface{} {
+	result := command.Dispatch(cmdCtx, func() any {
 		for _, key := range keys {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
@@ -240,7 +240,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 					logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on pop write-back")
 				}
 			}
-			return []interface{}{key, val}
+			return []any{key, val}
 		}
 		return nil
 	})
@@ -266,7 +266,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 		// Block indefinitely until woken or server shuts down.
 		select {
 		case wake := <-ch:
-			return command.Result{Value: []interface{}{wake.Key, wake.Value}}
+			return command.Result{Value: []any{wake.Key, wake.Value}}
 		case <-cmdCtx.BlockingRegistry.Done():
 			return command.Result{Value: nil}
 		}
@@ -276,7 +276,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	defer timer.Stop()
 	select {
 	case wake := <-ch:
-		return command.Result{Value: []interface{}{wake.Key, wake.Value}}
+		return command.Result{Value: []any{wake.Key, wake.Value}}
 	case <-timer.C:
 		return command.Result{Value: nil}
 	case <-cmdCtx.BlockingRegistry.Done():
@@ -296,7 +296,7 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 		if !found {
 			return
 		}
-		popResult, dispatchErr := cmdCtx.Engine.DispatchWithResult(cmdCtx.Context(), func() interface{} {
+		popResult, dispatchErr := cmdCtx.Engine.DispatchWithResult(cmdCtx.Context(), func() any {
 			entry, ok := cmdCtx.Cache.RawGet(key)
 			if !ok {
 				return nil

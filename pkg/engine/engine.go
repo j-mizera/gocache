@@ -27,8 +27,8 @@ var ErrEngineStopped = errors.New("engine stopped")
 const cmdChanCapacity = 100
 
 type Command struct {
-	Execute func() interface{}
-	ResChan chan interface{}
+	Execute func() any
+	ResChan chan any
 }
 
 type Engine struct {
@@ -72,10 +72,10 @@ func (e *Engine) Stop() {
 // stops, or ctx is cancelled). Returns nil on success, ErrEngineStopped if
 // the engine stopped before execution, or ctx.Err() if ctx was cancelled.
 func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
-	resChan := make(chan interface{}, 1)
+	resChan := make(chan any, 1)
 	select {
 	case e.cmdChan <- Command{
-		Execute: func() interface{} {
+		Execute: func() any {
 			fn()
 			return nil
 		},
@@ -99,8 +99,8 @@ func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
 // DispatchWithResult submits fn to the engine and blocks until it runs.
 // Returns (result, nil) on success, (nil, ErrEngineStopped) if the engine
 // stopped before execution, or (nil, ctx.Err()) if ctx was cancelled.
-func (e *Engine) DispatchWithResult(ctx context.Context, fn func() interface{}) (interface{}, error) {
-	resChan := make(chan interface{}, 1)
+func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, error) {
+	resChan := make(chan any, 1)
 	select {
 	case e.cmdChan <- Command{
 		Execute: fn,

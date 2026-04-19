@@ -379,7 +379,7 @@ func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res command.Result) r
 	return srv.mapValueToResp(ctx, res.Value)
 }
 
-func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val interface{}) resp.Value {
+func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val any) resp.Value {
 	proto := ctx.ProtoVersion
 
 	switch v := val.(type) {
@@ -394,7 +394,7 @@ func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val interface{})
 			return resp.MarshalDouble(v)
 		}
 		return resp.MarshalBulkString(fmt.Sprintf("%g", v))
-	case []interface{}:
+	case []any:
 		respArray := make([]resp.Value, len(v))
 		for i, item := range v {
 			respArray[i] = srv.mapValueToResp(ctx, item)
@@ -416,7 +416,7 @@ func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val interface{})
 			arr = append(arr, resp.MarshalBulkString(key), resp.MarshalBulkString(value))
 		}
 		return resp.ValueArray(arr...)
-	case map[string]interface{}:
+	case map[string]any:
 		if proto >= 3 {
 			pairs := make([]resp.Value, 0, len(v)*2)
 			for key, value := range v {

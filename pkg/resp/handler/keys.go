@@ -24,7 +24,7 @@ const (
 // HandleType implements TYPE key.
 func HandleType(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return resp.Value{Type: resp.SimpleString, Str: "none"}
@@ -58,7 +58,7 @@ func HandleType(cmdCtx *command.Context) command.Result {
 func HandleRename(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(src)
 		if !found {
 			return resp.MarshalError("ERR no such key")
@@ -90,7 +90,7 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(src)
 		if !found {
 			return resp.MarshalError("ERR no such key")
@@ -130,7 +130,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 // HandleKeys implements KEYS pattern.
 func HandleKeys(cmdCtx *command.Context) command.Result {
 	pattern := cmdCtx.Args[0]
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		var keys []string
 		now := time.Now().UnixNano()
 		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
@@ -184,7 +184,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 		}
 	}
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		now := time.Now().UnixNano()
 
 		// Collect all non-expired keys.
@@ -213,7 +213,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 		total := len(filtered)
 		if cursor >= total {
 			// Past end: return empty with cursor 0.
-			return []interface{}{"0", []string{}}
+			return []any{"0", []string{}}
 		}
 
 		end := cursor + count
@@ -227,14 +227,14 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 			nextCursor = 0
 		}
 
-		return []interface{}{strconv.Itoa(nextCursor), page}
+		return []any{strconv.Itoa(nextCursor), page}
 	}
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
 // HandleRandomKey implements RANDOMKEY.
 func HandleRandomKey(cmdCtx *command.Context) command.Result {
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		now := time.Now().UnixNano()
 		var found string
 		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
@@ -261,7 +261,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			return command.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
-		return command.Dispatch(cmdCtx, func() interface{} {
+		return command.Dispatch(cmdCtx, func() any {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
 				return nil
@@ -295,7 +295,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			return command.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
-		return command.Dispatch(cmdCtx, func() interface{} {
+		return command.Dispatch(cmdCtx, func() any {
 			entry, found := cmdCtx.Cache.RawGet(key)
 			if !found {
 				return nil

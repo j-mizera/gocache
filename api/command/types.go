@@ -6,7 +6,7 @@ package command
 
 // Result holds the return value or error from a command handler.
 type Result struct {
-	Value interface{}
+	Value any
 	Err   error
 }
 

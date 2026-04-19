@@ -23,7 +23,7 @@ func getSet(c *cache.Cache, key string) (map[string]struct{}, error) {
 // HandleSinter implements SINTER key [key ...]
 func HandleSinter(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		first, err := getSet(cmdCtx.Cache, keys[0])
 		if err != nil {
 			return err
@@ -47,7 +47,7 @@ func HandleSinter(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		result := make([]interface{}, 0, len(intersection))
+		result := make([]any, 0, len(intersection))
 		for m := range intersection {
 			result = append(result, m)
 		}
@@ -59,7 +59,7 @@ func HandleSinter(cmdCtx *command.Context) command.Result {
 // HandleSunion implements SUNION key [key ...]
 func HandleSunion(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		union := make(map[string]struct{})
 		for _, key := range keys {
 			s, err := getSet(cmdCtx.Cache, key)
@@ -70,7 +70,7 @@ func HandleSunion(cmdCtx *command.Context) command.Result {
 				union[m] = struct{}{}
 			}
 		}
-		result := make([]interface{}, 0, len(union))
+		result := make([]any, 0, len(union))
 		for m := range union {
 			result = append(result, m)
 		}
@@ -82,7 +82,7 @@ func HandleSunion(cmdCtx *command.Context) command.Result {
 // HandleSdiff implements SDIFF key [key ...]
 func HandleSdiff(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		first, err := getSet(cmdCtx.Cache, keys[0])
 		if err != nil {
 			return err
@@ -103,7 +103,7 @@ func HandleSdiff(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		result := make([]interface{}, 0, len(diff))
+		result := make([]any, 0, len(diff))
 		for m := range diff {
 			result = append(result, m)
 		}
@@ -117,7 +117,7 @@ func HandleSadd(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		var set map[string]struct{}
 		added := 0
@@ -152,7 +152,7 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -190,10 +190,10 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 func HandleSmembers(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
-			return []interface{}{}
+			return []any{}
 		}
 
 		if entry.ValueType != cache.ObjTypeSet {
@@ -201,7 +201,7 @@ func HandleSmembers(cmdCtx *command.Context) command.Result {
 		}
 
 		set := entry.Value.(map[string]struct{})
-		result := make([]interface{}, 0, len(set))
+		result := make([]any, 0, len(set))
 
 		for member := range set {
 			result = append(result, member)
@@ -218,7 +218,7 @@ func HandleSismember(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -242,7 +242,7 @@ func HandleSismember(cmdCtx *command.Context) command.Result {
 func HandleScard(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
@@ -263,7 +263,7 @@ func HandleScard(cmdCtx *command.Context) command.Result {
 func HandleSpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
-	executeFn := func() interface{} {
+	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil

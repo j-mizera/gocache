@@ -173,7 +173,7 @@ func (c *Cache) MaxBytes() int64 {
 // ErrOutOfMemory (EvictionNone) when the limit would be exceeded.
 // Must be called while holding the cache write lock. ctx carries the
 // operation (command, cleanup, etc.) for log correlation.
-func (c *Cache) RawSet(ctx context.Context, key string, value interface{}, expiration int64) error {
+func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration int64) error {
 	if c.maxBytes > 0 {
 		newSize := estimateSize(key, value)
 		oldSize := c.sizes[key]
@@ -198,7 +198,7 @@ func (c *Cache) RawSet(ctx context.Context, key string, value interface{}, expir
 // RawLoad stores a key-value pair, bypassing the memory limit check.
 // Intended for snapshot loading only. Still maintains LRU and size tracking.
 // The OnMutate callback is suppressed since this is a bulk load, not a client mutation.
-func (c *Cache) RawLoad(key string, value interface{}, expiration int64) {
+func (c *Cache) RawLoad(key string, value any, expiration int64) {
 	saved := c.OnMutate
 	c.OnMutate = nil
 	c.setInternal(key, value, expiration)
@@ -206,7 +206,7 @@ func (c *Cache) RawLoad(key string, value interface{}, expiration int64) {
 }
 
 // setInternal performs the raw storage operation, updating LRU and size tracking.
-func (c *Cache) setInternal(key string, value interface{}, expiration int64) {
+func (c *Cache) setInternal(key string, value any, expiration int64) {
 	newSize := estimateSize(key, value)
 	oldSize := c.sizes[key]
 	c.usedBytes += newSize - oldSize
@@ -334,7 +334,7 @@ func (c *Cache) Clear(ctx context.Context) {
 }
 
 // estimateSize returns an approximate memory usage in bytes for a key-value pair.
-func estimateSize(key string, value interface{}) int64 {
+func estimateSize(key string, value any) int64 {
 	size := int64(entryOverhead) + int64(len(key))
 	switch v := value.(type) {
 	case string:

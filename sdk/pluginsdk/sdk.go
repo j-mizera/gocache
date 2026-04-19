@@ -140,8 +140,8 @@ type CommandDecl struct {
 // CommandResult holds the result of a plugin command execution.
 type CommandResult struct {
 	// Value can be: string, int, int64, float64, nil, error,
-	// []interface{}, []string, map[string]string, map[string]interface{}.
-	Value interface{}
+	// []any, []string, map[string]string, map[string]any.
+	Value any
 }
 
 // HookDecl declares a hook a plugin wants to intercept.

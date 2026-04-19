@@ -59,7 +59,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("ZRANGE failed: %v", res.Err)
 	}
-	members := res.Value.([]interface{})
+	members := res.Value.([]any)
 	if len(members) != 3 {
 		t.Errorf("Expected 3 members, got %d", len(members))
 	}
@@ -79,7 +79,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("ZRANGE WITHSCORES failed: %v", res.Err)
 	}
-	withScores := res.Value.([]interface{})
+	withScores := res.Value.([]any)
 	if len(withScores) != 4 { // 2 members * 2 (member + score)
 		t.Errorf("Expected 4 items, got %d", len(withScores))
 	}
@@ -92,7 +92,7 @@ func TestEvaluator_SortedSet(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("ZRANGE with negative indices failed: %v", res.Err)
 	}
-	negMembers := res.Value.([]interface{})
+	negMembers := res.Value.([]any)
 	if len(negMembers) != 2 {
 		t.Errorf("Expected 2 members, got %d", len(negMembers))
 	}
@@ -206,7 +206,7 @@ func TestSortedSet_Lexicographic(t *testing.T) {
 		t.Fatalf("ZRANGE failed: %v", res.Err)
 	}
 
-	members := res.Value.([]interface{})
+	members := res.Value.([]any)
 	if len(members) != 3 {
 		t.Fatalf("Expected 3 members, got %d", len(members))
 	}

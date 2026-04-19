@@ -114,7 +114,7 @@ func (e *OpEvent) Dur(key string, val time.Duration) *OpEvent {
 	return e
 }
 
-func (e *OpEvent) Interface(key string, val interface{}) *OpEvent {
+func (e *OpEvent) Interface(key string, val any) *OpEvent {
 	e.event = e.event.Interface(key, val)
 	return e
 }
@@ -124,7 +124,7 @@ func (e *OpEvent) Msg(msg string) {
 	e.event.Msg(msg)
 }
 
-func (e *OpEvent) Msgf(format string, args ...interface{}) {
+func (e *OpEvent) Msgf(format string, args ...any) {
 	e.injectContext()
 	e.event.Msgf(format, args...)
 }

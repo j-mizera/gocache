@@ -68,7 +68,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 		healthData, err := p.session.QueryServer(r.Context(), "health")
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "unavailable",
 				"error":  err.Error(),
 				"hint":   "ensure the gobservability plugin has the 'server:query:health' scope",
@@ -79,7 +79,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 		pluginData, err := p.session.QueryServer(r.Context(), "plugins")
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "unavailable",
 				"error":  err.Error(),
 				"hint":   "ensure the gobservability plugin has the 'server:query:plugins' scope",
@@ -95,7 +95,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 			ready = checkCriticalPlugins(pluginData)
 		}
 
-		result := map[string]interface{}{
+		result := map[string]any{
 			"status":  "ready",
 			"server":  healthData,
 			"plugins": pluginData,
