@@ -44,7 +44,7 @@ func HandleSelect(cmdCtx *command.Context) command.Result {
 	return command.Result{Value: "OK"}
 }
 
-// HandleFlushDB clears the entire cache (single-DB server, same as FLUSHALL).
+// HandleFlushDB clears the entire cache (single-DB server, equivalent to FLUSHALL).
 func HandleFlushDB(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, func() any {
 		cmdCtx.Cache.Clear(cmdCtx.Context())
@@ -52,12 +52,10 @@ func HandleFlushDB(cmdCtx *command.Context) command.Result {
 	})
 }
 
-// HandleFlushAll clears the entire cache.
+// HandleFlushAll is a Redis-compatibility alias for FLUSHDB. Multi-DB is not
+// supported, so there is nothing extra to flush.
 func HandleFlushAll(cmdCtx *command.Context) command.Result {
-	return command.Dispatch(cmdCtx, func() any {
-		cmdCtx.Cache.Clear(cmdCtx.Context())
-		return "OK"
-	})
+	return HandleFlushDB(cmdCtx)
 }
 
 // HandleAuth validates a password against RequirePass.

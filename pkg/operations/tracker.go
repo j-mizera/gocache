@@ -33,24 +33,25 @@ func (t *Tracker) Start(opType ops.Type, parentID string) *ops.Operation {
 	return op
 }
 
-// Complete marks the operation as completed and removes it from active.
-func (t *Tracker) Complete(id string) {
+// finish applies finalize to the op with id and removes it from active.
+// No-op if the id is unknown (already completed or never registered).
+func (t *Tracker) finish(id string, finalize func(*ops.Operation)) {
 	t.mu.Lock()
 	if op, ok := t.active[id]; ok {
-		op.Complete()
+		finalize(op)
 		delete(t.active, id)
 	}
 	t.mu.Unlock()
 }
 
+// Complete marks the operation as completed and removes it from active.
+func (t *Tracker) Complete(id string) {
+	t.finish(id, (*ops.Operation).Complete)
+}
+
 // Fail marks the operation as failed and removes it from active.
 func (t *Tracker) Fail(id string, reason string) {
-	t.mu.Lock()
-	if op, ok := t.active[id]; ok {
-		op.Fail(reason)
-		delete(t.active, id)
-	}
-	t.mu.Unlock()
+	t.finish(id, func(op *ops.Operation) { op.Fail(reason) })
 }
 
 // Get returns an active operation by ID. Returns nil if not found or already completed.

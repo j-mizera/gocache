@@ -521,8 +521,10 @@ func MarshalError(s string) Value {
 	return Value{Type: Error, Str: s}
 }
 
+// MarshalNull returns the RESP2 null bulk string ($-1\r\n). Equivalent to
+// helpers.Nil(); prefer that name inside the resp package.
 func MarshalNull() Value {
-	return Value{Type: BulkString, IsNull: true}
+	return Nil()
 }
 
 func MarshalSimpleString(s string) Value {

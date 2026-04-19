@@ -45,7 +45,8 @@ func (r *Registry) Register(pluginName string, priority int, conn *router.Plugin
 			Conn:       conn,
 		})
 	}
-	sort.Slice(r.hooks, func(i, j int) bool {
+	// Stable so equal priorities keep registration order — matches cmdhooks.
+	sort.SliceStable(r.hooks, func(i, j int) bool {
 		return r.hooks[i].Priority < r.hooks[j].Priority
 	})
 }

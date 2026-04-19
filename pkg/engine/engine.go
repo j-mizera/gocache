@@ -68,44 +68,12 @@ func (e *Engine) Stop() {
 	})
 }
 
-// Dispatch submits fn to the engine and blocks until it runs (or the engine
-// stops, or ctx is cancelled). Returns nil on success, ErrEngineStopped if
-// the engine stopped before execution, or ctx.Err() if ctx was cancelled.
-func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
+// sendAndWait submits fn via the engine's command channel and blocks for its
+// result. Shared implementation behind Dispatch and DispatchWithResult.
+func (e *Engine) sendAndWait(ctx context.Context, fn func() any) (any, error) {
 	resChan := make(chan any, 1)
 	select {
-	case e.cmdChan <- Command{
-		Execute: func() any {
-			fn()
-			return nil
-		},
-		ResChan: resChan,
-	}:
-	case <-e.stopChan:
-		return ErrEngineStopped
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case <-resChan:
-		return nil
-	case <-e.stopChan:
-		return ErrEngineStopped
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// DispatchWithResult submits fn to the engine and blocks until it runs.
-// Returns (result, nil) on success, (nil, ErrEngineStopped) if the engine
-// stopped before execution, or (nil, ctx.Err()) if ctx was cancelled.
-func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, error) {
-	resChan := make(chan any, 1)
-	select {
-	case e.cmdChan <- Command{
-		Execute: fn,
-		ResChan: resChan,
-	}:
+	case e.cmdChan <- Command{Execute: fn, ResChan: resChan}:
 	case <-e.stopChan:
 		return nil, ErrEngineStopped
 	case <-ctx.Done():
@@ -119,4 +87,22 @@ func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, er
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// Dispatch submits fn to the engine and blocks until it runs (or the engine
+// stops, or ctx is cancelled). Returns nil on success, ErrEngineStopped if
+// the engine stopped before execution, or ctx.Err() if ctx was cancelled.
+func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
+	_, err := e.sendAndWait(ctx, func() any {
+		fn()
+		return nil
+	})
+	return err
+}
+
+// DispatchWithResult submits fn to the engine and blocks until it runs.
+// Returns (result, nil) on success, (nil, ErrEngineStopped) if the engine
+// stopped before execution, or (nil, ctx.Err()) if ctx was cancelled.
+func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, error) {
+	return e.sendAndWait(ctx, fn)
 }

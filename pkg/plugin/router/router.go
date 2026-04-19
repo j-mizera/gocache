@@ -349,24 +349,13 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 }
 
 // lookup finds a route and its connection. Must be called with r.mu held (read).
-// Tries direct lookup first, then REX namespace parsing (split on first ':').
+// The routes map is keyed by the full upper-case command name — REX-namespaced
+// entries are stored as "PLUGIN:CMD" at registration time, so a single
+// case-insensitive lookup covers both main-namespace and REX commands.
 func (r *Router) lookup(op string) (*PluginRoute, *PluginConn, bool) {
 	up := strings.ToUpper(op)
-
 	if route, ok := r.routes[up]; ok {
-		pc := r.conns[up]
-		return route, pc, true
+		return route, r.conns[up], true
 	}
-
-	// REX parse: "KAFKA:PUBLISH" → namespace="KAFKA", cmd="PUBLISH"
-	idx := strings.IndexByte(up, ':')
-	if idx > 0 && idx < len(up)-1 {
-		rexKey := up // already upper
-		if route, ok := r.routes[rexKey]; ok {
-			pc := r.conns[rexKey]
-			return route, pc, true
-		}
-	}
-
 	return nil, nil, false
 }

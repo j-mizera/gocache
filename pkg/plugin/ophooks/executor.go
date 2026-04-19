@@ -90,7 +90,3 @@ func (e *Executor) RunCompleteHooks(op *ops.Operation) {
 	}
 }
 
-// RegistryForTesting returns the underlying registry. Test-only.
-func (e *Executor) RegistryForTesting() *Registry {
-	return e.registry
-}
