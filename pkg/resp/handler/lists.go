@@ -143,7 +143,7 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func HandleLrange(cmdCtx *command.Context) command.Result {
+func HandleLRange(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	start, err := strconv.Atoi(cmdCtx.Args[1])
 	if err != nil {

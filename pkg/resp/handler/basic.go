@@ -523,8 +523,8 @@ func HandleTtl(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-// HandleDbsize implements DBSIZE.
-func HandleDbsize(cmdCtx *command.Context) command.Result {
+// HandleDBSize implements DBSIZE.
+func HandleDBSize(cmdCtx *command.Context) command.Result {
 	executeFn := func() interface{} {
 		return cmdCtx.Cache.Len()
 	}
