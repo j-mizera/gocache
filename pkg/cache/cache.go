@@ -276,17 +276,31 @@ func (c *Cache) RawDelete(key string) {
 	c.delete(key)
 }
 
+// TTLInternal returns the remaining TTL and a ValueState for key.
+//
+// States:
+//
+//	ValuePresent   — key exists with a future expiration (ttl > 0)
+//	ValueExpired   — key has a TTL that has already passed (caller should
+//	                 lazyExpire to clean it up)
+//	ValueNoExpire  — key exists but no TTL is set
+//	ValueAbsent    — key does not exist in the cache
+//
+// Callers that need to distinguish "missing" from "no TTL" (TTL/PTTL) can
+// rely on ValueAbsent vs ValueNoExpire directly. Must be called while
+// holding the cache read lock.
 func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
-	expiration, found := c.ttl[key]
-	if !found {
-		return 0, ValueAbsent
+	if expiration, found := c.ttl[key]; found {
+		expirationTime := time.Unix(0, expiration)
+		if expirationTime.Before(time.Now()) {
+			return 0, ValueExpired
+		}
+		return time.Until(expirationTime), ValuePresent
 	}
-	expirationTime := time.Unix(0, expiration)
-	if expirationTime.Before(time.Now()) {
-		return 0, ValueExpired
+	if _, exists := c.items[key]; exists {
+		return 0, ValueNoExpire
 	}
-
-	return time.Until(expirationTime), ValuePresent
+	return 0, ValueAbsent
 }
 
 func (c *Cache) delete(key string) {

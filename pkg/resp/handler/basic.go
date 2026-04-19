@@ -380,15 +380,14 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 func HandlePttl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
-		if _, found := cmdCtx.Cache.RawGet(key); !found {
-			return int64(-2)
-		}
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
 		switch state {
 		case cache.ValueExpired:
 			cmdCtx.Cache.RawDelete(key)
 			return int64(-2)
 		case cache.ValueAbsent:
+			return int64(-2)
+		case cache.ValueNoExpire:
 			return int64(-1)
 		default:
 			return ttl.Milliseconds()
@@ -480,19 +479,14 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 func HandleTtl(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
-		// Distinguish "key missing" (-2) from "key present with no TTL" (-1).
-		// TTLInternal returns ValueAbsent for both cases, so we must check
-		// key existence explicitly first.
-		if _, found := cmdCtx.Cache.RawGet(key); !found {
-			return int64(-2)
-		}
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
 		switch state {
 		case cache.ValueExpired:
 			cmdCtx.Cache.RawDelete(key)
 			return int64(-2)
 		case cache.ValueAbsent:
-			// Key exists but has no TTL set.
+			return int64(-2)
+		case cache.ValueNoExpire:
 			return int64(-1)
 		default:
 			return int64(ttl.Seconds())
