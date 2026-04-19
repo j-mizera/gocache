@@ -542,13 +542,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 			}
 			if inst.State() == StateRunning {
 				logger.WarnNoCtx().Str("plugin", inst.Name).Err(err).Msg("plugin connection lost")
-				m.router.UnregisterPlugin(inst.Name)
-				m.hookRegistry.Unregister(inst.Name)
-				m.opHookRegistry.Unregister(inst.Name)
-				m.scopeRegistry.Unregister(inst.Name)
-				if m.eventBus != nil {
-					m.eventBus.Unsubscribe("plugin:" + inst.Name)
-				}
+				m.deregisterPlugin(inst.Name)
 				inst.SetState(StateUnhealthy)
 				if m.eventBus != nil {
 					m.eventBus.Emit(events.NewPluginCrashed(inst.Name, inst.Critical(), err.Error()))
@@ -618,16 +612,25 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 	}
 }
 
+// deregisterPlugin removes every registration this plugin held across the
+// subsystems. Idempotent — each individual Unregister is safe to call for a
+// name that never registered. Callers must still manage instance state
+// (SetState, emit events) separately.
+func (m *Manager) deregisterPlugin(name string) {
+	m.router.UnregisterPlugin(name)
+	m.hookRegistry.Unregister(name)
+	m.opHookRegistry.Unregister(name)
+	m.scopeRegistry.Unregister(name)
+	if m.eventBus != nil {
+		m.eventBus.Unsubscribe("plugin:" + name)
+	}
+}
+
 // handlePluginExit handles unexpected plugin process termination.
 func (m *Manager) handlePluginExit(ctx context.Context, inst *PluginInstance) {
-	// Unregister commands, hooks, scopes, and event subscriptions.
-	m.router.UnregisterPlugin(inst.Name)
-	m.hookRegistry.Unregister(inst.Name)
-	m.opHookRegistry.Unregister(inst.Name)
-	m.scopeRegistry.Unregister(inst.Name)
+	m.deregisterPlugin(inst.Name)
 	critical := inst.Critical()
 	if m.eventBus != nil {
-		m.eventBus.Unsubscribe("plugin:" + inst.Name)
 		m.eventBus.Emit(events.NewPluginCrashed(inst.Name, critical, "process exited unexpectedly"))
 	}
 
