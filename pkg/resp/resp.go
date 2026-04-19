@@ -188,18 +188,20 @@ func (r *Reader) readBulkString() (Value, error) {
 		return v, fmt.Errorf("resp: bulk string too large: %d (max %d)", n, maxBulkStringBytes)
 	}
 
-	bulk := make([]byte, n)
-	_, err = io.ReadFull(r.reader, bulk)
-	if err != nil {
+	bufp := getBulkScratch(n)
+	if _, err := io.ReadFull(r.reader, *bufp); err != nil {
+		putBulkScratch(bufp)
 		return v, err
 	}
 
 	// Read CRLF
 	if _, err := r.ReadLine(); err != nil {
+		putBulkScratch(bufp)
 		return v, err
 	}
 
-	v.Str = string(bulk)
+	v.Str = string(*bufp)
+	putBulkScratch(bufp)
 	return v, nil
 }
 
@@ -269,15 +271,18 @@ func (r *Reader) readBulkError() (Value, error) {
 	if length > maxBulkStringBytes {
 		return v, fmt.Errorf("resp: bulk error too large: %d (max %d)", length, maxBulkStringBytes)
 	}
-	bulk := make([]byte, length)
-	_, err = io.ReadFull(r.reader, bulk)
-	if err != nil {
+
+	bufp := getBulkScratch(length)
+	if _, err := io.ReadFull(r.reader, *bufp); err != nil {
+		putBulkScratch(bufp)
 		return v, err
 	}
 	if _, err := r.ReadLine(); err != nil {
+		putBulkScratch(bufp)
 		return v, err
 	}
-	v.Str = string(bulk)
+	v.Str = string(*bufp)
+	putBulkScratch(bufp)
 	return v, nil
 }
 
@@ -342,170 +347,137 @@ func (w *Writer) Flush() error {
 }
 
 func (w *Writer) Write(v Value) error {
-	var b []byte
-	switch v.Type {
-	case Array:
-		b = w.marshalArray(v)
-	case BulkString:
-		b = w.marshalBulkString(v)
-	case SimpleString:
-		b = w.marshalSimpleString(v)
-	case Error:
-		b = w.marshalError(v)
-	case Integer:
-		b = w.marshalInt(v)
-	case Null:
-		b = w.marshalNull()
-	case Boolean:
-		b = w.marshalBoolean(v)
-	case Double:
-		b = w.marshalDouble(v)
-	case BulkError:
-		b = w.marshalBulkError(v)
-	case Map:
-		b = w.marshalMap(v)
-	case Set:
-		b = w.marshalSet(v)
-	default:
-		return ErrUnknownType
+	bufp := getScratch()
+	defer putScratch(bufp)
+
+	buf, err := appendValue((*bufp)[:0], v)
+	*bufp = buf
+	if err != nil {
+		return err
 	}
 
-	_, err := w.writer.Write(b)
-	if err != nil {
+	if _, err := w.writer.Write(buf); err != nil {
 		return fmt.Errorf("resp write: %w", err)
 	}
 	return nil
 }
 
-func (w *Writer) marshalArray(v Value) []byte {
-	n := len(v.Array)
-	var b []byte
-	b = append(b, Array)
-	b = append(b, strconv.Itoa(n)...)
-	b = append(b, '\r', '\n')
-
-	for i := 0; i < n; i++ {
-		b = append(b, w.marshalValue(v.Array[i])...)
-	}
-	return b
-}
-
-func (w *Writer) marshalBulkString(v Value) []byte {
-	if v.IsNull {
-		return []byte("$-1\r\n")
-	}
-	var b []byte
-	b = append(b, BulkString)
-	b = append(b, strconv.Itoa(len(v.Str))...)
-	b = append(b, '\r', '\n')
-	b = append(b, v.Str...)
-	b = append(b, '\r', '\n')
-	return b
-}
-
-func (w *Writer) marshalSimpleString(v Value) []byte {
-	var b []byte
-	b = append(b, SimpleString)
-	b = append(b, v.Str...)
-	b = append(b, '\r', '\n')
-	return b
-}
-
-func (w *Writer) marshalError(v Value) []byte {
-	var b []byte
-	b = append(b, Error)
-	b = append(b, v.Str...)
-	b = append(b, '\r', '\n')
-	return b
-}
-
-func (w *Writer) marshalInt(v Value) []byte {
-	var b []byte
-	b = append(b, Integer)
-	b = append(b, strconv.Itoa(v.Integer)...)
-	b = append(b, '\r', '\n')
-	return b
-}
-
-func (w *Writer) marshalNull() []byte {
-	return []byte("_\r\n")
-}
-
-func (w *Writer) marshalBoolean(v Value) []byte {
-	if v.Bool {
-		return []byte("#t\r\n")
-	}
-	return []byte("#f\r\n")
-}
-
-func (w *Writer) marshalDouble(v Value) []byte {
-	var b []byte
-	b = append(b, Double)
-	b = append(b, strconv.FormatFloat(v.Float64, 'g', -1, 64)...)
-	b = append(b, '\r', '\n')
-	return b
-}
-
-func (w *Writer) marshalBulkError(v Value) []byte {
-	var b []byte
-	b = append(b, BulkError)
-	b = append(b, strconv.Itoa(len(v.Str))...)
-	b = append(b, '\r', '\n')
-	b = append(b, v.Str...)
-	b = append(b, '\r', '\n')
-	return b
-}
-
-func (w *Writer) marshalMap(v Value) []byte {
-	pairs := len(v.Array) / 2
-	var b []byte
-	b = append(b, Map)
-	b = append(b, strconv.Itoa(pairs)...)
-	b = append(b, '\r', '\n')
-	for i := 0; i < len(v.Array); i++ {
-		b = append(b, w.marshalValue(v.Array[i])...)
-	}
-	return b
-}
-
-func (w *Writer) marshalSet(v Value) []byte {
-	var b []byte
-	b = append(b, Set)
-	b = append(b, strconv.Itoa(len(v.Array))...)
-	b = append(b, '\r', '\n')
-	for i := 0; i < len(v.Array); i++ {
-		b = append(b, w.marshalValue(v.Array[i])...)
-	}
-	return b
-}
-
-func (w *Writer) marshalValue(v Value) []byte {
+// appendValue appends the RESP-encoded form of v to b and returns the extended
+// slice. Errors are returned only for unknown types; the append itself cannot
+// fail. This is the single recursion point shared by all container types — the
+// same scratch buffer flows through Array/Map/Set children without any
+// intermediate allocation.
+func appendValue(b []byte, v Value) ([]byte, error) {
 	switch v.Type {
 	case Array:
-		return w.marshalArray(v)
+		return appendArray(b, v), nil
 	case BulkString:
-		return w.marshalBulkString(v)
+		return appendBulkString(b, v), nil
 	case SimpleString:
-		return w.marshalSimpleString(v)
+		return appendLine(b, SimpleString, v.Str), nil
 	case Error:
-		return w.marshalError(v)
+		return appendLine(b, Error, v.Str), nil
 	case Integer:
-		return w.marshalInt(v)
+		return appendInt(b, v), nil
 	case Null:
-		return w.marshalNull()
+		return append(b, "_\r\n"...), nil
 	case Boolean:
-		return w.marshalBoolean(v)
+		return appendBoolean(b, v), nil
 	case Double:
-		return w.marshalDouble(v)
+		return appendDouble(b, v), nil
 	case BulkError:
-		return w.marshalBulkError(v)
+		return appendBulkError(b, v), nil
 	case Map:
-		return w.marshalMap(v)
+		return appendMap(b, v)
 	case Set:
-		return w.marshalSet(v)
+		return appendSet(b, v)
 	default:
-		return nil
+		return b, ErrUnknownType
 	}
+}
+
+func appendArray(b []byte, v Value) []byte {
+	b = append(b, Array)
+	b = strconv.AppendInt(b, int64(len(v.Array)), 10)
+	b = append(b, '\r', '\n')
+	for i := range v.Array {
+		// Children of an Array are always well-formed; ignore the error.
+		b, _ = appendValue(b, v.Array[i])
+	}
+	return b
+}
+
+func appendMap(b []byte, v Value) ([]byte, error) {
+	pairs := len(v.Array) / 2
+	b = append(b, Map)
+	b = strconv.AppendInt(b, int64(pairs), 10)
+	b = append(b, '\r', '\n')
+	for i := range v.Array {
+		var err error
+		b, err = appendValue(b, v.Array[i])
+		if err != nil {
+			return b, err
+		}
+	}
+	return b, nil
+}
+
+func appendSet(b []byte, v Value) ([]byte, error) {
+	b = append(b, Set)
+	b = strconv.AppendInt(b, int64(len(v.Array)), 10)
+	b = append(b, '\r', '\n')
+	for i := range v.Array {
+		var err error
+		b, err = appendValue(b, v.Array[i])
+		if err != nil {
+			return b, err
+		}
+	}
+	return b, nil
+}
+
+func appendBulkString(b []byte, v Value) []byte {
+	if v.IsNull {
+		return append(b, "$-1\r\n"...)
+	}
+	b = append(b, BulkString)
+	b = strconv.AppendInt(b, int64(len(v.Str)), 10)
+	b = append(b, '\r', '\n')
+	b = append(b, v.Str...)
+	return append(b, '\r', '\n')
+}
+
+func appendLine(b []byte, prefix byte, s string) []byte {
+	b = append(b, prefix)
+	b = append(b, s...)
+	return append(b, '\r', '\n')
+}
+
+func appendInt(b []byte, v Value) []byte {
+	b = append(b, Integer)
+	b = strconv.AppendInt(b, int64(v.Integer), 10)
+	return append(b, '\r', '\n')
+}
+
+func appendBoolean(b []byte, v Value) []byte {
+	if v.Bool {
+		return append(b, "#t\r\n"...)
+	}
+	return append(b, "#f\r\n"...)
+}
+
+func appendDouble(b []byte, v Value) []byte {
+	b = append(b, Double)
+	b = strconv.AppendFloat(b, v.Float64, 'g', -1, 64)
+	return append(b, '\r', '\n')
+}
+
+func appendBulkError(b []byte, v Value) []byte {
+	b = append(b, BulkError)
+	b = strconv.AppendInt(b, int64(len(v.Str)), 10)
+	b = append(b, '\r', '\n')
+	b = append(b, v.Str...)
+	return append(b, '\r', '\n')
 }
 
 // Helper functions for easy value creation
