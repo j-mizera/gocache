@@ -6,6 +6,39 @@ import (
 	"gocache/pkg/resp"
 )
 
+// readHash decodes the byte-encoded hash at key, returning (map, found,
+// wrongType). See readList in lists.go for the same pattern applied to
+// lists.
+func readHash(cacheInst *cache.Cache, key string) (map[string]string, bool, bool) {
+	entry, ok := cacheInst.RawGet(key)
+	if !ok {
+		return nil, false, false
+	}
+	if entry.ValueType != cache.ObjTypeHash {
+		return nil, true, true
+	}
+	b, _ := entry.Value.([]byte)
+	decoded, err := cache.DecodeHash(b)
+	if err != nil {
+		return nil, true, true
+	}
+	return decoded, true, false
+}
+
+// writeHash encodes h and stores it under key. An empty hash deletes the
+// key entirely, matching the existing semantics.
+func writeHash(cmdCtx *command.Context, key string, h map[string]string) error {
+	if len(h) == 0 {
+		cmdCtx.Cache.RawDelete(key)
+		return nil
+	}
+	encoded, err := cache.EncodeHash(h)
+	if err != nil {
+		return err
+	}
+	return cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeHash, encoded, 0)
+}
+
 // HandleHset implements HSET key field value [field value ...]
 func HandleHset(cmdCtx *command.Context) command.Result {
 	if (len(cmdCtx.Args)-1)%2 != 0 {
@@ -14,19 +47,15 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
-		var hash map[string]string
-		added := 0
-
-		if !found {
+		hash, _, wrongType := readHash(cmdCtx.Cache, key)
+		if wrongType {
+			return resp.ErrWrongType
+		}
+		if hash == nil {
 			hash = make(map[string]string)
-		} else {
-			if entry.ValueType != cache.ObjTypeHash {
-				return resp.ErrWrongType
-			}
-			hash = entry.Value.(map[string]string)
 		}
 
+		added := 0
 		for i := 1; i < len(cmdCtx.Args); i += 2 {
 			field := cmdCtx.Args[i]
 			value := cmdCtx.Args[i+1]
@@ -36,7 +65,7 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 			hash[field] = value
 		}
 
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, hash, 0); err != nil {
+		if err := writeHash(cmdCtx, key, hash); err != nil {
 			return err
 		}
 		return added
@@ -51,16 +80,13 @@ func HandleHget(cmdCtx *command.Context) command.Result {
 	field := cmdCtx.Args[1]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		hash, found, wrongType := readHash(cmdCtx.Cache, key)
 		if !found {
 			return nil
 		}
-
-		if entry.ValueType != cache.ObjTypeHash {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		hash := entry.Value.(map[string]string)
 		if value, ok := hash[field]; ok {
 			return value
 		}
@@ -76,18 +102,15 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 	fields := cmdCtx.Args[1:]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		hash, found, wrongType := readHash(cmdCtx.Cache, key)
 		if !found {
 			return 0
 		}
-
-		if entry.ValueType != cache.ObjTypeHash {
+		if wrongType {
 			return resp.ErrWrongType
 		}
 
-		hash := entry.Value.(map[string]string)
 		deleted := 0
-
 		for _, field := range fields {
 			if _, exists := hash[field]; exists {
 				delete(hash, field)
@@ -95,14 +118,9 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		if len(hash) == 0 {
-			cmdCtx.Cache.RawDelete(key)
-		} else {
-			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, hash, 0); err != nil {
-				return err
-			}
+		if err := writeHash(cmdCtx, key, hash); err != nil {
+			return err
 		}
-
 		return deleted
 	}
 
@@ -115,16 +133,13 @@ func HandleHexists(cmdCtx *command.Context) command.Result {
 	field := cmdCtx.Args[1]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		hash, found, wrongType := readHash(cmdCtx.Cache, key)
 		if !found {
 			return 0
 		}
-
-		if entry.ValueType != cache.ObjTypeHash {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		hash := entry.Value.(map[string]string)
 		if _, exists := hash[field]; exists {
 			return 1
 		}
@@ -139,16 +154,14 @@ func HandleHgetall(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		hash, found, wrongType := readHash(cmdCtx.Cache, key)
 		if !found {
 			return map[string]string{}
 		}
-
-		if entry.ValueType != cache.ObjTypeHash {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		return entry.Value.(map[string]string)
+		return hash
 	}
 
 	return command.Dispatch(cmdCtx, executeFn)
@@ -159,22 +172,17 @@ func HandleHkeys(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		hash, found, wrongType := readHash(cmdCtx.Cache, key)
 		if !found {
 			return []any{}
 		}
-
-		if entry.ValueType != cache.ObjTypeHash {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		hash := entry.Value.(map[string]string)
 		result := make([]any, 0, len(hash))
-
 		for field := range hash {
 			result = append(result, field)
 		}
-
 		return result
 	}
 
@@ -186,22 +194,17 @@ func HandleHvals(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		hash, found, wrongType := readHash(cmdCtx.Cache, key)
 		if !found {
 			return []any{}
 		}
-
-		if entry.ValueType != cache.ObjTypeHash {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		hash := entry.Value.(map[string]string)
 		result := make([]any, 0, len(hash))
-
 		for _, value := range hash {
 			result = append(result, value)
 		}
-
 		return result
 	}
 
@@ -217,13 +220,15 @@ func HandleHlen(cmdCtx *command.Context) command.Result {
 		if !found {
 			return 0
 		}
-
 		if entry.ValueType != cache.ObjTypeHash {
 			return resp.ErrWrongType
 		}
-
-		hash := entry.Value.(map[string]string)
-		return len(hash)
+		// O(1) — just reads the count prefix.
+		n, err := cache.HashLen(entry.Value.([]byte))
+		if err != nil {
+			return resp.ErrWrongType
+		}
+		return n
 	}
 
 	return command.Dispatch(cmdCtx, executeFn)
