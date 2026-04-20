@@ -1,0 +1,17 @@
+label=phase-1
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=34b28d68479af3aba239bd6b1e856f5920b3a23d
+gocache_branch=feat/slab-phase0-resp-pool
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=7479492
+post_standard_rss_bytes=306603622
+final_rss_bytes=448790528
+delta_rss_bytes=441311036

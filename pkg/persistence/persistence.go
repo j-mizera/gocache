@@ -22,6 +22,7 @@ func init() {
 type SnapshotEntry struct {
 	Key        string
 	ValueType  cache.ValueType
+	Encoding   cache.Encoding
 	Value      any
 	Expiration int64
 }
@@ -46,11 +47,23 @@ func SaveSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 
 	// Collect all entries first so we can write the count header.
 	var entries []SnapshotEntry
-	cacheInstance.Range(func(key string, entry *cache.Entry, expiration int64) bool {
+	cacheInstance.Range(func(key string, entry cache.Entry, expiration int64) bool {
+		var v any
+		if entry.Encoding == cache.EncPacked {
+			// Copy slab-backed bytes out of the allocator so the gob
+			// encoder sees a stable []byte independent of slab state.
+			src := cacheInstance.ResolvePacked(entry)
+			buf := make([]byte, len(src))
+			copy(buf, src)
+			v = buf
+		} else {
+			v = entry.Value
+		}
 		entries = append(entries, SnapshotEntry{
 			Key:        key,
 			ValueType:  entry.ValueType,
-			Value:      entry.Value,
+			Encoding:   entry.Encoding,
+			Value:      v,
 			Expiration: expiration,
 		})
 		return true
@@ -124,7 +137,24 @@ func LoadSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 			logger.Trace(ctx).Str("key", e.Key).Msg("skipped expired entry during load")
 			continue
 		}
-		cacheInstance.RawLoad(e.Key, e.Value, e.Expiration)
+		if e.Encoding == cache.EncPacked {
+			// Accept both []byte and string shapes: the canonical form is
+			// []byte, but older snapshot files may hold the `string` shape.
+			// Coerce strings so both load successfully.
+			var buf []byte
+			switch v := e.Value.(type) {
+			case []byte:
+				buf = v
+			case string:
+				buf = []byte(v)
+			default:
+				logger.Warn(ctx).Str("key", e.Key).Msg("packed snapshot entry has non-byte payload; skipping")
+				continue
+			}
+			cacheInstance.RawLoadPacked(e.Key, e.ValueType, buf, e.Expiration)
+		} else {
+			cacheInstance.RawLoad(e.Key, e.Value, e.Expiration)
+		}
 		loaded++
 	}
 

@@ -34,8 +34,11 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 	defer c2.Unlock()
 
 	entry, ok := c2.RawGet("str")
-	if !ok || entry.Value != "hello" {
-		t.Errorf("str: expected 'hello', got %v", entry)
+	if !ok {
+		t.Fatal("str not found")
+	}
+	if got := string(c2.ResolvePacked(entry)); got != "hello" {
+		t.Errorf("str: expected 'hello', got %q", got)
 	}
 
 	entry, ok = c2.RawGet("list")

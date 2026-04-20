@@ -57,25 +57,15 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(src)
-		if !found {
+		if _, found := cmdCtx.Cache.RawGet(src); !found {
 			return resp.MarshalError("ERR no such key")
 		}
 		if lazyExpire(cmdCtx.Cache, src) {
 			return resp.MarshalError("ERR no such key")
 		}
 		ttl := cmdCtx.Cache.RawTTL(src)
-
-		// Determine absolute expiration for the destination.
-		var expiration int64
-		if ttl > 0 {
-			expiration = ttl
-		}
-
-		cmdCtx.Cache.RawDelete(dst)
-		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.Rename(src, dst, ttl) {
+			return resp.MarshalError("ERR no such key")
 		}
 		return "OK"
 	}
@@ -87,8 +77,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(src)
-		if !found {
+		if _, found := cmdCtx.Cache.RawGet(src); !found {
 			return resp.MarshalError("ERR no such key")
 		}
 		if lazyExpire(cmdCtx.Cache, src) {
@@ -104,14 +93,8 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 		}
 
 		ttl := cmdCtx.Cache.RawTTL(src)
-		var expiration int64
-		if ttl > 0 {
-			expiration = ttl
-		}
-
-		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.Rename(src, dst, ttl) {
+			return resp.MarshalError("ERR no such key")
 		}
 		return 1
 	}
@@ -124,7 +107,7 @@ func HandleKeys(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		var keys []string
 		now := time.Now().UnixNano()
-		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
+		cmdCtx.Cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 			if expiration > 0 && expiration <= now {
 				return true // skip expired
 			}
@@ -180,7 +163,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 
 		// Collect all non-expired keys.
 		var allKeys []string
-		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
+		cmdCtx.Cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 			if expiration > 0 && expiration <= now {
 				return true
 			}
@@ -228,7 +211,7 @@ func HandleRandomKey(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		now := time.Now().UnixNano()
 		var found string
-		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
+		cmdCtx.Cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 			if expiration > 0 && expiration <= now {
 				return true
 			}
@@ -262,8 +245,8 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
-				s, _ := entry.Value.(string)
-				if len(s) <= embstrMaxLen {
+				b := cmdCtx.Cache.ResolvePacked(entry)
+				if len(b) <= embstrMaxLen {
 					return "embstr"
 				}
 				return "raw"
@@ -292,7 +275,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
-			idle := int(time.Since(entry.LastAccessed).Seconds())
+			idle := int(time.Since(cmdCtx.Cache.LastAccess(entry)).Seconds())
 			return idle
 		})
 	case "HELP":

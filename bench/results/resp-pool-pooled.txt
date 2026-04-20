@@ -1,0 +1,14 @@
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/resp
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkWrite_BulkString-24    	127672405	        27.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	26029771	       136.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	  319914	     11550 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 7328967	       497.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	 1348432	      2669 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRead_BulkString-24     	 7082449	       718.4 ns/op	    4276 B/op	       6 allocs/op
+BenchmarkRead_Array-24          	 2118561	      1720 ns/op	    5213 B/op	      35 allocs/op
+BenchmarkRead_ArrayLarge-24     	   33099	    112024 ns/op	  102174 B/op	    3005 allocs/op
+PASS
+ok  	gocache/pkg/resp	40.072s

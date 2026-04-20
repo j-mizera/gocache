@@ -216,3 +216,35 @@ func TestSortedSet_Lexicographic(t *testing.T) {
 		t.Errorf("Expected lexicographic order [alice, bob, charlie], got %v", members)
 	}
 }
+
+// TestSortedSet_EncodingPromotion verifies a zset starts as EncPacked when
+// small and promotes to EncNative once the entry count crosses
+// ZSetMaxEntries. Rank semantics survive promotion.
+func TestSortedSet_EncodingPromotion(t *testing.T) {
+	c, e, ctx := setup(t)
+	c.SetPackedThresholds(cache.PackedThresholds{ZSetMaxEntries: 3, ZSetMaxValue: 1024})
+
+	for i := 0; i < 3; i++ {
+		score := "1." + string(rune('0'+i))
+		eval(t, c, e, ctx, "ZADD", []string{"z", score, "m" + string(rune('0'+i))})
+	}
+	entry, _ := c.RawGet("z")
+	if entry.Encoding != cache.EncPacked {
+		t.Errorf("after 3 adds: Encoding = %v; want EncPacked", entry.Encoding)
+	}
+
+	eval(t, c, e, ctx, "ZADD", []string{"z", "1.5", "m3"})
+	entry, _ = c.RawGet("z")
+	if entry.Encoding != cache.EncNative {
+		t.Errorf("after 4 adds: Encoding = %v; want EncNative", entry.Encoding)
+	}
+
+	res := eval(t, c, e, ctx, "ZCARD", []string{"z"})
+	if res.Value != 4 {
+		t.Errorf("ZCARD = %v; want 4", res.Value)
+	}
+	res = eval(t, c, e, ctx, "ZRANK", []string{"z", "m0"})
+	if res.Value != 0 {
+		t.Errorf("ZRANK m0 = %v; want 0", res.Value)
+	}
+}

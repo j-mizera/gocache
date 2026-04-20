@@ -37,6 +37,21 @@ func setupCtx(t *testing.T) *clientctx.ClientContext {
 	return clientctx.New()
 }
 
+// valueAsString coerces a command result into a string. GET-like handlers
+// return []byte; production callers convert via mapValueToResp, but
+// handler-level tests dispatch directly. The helper papers over the
+// boundary so test assertions can stay in terms of the user-visible string.
+func valueAsString(v any) string {
+	switch x := v.(type) {
+	case []byte:
+		return string(x)
+	case string:
+		return x
+	default:
+		return ""
+	}
+}
+
 // eval dispatches a command through the handler map, mimicking the evaluator
 // pipeline for test convenience.
 func eval(t *testing.T, c *cache.Cache, e *engine.Engine, ctx *clientctx.ClientContext, op string, args []string) command.Result {

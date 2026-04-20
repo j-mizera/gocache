@@ -23,7 +23,7 @@ func TestEvaluator_Basic(t *testing.T) {
 	if res.Err != nil {
 		t.Errorf("expected no error, got %v", res.Err)
 	}
-	if res.Value != "value" {
+	if valueAsString(res.Value) != "value" {
 		t.Errorf("expected value, got %v", res.Value)
 	}
 

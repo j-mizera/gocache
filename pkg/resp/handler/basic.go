@@ -122,11 +122,11 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 
 		existing := 0.0
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
-			str, ok := entry.Value.(string)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				return resp.ErrWrongType
 			}
-			existing, err = strconv.ParseFloat(str, 64)
+			b := cmdCtx.Cache.ResolvePacked(entry)
+			existing, err = strconv.ParseFloat(string(b), 64)
 			if err != nil {
 				return resp.ErrNotFloat
 			}
@@ -135,7 +135,7 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 		newVal := existing + incr
 		newStr := strconv.FormatFloat(newVal, 'f', -1, 64)
 		rawTTL := cmdCtx.Cache.RawTTL(key)
-		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newStr, rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(newStr), rawTTL); setErr != nil {
 			return setErr
 		}
 		return newStr
@@ -150,22 +150,23 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, func() any {
 		lazyExpire(cmdCtx.Cache, key)
 
-		existing := ""
+		var existing []byte
 		rawTTL := int64(0)
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
-			str, ok := entry.Value.(string)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				return resp.ErrWrongType
 			}
-			existing = str
+			existing = cmdCtx.Cache.ResolvePacked(entry)
 			rawTTL = cmdCtx.Cache.RawTTL(key)
 		}
 
-		newStr := existing + suffix
-		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newStr, rawTTL); setErr != nil {
+		newBytes := make([]byte, len(existing)+len(suffix))
+		copy(newBytes, existing)
+		copy(newBytes[len(existing):], suffix)
+		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newBytes, rawTTL); setErr != nil {
 			return setErr
 		}
-		return int64(len(newStr))
+		return int64(len(newBytes))
 	})
 }
 
@@ -181,11 +182,10 @@ func HandleStrlen(cmdCtx *command.Context) command.Result {
 		if !found {
 			return int64(0)
 		}
-		str, ok := entry.Value.(string)
-		if !ok {
+		if entry.ValueType != cache.ObjTypeBytes {
 			return resp.ErrWrongType
 		}
-		return int64(len(str))
+		return int64(len(cmdCtx.Cache.ResolvePacked(entry)))
 	})
 }
 
@@ -204,12 +204,17 @@ func HandleMget(cmdCtx *command.Context) command.Result {
 				result[i] = nil
 				continue
 			}
-			str, ok := entry.Value.(string)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				result[i] = nil
 				continue
 			}
-			result[i] = str
+			// Copy out: the slice returned by ResolvePacked aliases the
+			// slab region, which is not safe to hand off to the RESP
+			// serializer when subsequent mutations may reuse the slot.
+			src := cmdCtx.Cache.ResolvePacked(entry)
+			buf := make([]byte, len(src))
+			copy(buf, src)
+			result[i] = buf
 		}
 		return result
 	})
@@ -222,7 +227,7 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 	}
 	return command.Dispatch(cmdCtx, func() any {
 		for i := 0; i < len(cmdCtx.Args); i += 2 {
-			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], cmdCtx.Args[i+1], 0); setErr != nil {
+			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], []byte(cmdCtx.Args[i+1]), 0); setErr != nil {
 				return setErr
 			}
 		}
@@ -238,11 +243,11 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 	current := int64(0)
 	rawTTL := int64(0)
 	if entry, found := cmdCtx.Cache.RawGet(key); found {
-		str, ok := entry.Value.(string)
-		if !ok {
+		if entry.ValueType != cache.ObjTypeBytes {
 			return resp.ErrWrongType
 		}
-		parsed, err := strconv.ParseInt(str, 10, 64)
+		b := cmdCtx.Cache.ResolvePacked(entry)
+		parsed, err := strconv.ParseInt(string(b), 10, 64)
 		if err != nil {
 			return resp.ErrNotInteger
 		}
@@ -251,7 +256,8 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 	}
 
 	newVal := current + delta
-	if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, strconv.FormatInt(newVal, 10), rawTTL); setErr != nil {
+	newBytes := strconv.AppendInt(make([]byte, 0, 20), newVal, 10)
+	if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newBytes, rawTTL); setErr != nil {
 		return setErr
 	}
 	return newVal
@@ -320,7 +326,7 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 			exp = cmdCtx.Cache.RawTTL(key)
 		}
 
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, val, exp); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(val), exp); err != nil {
 			return err
 		}
 		return "OK"
@@ -340,7 +346,7 @@ func HandleSetnx(cmdCtx *command.Context) command.Result {
 				return 0
 			}
 		}
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, val, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(val), 0); err != nil {
 			return err
 		}
 		return 1
@@ -363,9 +369,10 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
+		_ = entry
 		expiration := time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.SetExpiration(key, expiration) {
+			return 0
 		}
 		return 1
 	}
@@ -405,7 +412,15 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 		if lazyExpire(cmdCtx.Cache, key) {
 			return nil
 		}
-		return entry.Value
+		if entry.ValueType != cache.ObjTypeBytes {
+			return resp.ErrWrongType
+		}
+		// Copy out — the returned slice must not alias the slab slot
+		// once the cache lock is released.
+		src := cmdCtx.Cache.ResolvePacked(entry)
+		buf := make([]byte, len(src))
+		copy(buf, src)
+		return buf
 	}
 	return command.Dispatch(cmdCtx, executeFn)
 }
@@ -459,12 +474,13 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 
+		_ = entry
 		var expiration int64
 		if ttl > 0 {
 			expiration = time.Now().Add(ttl).UnixNano()
 		}
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.SetExpiration(key, expiration) {
+			return 0
 		}
 		return 1
 	}
