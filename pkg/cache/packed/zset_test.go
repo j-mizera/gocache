@@ -73,7 +73,7 @@ func TestZSetAddDuplicateUpdatesScore(t *testing.T) {
 func TestZSetAddDuplicateSameScoreIsNoop(t *testing.T) {
 	buf := packed.ZSetNew()
 	buf, _, _, _, _ = packed.ZSetAdd(buf, "a", 1.0, 100, 100)
-	buf, added, changed, _, _ := packed.ZSetAdd(buf, "a", 1.0, 100, 100)
+	_, added, changed, _, _ := packed.ZSetAdd(buf, "a", 1.0, 100, 100)
 	if added || changed {
 		t.Errorf("same score: added=%v changed=%v; want false,false", added, changed)
 	}

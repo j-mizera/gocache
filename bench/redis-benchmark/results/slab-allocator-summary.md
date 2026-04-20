@@ -1,21 +1,21 @@
-# Phase 2 slab allocator — `redis-benchmark` vs Phase 1 baseline
+# slab-allocator — `redis-benchmark` vs hybrid-encoding baseline
 
-**Branch:** `feat/slab-phase0-resp-pool`
-**Commit:** `659eb81` (Stage B — cache + handlers wired to slab)
+**Branch:** `feat/memory-optimization`
+**Snapshot:** cache + handlers wired to slab
 **Date:** 2026-04-20
 
 ## Setup
 
-Same containerized harness as Phase 1. `0-3` target, `4-7` client, 2 GiB
+Same containerized harness as hybrid-encoding. `0-3` target, `4-7` client, 2 GiB
 memory limit each, `valkey/valkey:8` client, `-n 100000 -c 50 -r 100000`,
 pipeline `-P 10` for pipelined suite. Suite is the same 14 commands.
 
 ## Standard suite (no pipelining)
 
-Raw CSVs: [`phase-1-gocache.csv`](phase-1-gocache.csv) vs
-[`phase-2-gocache.csv`](phase-2-gocache.csv).
+Raw CSVs: [`hybrid-encoding-gocache.csv`](hybrid-encoding-gocache.csv) vs
+[`slab-allocator-gocache.csv`](slab-allocator-gocache.csv).
 
-| command | phase-1 rps | phase-2 rps | Δ rps% | phase-1 p99 | phase-2 p99 | Δ p99% |
+| command | hybrid-encoding rps | slab-allocator rps | Δ rps% | hybrid-encoding p99 | slab-allocator p99 | Δ p99% |
 |---|---:|---:|---:|---:|---:|---:|
 | PING_INLINE  | 102 459 |  88 495 | **-13.6%** | 0.54 | 0.54 |  -1.5% |
 | PING_MBULK   |  98 814 |  89 126 |  -9.8% | 0.50 | 0.65 | +28.6% |
@@ -41,10 +41,10 @@ it's lighter on GC.
 
 ## Pipelined suite (P=10)
 
-Raw CSVs: [`phase-1-gocache-pipelined.csv`](phase-1-gocache-pipelined.csv)
-vs [`phase-2-gocache-pipelined.csv`](phase-2-gocache-pipelined.csv).
+Raw CSVs: [`hybrid-encoding-gocache-pipelined.csv`](hybrid-encoding-gocache-pipelined.csv)
+vs [`slab-allocator-gocache-pipelined.csv`](slab-allocator-gocache-pipelined.csv).
 
-| command | phase-1 rps | phase-2 rps | Δ rps% |
+| command | hybrid-encoding rps | slab-allocator rps | Δ rps% |
 |---|---:|---:|---:|
 | **SADD**     |     872 |   1 865 | **+113.9%** |
 | **LPUSH**    |   1 024 |   1 173 | **+14.5%** |
@@ -63,13 +63,13 @@ vs [`phase-2-gocache-pipelined.csv`](phase-2-gocache-pipelined.csv).
 ### Pipelined headline
 
 **SADD pipelined +114%.** The sort-insert splice used to return a fresh
-`[]byte` on every op, and Phase 1 pipelined SADD at 872 rps was the single
-biggest regression. Phase 2 reuses the existing slab slot when the class
+`[]byte` on every op, and hybrid-encoding pipelined SADD at 872 rps was the single
+biggest regression. slab-allocator reuses the existing slab slot when the class
 capacity fits the new buffer — same-size/shrinking writes are alloc-free,
 and small growth stays within the 64 B class.
 
 **LPUSH pipelined +14.5%**, **SET +10.8%**, **LRANGE_100 +9.5%** — same
-mechanism: slot reuse for append-y workloads avoids the Phase 1 buffer
+mechanism: slot reuse for append-y workloads avoids the hybrid-encoding buffer
 alloc-per-op churn.
 
 **GET pipelined -8.5%, INCR -9.4%.** Reads pay an extra function call
@@ -79,13 +79,13 @@ read-lock bypass) will reclaim.
 
 ## Memory (container RSS)
 
-| metric | phase-1 | phase-2 | Δ |
+| metric | hybrid-encoding | slab-allocator | Δ |
 |---|---:|---:|---:|
 | baseline         |   7 479 492 |   7 430 209 |     -49 283 |
 | post-standard    | 306 603 622 | 328 938 291 | +22 334 669 |
 | final            | 448 790 528 | 458 122 854 |  +9 332 326 |
 
-Final RSS is ~9 MiB higher than Phase 1. Two reasons:
+Final RSS is ~9 MiB higher than hybrid-encoding. Two reasons:
 
 1. **Slab class rounding.** A 10-byte string is charged a 64-byte slab
    slot; a 65-byte value jumps to the 128-byte class. At 100k keys this
@@ -101,19 +101,19 @@ measurement.
 
 ## What this validates
 
-- **SADD pipelined was the allocator canary.** Phase 1 flagged it at -57%,
-  diagnosis was "sort-insert splice allocator churn". Phase 2's slab-slot
-  reuse brings it to **+114% over Phase 1**, i.e. more than double the
-  Phase 1 rate and back on par with Phase 0 trajectory.
+- **SADD pipelined was the allocator canary.** hybrid-encoding flagged it at -57%,
+  diagnosis was "sort-insert splice allocator churn". slab-allocator's slab-slot
+  reuse brings it to **+114% over hybrid-encoding**, i.e. more than double the
+  hybrid-encoding rate and back on par with resp-pool trajectory.
 - **Append-y workloads benefit structurally.** LPUSH / SADD / LRANGE_100 /
   SET all gained from slot reuse on same-size or shrinking updates.
-- **`+188 MiB` Phase 1 RSS leak is gone** (relative to allocation count
+- **`+188 MiB` hybrid-encoding RSS leak is gone** (relative to allocation count
   per-op — the remaining ~9 MiB delta is class-rounding, not a leak).
 
 ## What this flags for follow-up work
 
 1. **String path regression** (SET/GET/INCR -3 to -10%). The slab `Alloc`
-   + `Write` is heavier than the Phase 1 `[]byte(v)` on small strings.
+   + `Write` is heavier than the hybrid-encoding `[]byte(v)` on small strings.
    Mitigation: the fast-path read-lock bypass (plan item #4) cancels the
    read tax entirely. For writes, consider a size-indexed inline fast path
    for class 0 (≤64 B) that skips the freeList pop.
@@ -123,14 +123,14 @@ measurement.
    `GODEBUG=gctrace=1` on a 1M-key fill followed by a read loop; compare
    the mark-phase cost before/after slab.
 
-3. **Phase 3 still pending.** Moving `lruList *list.List` + `lruMap
+3. **gc-opaque-index still pending.** Moving `lruList *list.List` + `lruMap
    map[string]*list.Element` into slab-pointer headers deletes the last
    GC-scannable per-entry pointers. Until that lands, GC still walks N
    `*list.Element` nodes per cache scan regardless of the slab work.
 
-## Phase status update
+## Memory-optimization track status
 
-- Phase 0: shipped (2026-04-19, RESP pool)
-- Phase 1: shipped (2026-04-20, hybrid encoding)
-- Phase 2: **shipped** (2026-04-20, slab allocator; Stages A + B + D)
-- Phase 3: not started (GC-opaque LRU + `map[string]SlabPointer`)
+- resp-pool: shipped (2026-04-19, RESP pool)
+- hybrid-encoding: shipped (2026-04-20, hybrid encoding)
+- slab-allocator: **shipped** (2026-04-20, slab allocator)
+- gc-opaque-index: not started (GC-opaque LRU + `map[string]SlabPointer`)

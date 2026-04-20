@@ -14,8 +14,7 @@
 //   - Same-size replacements (same field length or same member length) are
 //     O(1) and do not allocate.
 //   - Size-changing mutations allocate at most one buffer.
-//   - Zero unsafe.Pointer usage. The slab allocator (Phase 2) will
-//     reintroduce unsafe for GC-opacity; this package stays GC-visible.
+//   - Zero unsafe.Pointer usage; this package stays GC-visible.
 package packed
 
 import (
@@ -91,12 +90,6 @@ func appendLenU32(buf []byte, n int) []byte {
 // appendFrameString writes [len u32][frame bytes] onto buf. The `append(buf,
 // s...)` form is the well-known zero-alloc string-to-bytes append idiom.
 func appendFrameString(buf []byte, frame string) []byte {
-	buf = appendLenU32(buf, len(frame))
-	return append(buf, frame...)
-}
-
-// appendFrameBytes is the []byte-input counterpart to appendFrameString.
-func appendFrameBytes(buf []byte, frame []byte) []byte {
 	buf = appendLenU32(buf, len(frame))
 	return append(buf, frame...)
 }

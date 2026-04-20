@@ -1,6 +1,6 @@
-# Phase 0 baseline — gocache vs valkey
+# resp-pool baseline — gocache vs valkey
 
-Captured 2026-04-20, commit `f0afdca` on `feat/slab-phase0-resp-pool`.
+Captured 2026-04-20, commit `f0afdca` on `feat/memory-optimization`.
 
 Both servers containerized, identical limits:
 
@@ -56,7 +56,7 @@ Both servers containerized, identical limits:
 
 ## Interpretation
 
-**The simple-string commands are close to parity.** GET/SET/INCR/PING land at 93–97% of valkey standard, which is the expected overhead for a young implementation in Go versus a battle-hardened C server. The Phase 0 pool refactor is partly why they're this close — the zero-alloc RESP write path matters most on short-response commands.
+**The simple-string commands are close to parity.** GET/SET/INCR/PING land at 93–97% of valkey standard, which is the expected overhead for a young implementation in Go versus a battle-hardened C server. The resp-pool pool refactor is partly why they're this close — the zero-alloc RESP write path matters most on short-response commands.
 
 **Collection commands are a disaster.** LPUSH/HSET/SADD at 2–3 k rps (vs valkey's 100 k+) is a 30–50× gap, and it collapses further under pipelining. SPOP at **2 rps pipelined** versus 571 k for valkey — four and a half orders of magnitude — is pathological.
 
@@ -66,16 +66,16 @@ The cause is almost certainly the current per-mutation work on `pkg/cache`:
 2. `Entry.Value any` holding a Go-native `[]string` / `map[string]string` / set means every append triggers reallocation + GC pressure.
 3. The `lruMap` + `list.Element` + `sizes` + `store` map chain means **every mutation writes to at least four maps**.
 
-Phase 1 (byte-oriented `Entry`) targets (1) and (2): flat `[]byte` payloads mean `len(value)` is the size (no walking), and one allocation per mutation instead of one-per-element. Phase 3 then folds `lruMap` and `sizes` into the slab header, cutting the map write count.
+hybrid-encoding (byte-oriented `Entry`) targets (1) and (2): flat `[]byte` payloads mean `len(value)` is the size (no walking), and one allocation per mutation instead of one-per-element. gc-opaque-index then folds `lruMap` and `sizes` into the slab header, cutting the map write count.
 
-**Memory is the second headline.** gocache holds 12.9× the RSS growth of valkey for the same workload. Every `map[string]*Entry` + `*Entry.Value any` + `list.Element` + `time.Time` multiplies GC-tracked pointers. This is exactly the number the slab allocator (Phase 2 + 3) is built to bring down.
+**Memory is the second headline.** gocache holds 12.9× the RSS growth of valkey for the same workload. Every `map[string]*Entry` + `*Entry.Value any` + `list.Element` + `time.Time` multiplies GC-tracked pointers. This is exactly the number the slab allocator (slab-allocator + 3) is built to bring down.
 
-## Success criteria for Phase 3
+## Success criteria for gc-opaque-index
 
-To keep the thesis claim defensible, after Phase 3:
+To keep the thesis claim defensible, after gc-opaque-index:
 
 - Collection write commands (LPUSH/HSET/SADD/SPOP) should land at **≥30%** of valkey ops/sec standard and **≥20%** pipelined. Getting to parity is unlikely for a Go implementation; narrowing the gap from 50× to 3–5× is the achievable story.
 - Memory delta should drop from 12.9× to **≤3×** valkey's RSS growth.
 - Simple commands must not regress below the current 93% parity (they're already close).
 
-Full baselines preserved under `bench/redis-benchmark/results/phase-0-*`. After Phase 3 lands, re-run both `--target gocache` and `--target valkey` with the same label convention (`phase-3-*`) and cross-compare.
+Full baselines preserved under `bench/redis-benchmark/results/resp-pool-*`. After gc-opaque-index lands, re-run both `--target gocache` and `--target valkey` with the same label convention (`gc-opaque-index-*`) and cross-compare.

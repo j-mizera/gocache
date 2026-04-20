@@ -263,7 +263,7 @@ func ListToSlice(buf []byte) ([]string, error) {
 }
 
 // ListFromSlice encodes items into a packed buffer. Used for native→packed
-// conversion when snapshot-loading pre-Phase-1 formats.
+// conversion when snapshot-loading older on-disk formats.
 func ListFromSlice(items []string) ([]byte, error) {
 	if len(items) > cache.MaxCollectionItems {
 		return nil, cache.ErrTooManyItems

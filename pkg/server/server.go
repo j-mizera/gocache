@@ -379,10 +379,9 @@ func (srv *Server) mapValueToResp(ctx *clientctx.ClientContext, val any) resp.Va
 
 	switch v := val.(type) {
 	case []byte:
-		// Byte-encoded string value (Phase 1 migration). The string
-		// conversion copies once per reply — in a follow-up phase the
-		// resp.Value type can hold []byte directly so this allocation
-		// disappears from the hot GET path.
+		// The string conversion copies once per reply; future work could
+		// let resp.Value hold []byte directly to skip this allocation on
+		// the hot GET path.
 		return resp.MarshalBulkString(string(v))
 	case string:
 		return resp.MarshalBulkString(v)

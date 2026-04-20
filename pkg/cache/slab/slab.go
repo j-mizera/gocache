@@ -66,14 +66,6 @@ func (s *slab) freeEntry(idx uint32) {
 	s.freeList = append(s.freeList, idx)
 }
 
-// entryBytes returns a zero-copy slice of the entry's capacity region. The
-// returned slice aliases the slab's backing array; the caller must not retain
-// it past the allocation's lifetime.
-func (s *slab) entryCap(idx uint32) []byte {
-	start := uint32(idx) * s.classSize
-	return s.data[start : start+s.classSize]
-}
-
 // entryValue returns a zero-copy slice of len = valueLen[idx]. Use for reads.
 func (s *slab) entryValue(idx uint32) []byte {
 	start := uint32(idx) * s.classSize

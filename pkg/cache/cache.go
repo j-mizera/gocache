@@ -74,12 +74,6 @@ const (
 // by RawGet / Range from the slab meta and the native-value sidecar; callers
 // never store *Entry in the cache. The items map stores bare SlabPointers,
 // which are inert to the GC.
-//
-// Phase 3 stage 2 flattened the forward index: before this change Entry was
-// heap-allocated per key and the items map held *Entry, giving the GC one
-// pointer to scan per cache key. Now the GC sees only the string-keyed
-// items map plus a sidecar map[SlabPointer]any populated only for native
-// entries (rare in typical workloads).
 type Entry struct {
 	ValueType ValueType
 	Encoding  Encoding

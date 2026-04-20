@@ -138,9 +138,9 @@ func LoadSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 			continue
 		}
 		if e.Encoding == cache.EncPacked {
-			// Strings were written as `string` before the Phase 1 hybrid
-			// encoding — accept both shapes so pre-migration snapshots are
-			// still loadable. The canonical form is []byte; coerce strings.
+			// Accept both []byte and string shapes: the canonical form is
+			// []byte, but older snapshot files may hold the `string` shape.
+			// Coerce strings so both load successfully.
 			var buf []byte
 			switch v := e.Value.(type) {
 			case []byte:

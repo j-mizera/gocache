@@ -380,7 +380,7 @@ func ZSetFromPairs(pairs []cache.ScoredMember) ([]byte, error) {
 }
 
 // ZSetFromNative sorts and encodes a *SortedSet into a packed buffer. Used
-// for native→packed conversion when snapshot-loading pre-Phase-1 formats.
+// for native→packed conversion when snapshot-loading older on-disk formats.
 func ZSetFromNative(z *cache.SortedSet) ([]byte, error) {
 	if z == nil {
 		return ZSetNew(), nil

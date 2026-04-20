@@ -1,15 +1,15 @@
 # gocache vs valkey — where the real gap is
 
-**Date:** 2026-04-20 · **Branch:** `feat/slab-phase0-resp-pool` · **Commit:** `5a94ed5`
+**Date:** 2026-04-20 · **Branch:** `feat/memory-optimization`
 
 Same containerized harness (`0-3` target, `4-7` client, 2 GiB each,
 `valkey/valkey:8` client, `-n 100000 -c 50 -r 100000`, P=10 for pipelined).
 
-## Headline: the Phase-1 redo is healthy. gocache itself is the bottleneck.
+## Headline: the hybrid-encoding redo is healthy. gocache itself is the bottleneck.
 
 The hybrid encoding fixed the regression (was -50% to -98%, now -7% worst-case
 on standard). But the absolute gap to valkey is still 30–55× on many ops.
-That gap is **not** an encoding problem — it was there in Phase 0 already.
+That gap is **not** an encoding problem — it was there in resp-pool already.
 
 ## Standard suite (no pipeline)
 
@@ -34,7 +34,7 @@ That gap is **not** an encoding problem — it was there in Phase 0 already.
 - Pings / strings (SET, GET, INCR, MSET, LRANGE_100): gocache **within 1.1× of valkey**. The transport and RESP-level work is competitive.
 - Collection mutations (HSET, SADD, LPUSH, RPUSH, LPOP, RPOP): gocache is **5–57× slower**, with p99 latency 15–150× worse.
 
-The 50× gap on HSET / SADD isn't a collection-encoding bug — it shows up identically in Phase 0 (1 995 HSET rps, before any encoding changes) and Phase 1 (1 863 rps). Encoding moved the needle ~7%. The other **57×** is everywhere else.
+The 50× gap on HSET / SADD isn't a collection-encoding bug — it shows up identically in resp-pool (1 995 HSET rps, before any encoding changes) and hybrid-encoding (1 863 rps). Encoding moved the needle ~7%. The other **57×** is everywhere else.
 
 ## Pipelined suite (P=10)
 
@@ -122,7 +122,7 @@ At 1 900 HSETs/sec on one engine goroutine, each op is 520 μs. That's within wh
 
 1. **`sync.Pool` for packed buffer growth** — reuse previously-freed buffers instead of making a fresh one.
 2. **Capacity hint in `HashSet`** — first write to a fresh hash currently does `append(emptyHeader, frame...)`. Grow with a sensible minimum cap (64 B) so subsequent writes re-slice without realloc.
-3. **Skip LRU push for NEW keys** — we `lruList.PushFront(key)` on every write. For keys we've just pushed, it's redundant. Phase 3 replaces the doubly-linked list with slab-pointer intrusive LRU anyway.
+3. **Skip LRU push for NEW keys** — we `lruList.PushFront(key)` on every write. For keys we've just pushed, it's redundant. gc-opaque-index replaces the doubly-linked list with slab-pointer intrusive LRU anyway.
 
 ### (4) Writer flush policy may hurt pipelined collection throughput
 
@@ -136,19 +136,19 @@ Worth profiling with `go tool pprof` on a live bench to see what's actually on-C
 
 1. **Sink-aware fast path** in `evaluateInternal`: if no emitter / no hooks / no tracker subscribers, skip the 27 calls. **Expected +5–10× on PING/GET/SET standard, 2–3× on collections.**
 2. **`sync.Pool` for engine `resChan`** and for `*command.Context`. **Expected 10-20% on all ops, less GC noise.**
-3. **`sync.Pool` for packed buffer grow** — `packed.HashSet/ListAppend*/SetAdd/ZSetAdd` return a fresh `[]byte` on size change today. Pooling the scratch would address the Phase-1 summary's +188 MB RSS growth.
+3. **`sync.Pool` for packed buffer grow** — `packed.HashSet/ListAppend*/SetAdd/ZSetAdd` return a fresh `[]byte` on size change today. Pooling the scratch would address the hybrid-encoding summary's +188 MB RSS growth.
 4. **Capacity hint for fresh packed collections** — start with 64 B backing, not 4 B. Shaves reallocs on the common empty→small growth.
 
 ### Next phase (structural)
 
 5. **Read-lock bypass** — read commands take `cache.RLock()` directly from the connection goroutine; no engine dispatch. **Expected 2-3× on GET/HGET/LRANGE; brings pipelined GET from 401k → ~900k (valkey-parity).**
 6. **Batched dispatch** — pipelined commands arrive as a single read; dispatch them as a group so the engine processes the batch under one lock acquisition. **Expected close to valkey's 2× pipelined multiplier.**
-7. **Slab allocator (existing Phase 2 plan)** — replaces the `make([]byte, ...)` in setPackedInternal + reduces GC pointers. **Expected +20-40% on collection writes, RSS delta back near baseline.**
+7. **Slab allocator (existing slab-allocator plan)** — replaces the `make([]byte, ...)` in setPackedInternal + reduces GC pointers. **Expected +20-40% on collection writes, RSS delta back near baseline.**
 
 ### Deferred / thesis-out-of-scope
 
 8. **Multiple engine goroutines** (like dragonfly's per-shard scheme). Breaks the "serial dispatch" architectural invariant and is a bigger redesign than the thesis scope. Parking.
-9. **Custom hash/skiplist** (like valkey's dict or dragonfly's DenseSet). Reimplementing Go's map with lower GC overhead. Phase 3 covers a chunk of this via `map[string]SlabPointer` already.
+9. **Custom hash/skiplist** (like valkey's dict or dragonfly's DenseSet). Reimplementing Go's map with lower GC overhead. gc-opaque-index covers a chunk of this via `map[string]SlabPointer` already.
 
 ## Bottom line for the thesis
 

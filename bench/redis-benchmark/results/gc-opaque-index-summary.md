@@ -1,7 +1,7 @@
-# Phase 3 GC-opaque LRU — `redis-benchmark` vs Phase 2 baseline
+# gc-opaque-index — `redis-benchmark` vs slab-allocator baseline
 
-**Branch:** `feat/slab-phase0-resp-pool`
-**Commit:** `dae3782` (Stage 2 — items map is `map[string]SlabPointer`)
+**Branch:** `feat/memory-optimization`
+**Snapshot:** items map is `map[string]SlabPointer`
 **Date:** 2026-04-20
 
 ## Setup
@@ -11,10 +11,10 @@ valkey/valkey:8 client, `-n 100000 -c 50 -r 100000`, `-P 10` pipelined.
 
 ## Standard suite (no pipelining)
 
-Raw CSVs: [`phase-2-gocache.csv`](phase-2-gocache.csv) vs
-[`phase-3-gocache.csv`](phase-3-gocache.csv).
+Raw CSVs: [`slab-allocator-gocache.csv`](slab-allocator-gocache.csv) vs
+[`gc-opaque-index-gocache.csv`](gc-opaque-index-gocache.csv).
 
-| command | phase-2 rps | phase-3 rps | Δ rps% |
+| command | slab-allocator rps | gc-opaque-index rps | Δ rps% |
 |---|---:|---:|---:|
 | **MSET (10)** |  79 744 |  92 165 | **+15.6%** |
 | **LPUSH**     |   3 933 |   5 032 | **+27.9%** |
@@ -38,10 +38,10 @@ are at parity or slightly negative (INCR -3.5%, PING_MBULK -2.3%).
 
 ## Pipelined suite (P=10)
 
-Raw CSVs: [`phase-2-gocache-pipelined.csv`](phase-2-gocache-pipelined.csv)
-vs [`phase-3-gocache-pipelined.csv`](phase-3-gocache-pipelined.csv).
+Raw CSVs: [`slab-allocator-gocache-pipelined.csv`](slab-allocator-gocache-pipelined.csv)
+vs [`gc-opaque-index-gocache-pipelined.csv`](gc-opaque-index-gocache-pipelined.csv).
 
-| command | phase-2 rps | phase-3 rps | Δ rps% |
+| command | slab-allocator rps | gc-opaque-index rps | Δ rps% |
 |---|---:|---:|---:|
 | **MSET (10)**   | 102 040 | 152 439 | **+49.4%** |
 | **LPUSH**       |   1 173 |   1 542 | **+31.4%** |
@@ -62,11 +62,11 @@ vs [`phase-3-gocache-pipelined.csv`](phase-3-gocache-pipelined.csv).
 
 **Every command improved.** GET pipelined +30%, INCR +19%, SET +8.7%,
 MSET +49%, LPUSH +31%, LRANGE_100 +14.6%. These are the big-ROI gains
-Phase 2 alone did not deliver.
+slab-allocator alone did not deliver.
 
 ## Memory (container RSS)
 
-| metric | phase-2 | phase-3 | Δ |
+| metric | slab-allocator | gc-opaque-index | Δ |
 |---|---:|---:|---:|
 | baseline         |   7 430 209 |   7 933 526 |     +503 317 |
 | post-standard    | 328 938 291 | 262 878 003 |  −66 060 288 |
@@ -81,16 +81,16 @@ Phase 2 alone did not deliver.
   pointer-type Entry means GC retention drops between mark cycles.
 
 The post-standard RSS (262 MiB) is the active-workload peak after 100k
-string SETs + 100k HSETs + collection churn. Phase 2 peaked at 329 MiB
+string SETs + 100k HSETs + collection churn. slab-allocator peaked at 329 MiB
 for the same load.
 
-## Full arc — Phase 1 (no slab) → Phase 3
+## Full arc — hybrid-encoding (no slab) → gc-opaque-index
 
-The thesis-facing comparison. Positive = improvement over Phase 1 baseline.
+The thesis-facing comparison. Positive = improvement over hybrid-encoding baseline.
 
 ### Pipelined (P=10)
 
-| command | phase-1 rps | phase-3 rps | Δ rps% |
+| command | hybrid-encoding rps | gc-opaque-index rps | Δ rps% |
 |---|---:|---:|---:|
 | **SADD**        |     872 |   1 913 | **+119.4%** |
 | **LPUSH**       |   1 024 |   1 542 |  **+50.6%** |
@@ -104,7 +104,7 @@ The thesis-facing comparison. Positive = improvement over Phase 1 baseline.
 
 ### Standard
 
-| command | phase-1 rps | phase-3 rps | Δ rps% |
+| command | hybrid-encoding rps | gc-opaque-index rps | Δ rps% |
 |---|---:|---:|---:|
 | **LPUSH**    |   3 283 |   5 032 | **+53.3%** |
 | **MSET (10)** |  83 612 |  92 165 |  +10.2% |
@@ -127,16 +127,16 @@ is the lever that reclaims the standard-mode string gap — 27
 instrumentation calls per command overwhelm the slab savings at 90k
 rps when each op costs ~10 μs.
 
-## GC-visibility change (what Phase 3 actually targeted)
+## GC-visibility change (what gc-opaque-index actually targeted)
 
-Before Phase 3:
+Before gc-opaque-index:
 - `map[string]*Entry` — N `*Entry` GC-scanned pointers.
 - `container/list.List` nodes — ~3N pointers (forward, back, Value).
 - `map[string]*list.Element` — N `*Element` pointers.
 - `map[string]int64` ttl — N keys scanned (strings).
 - `map[string]int64` sizes — N keys scanned.
 
-After Phase 3 Stage 2:
+After gc-opaque-index:
 - `map[string]SlabPointer` — N inert `uint64` values, N string keys.
 - `map[SlabPointer]any` nativeValues — populated only for EncNative
   (rare; empty in this benchmark's string/list/hash/set workload at the
@@ -152,32 +152,32 @@ effect.
 
 ## What this validates
 
-- **Phase 2 showed the slab allocator did not regress the hot path
+- **slab-allocator showed the slab allocator did not regress the hot path
   uniformly** — it improved slot-reuse workloads (SADD pipelined) but
   cost strings (SET/GET standard).
-- **Phase 3 proves the remaining cost was in the key index and LRU
+- **gc-opaque-index proves the remaining cost was in the key index and LRU
   bookkeeping**, not the slab itself. Removing `*Entry` + `container/list`
   unlocked +20-50% across most pipelined ops.
-- **SADD +119%** end-to-end from Phase 1 is the single most thesis-worthy
+- **SADD +119%** end-to-end from hybrid-encoding is the single most thesis-worthy
   number: diagnosis → slab allocator → GC-opaque LRU delivered 2.19× the
-  throughput on a workload Phase 1 measured at -57%.
+  throughput on a workload hybrid-encoding measured at -57%.
 
 ## What's next (deferred)
 
-- **Stage 3** — delete `sizes` and `ttl` maps. TTL moves into
-  `SlotMeta.ExpirationNs`. Size derivable from slab class + sidecar.
-  Incremental GC win; single-digit % on current workloads.
-- **Stage 4** — GC-level verification with `GODEBUG=gctrace=1` at 1M
-  keys. RSS and throughput captured; GC pause time p99 remains the
-  missing measurement for the thesis body.
-- **fast-path-optimizations plan** — orthogonal. The standard-mode
-  string regression vs Phase 1 (-10% SET/PING) is dominated by the 27
+- Delete `sizes` and `ttl` maps. TTL moves into `SlotMeta.ExpirationNs`.
+  Size derivable from slab class + sidecar. Incremental GC win;
+  single-digit % on current workloads.
+- GC-level verification with `GODEBUG=gctrace=1` at 1M keys. RSS and
+  throughput captured; GC pause time p99 remains the missing measurement
+  for the thesis body.
+- fast-path-optimizations plan — orthogonal. The standard-mode string
+  regression vs hybrid-encoding (-10% SET/PING) is dominated by the 27
   instrumentation calls per command in `evaluateInternal`, not by slab
   work. That's the next lever.
 
-## Phase status update
+## Memory-optimization track status
 
-- Phase 0: shipped (RESP pool)
-- Phase 1: shipped (hybrid encoding)
-- Phase 2: shipped (slab allocator)
-- Phase 3: **Stages 1 + 2 shipped**; Stage 3 (delete sizes/ttl) + Stage 4 (GC trace) queued
+- resp-pool: shipped (RESP pool)
+- hybrid-encoding: shipped (hybrid encoding)
+- slab-allocator: shipped (slab allocator)
+- gc-opaque-index: **LRU + items flattened shipped**; sizes/ttl deletion and GC trace queued

@@ -1,0 +1,30 @@
+# gctrace summary
+mix=strings keys=1000000 hold_ms=500 value_size=64
+load_duration=765.208649ms  load_rps=1306833
+
+## runtime.MemStats deltas (post-load - pre-load)
+HeapAlloc    2.23 MiB -> 230.78 MiB  (+239659056)
+HeapSys      7.50 MiB -> 290.97 MiB  (+297238528)
+HeapInuse    2.52 MiB -> 251.60 MiB  (+261185536)
+HeapObjects  394 B -> 985.35 KiB  (+1008605)
+StackInuse   512.00 KiB -> 1.03 MiB  (+557056)
+Mallocs      444 B -> 2.88 MiB  (+3016648)
+Frees        50 B -> 1.92 MiB  (+2008043)
+NumGC        1 B -> 11 B  (+10)
+
+## GC timing
+gc1_after_load=13.53442ms
+gc2_after_hold=11.977724ms
+PauseTotalNs=586555 (0.59 ms)
+NumGC_total=12
+pause_mean_ns=48880 pause_max_ns=173220 pause_max_ms=0.173
+
+## heap snapshot (post-hold + forced GC)
+HeapAlloc=230.78 MiB  HeapSys=290.97 MiB  HeapObjects=1008991
+cache.Len=1000000  cache.UsedBytes=192.64 MiB  cache.MaxBytes=0
+
+## slab allocator
+allocs=1000000 frees=0 live=1000001
+capacity=62.00 MiB allocated=61.04 MiB
+huge_count=0 huge_bytes=0 B
+per_class: c0=1000001(62 slabs)

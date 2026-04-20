@@ -23,17 +23,17 @@ gocache image locally from the repo's root `Dockerfile` with `PLUGINS=""`
 
 ```bash
 # Baseline run on the current branch — capture both sides.
-./bench/redis-benchmark/run.sh phase-0 --target gocache
-./bench/redis-benchmark/run.sh phase-0 --target valkey
+./bench/redis-benchmark/run.sh resp-pool --target gocache
+./bench/redis-benchmark/run.sh resp-pool --target valkey
 
-# After Phase 3 lands:
-./bench/redis-benchmark/run.sh phase-3 --target gocache
-./bench/redis-benchmark/run.sh phase-3 --target valkey
+# After gc-opaque-index lands:
+./bench/redis-benchmark/run.sh gc-opaque-index --target gocache
+./bench/redis-benchmark/run.sh gc-opaque-index --target valkey
 
 # Compare.
-./bench/redis-benchmark/compare.sh phase-0-gocache phase-0-valkey
-./bench/redis-benchmark/compare.sh phase-0-gocache phase-3-gocache
-./bench/redis-benchmark/compare.sh phase-3-gocache phase-3-valkey
+./bench/redis-benchmark/compare.sh resp-pool-gocache resp-pool-valkey
+./bench/redis-benchmark/compare.sh resp-pool-gocache gc-opaque-index-gocache
+./bench/redis-benchmark/compare.sh gc-opaque-index-gocache gc-opaque-index-valkey
 ```
 
 Output per run lands under `bench/redis-benchmark/results/`:
@@ -82,14 +82,15 @@ Total runtime ≈ 1 min per invocation on modern hardware.
 ## Rebuilding the gocache image
 
 ```bash
-REBUILD=1 ./bench/redis-benchmark/run.sh phase-N --target gocache
+REBUILD=1 ./bench/redis-benchmark/run.sh <label> --target gocache
 ```
 
 Or bump the image tag explicitly:
 
 ```bash
-GOCACHE_IMAGE=gocache-bench:phase-3 ./bench/redis-benchmark/run.sh phase-3 --target gocache
+GOCACHE_IMAGE=gocache-bench:gc-opaque-index ./bench/redis-benchmark/run.sh gc-opaque-index --target gocache
 ```
 
-This is the recommended pattern when moving between slab-allocator phases
-so the image tag records which phase each cached image corresponds to.
+This is the recommended pattern when moving between memory-optimization
+labels so the image tag records which capture each cached image
+corresponds to.

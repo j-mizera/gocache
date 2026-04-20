@@ -224,8 +224,7 @@ func HashToMap(buf []byte) (map[string]string, error) {
 }
 
 // HashFromMap encodes m into a packed buffer. Used for persistence-layer
-// round-trips where the on-disk form was stored as a Go map (pre-Phase 1
-// snapshots).
+// round-trips where the on-disk form was stored as a Go map.
 func HashFromMap(m map[string]string) ([]byte, error) {
 	if len(m) > cache.MaxCollectionItems {
 		return nil, cache.ErrTooManyItems

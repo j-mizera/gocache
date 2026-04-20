@@ -73,7 +73,7 @@ func TestListPopFromEmptyIsNoop(t *testing.T) {
 	if err != nil || ok {
 		t.Errorf("ListPopLeft(empty) ok=%v err=%v; want false nil", ok, err)
 	}
-	buf, _, ok, err = packed.ListPopRight(buf)
+	_, _, ok, err = packed.ListPopRight(buf)
 	if err != nil || ok {
 		t.Errorf("ListPopRight(empty) ok=%v err=%v; want false nil", ok, err)
 	}

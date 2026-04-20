@@ -37,11 +37,10 @@ func setupCtx(t *testing.T) *clientctx.ClientContext {
 	return clientctx.New()
 }
 
-// valueAsString coerces a command result into a string. After the Phase 1
-// byte-oriented Entry migration, GET-like handlers return []byte instead of
-// string; production callers convert via mapValueToResp, but handler-level
-// tests dispatch directly. The helper papers over the boundary so test
-// assertions can stay in terms of the user-visible string.
+// valueAsString coerces a command result into a string. GET-like handlers
+// return []byte; production callers convert via mapValueToResp, but
+// handler-level tests dispatch directly. The helper papers over the
+// boundary so test assertions can stay in terms of the user-visible string.
 func valueAsString(v any) string {
 	switch x := v.(type) {
 	case []byte:

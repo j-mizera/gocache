@@ -1,10 +1,10 @@
-# Phase 0 — `sync.Pool` for RESP buffers — benchmark summary
+# resp-pool — `sync.Pool` for RESP buffers — benchmark summary
 
-Branch: `feat/slab-phase0-resp-pool`
+Branch: `feat/memory-optimization`
 Host: AMD Ryzen 9 7900X, Linux
 Command: `go test -run=^$ -bench=. -benchmem -benchtime=3s ./pkg/resp/`
 
-Raw: `phase0-baseline.txt` (main) vs `phase0-pooled.txt` (this branch).
+Raw: `resp-pool-baseline.txt` (main) vs `resp-pool-pooled.txt` (this branch).
 
 ## Write path (the main target)
 
@@ -38,13 +38,13 @@ are still intact, now cleanly measurable.
 
 Each bulk string saves one `make([]byte, n)` allocation (the scratch that feeds the `string(buf)` conversion). The unavoidable remainders:
 
-- `string(buf)` conversion itself — 1 alloc per bulk string, proportional to payload size. Only way to remove this is a byte-oriented `Value` (Phase 1 territory).
-- `NewReader` allocates a `bufio.Reader` + 4 KiB internal buffer per benchmark iteration. In production this is one allocation per connection, amortized across all commands on that connection — not pooled for Phase 0.
-- `[]Value` slice for arrays. Pooling this is risky because consumers retain the slice across the command lifecycle; deferred to Phase 1 where the Entry redesign subsumes it.
+- `string(buf)` conversion itself — 1 alloc per bulk string, proportional to payload size. Only way to remove this is a byte-oriented `Value` (hybrid-encoding territory).
+- `NewReader` allocates a `bufio.Reader` + 4 KiB internal buffer per benchmark iteration. In production this is one allocation per connection, amortized across all commands on that connection — not pooled for resp-pool.
+- `[]Value` slice for arrays. Pooling this is risky because consumers retain the slice across the command lifecycle; deferred to hybrid-encoding where the Entry redesign subsumes it.
 
 ## Target vs achieved
 
-Plan's Phase 0 exit criterion was **≥30% allocation reduction on pipelined GETs**.
+Plan's resp-pool exit criterion was **≥30% allocation reduction on pipelined GETs**.
 
 Pipelined-write delivers **100%** allocation reduction. Full RESP round-trip (write + bulk-string read) achieves ~85% reduction in allocation count versus baseline, depending on workload shape.
 

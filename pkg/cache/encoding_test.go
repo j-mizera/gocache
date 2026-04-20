@@ -263,10 +263,6 @@ func TestReadFramed_ItemTooLarge(t *testing.T) {
 func TestEncoders_OutputOwnsStorage(t *testing.T) {
 	items := []string{"x"}
 	enc, _ := EncodeList(items)
-	if &items[0] == nil {
-		t.Fatal("impossible")
-	}
-	// Changing the original shouldn't change the encoding.
 	itemsCopy := append([]string(nil), items...)
 	items[0] = "y"
 	enc2, _ := EncodeList(itemsCopy)
