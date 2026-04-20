@@ -275,7 +275,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
-			idle := int(time.Since(entry.LastAccessed).Seconds())
+			idle := int(time.Since(cmdCtx.Cache.LastAccess(entry)).Seconds())
 			return idle
 		})
 	case "HELP":

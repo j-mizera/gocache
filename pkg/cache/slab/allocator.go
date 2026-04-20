@@ -31,6 +31,7 @@ type Allocator struct {
 	// hugeNext is the next assignable id; freed ids are pushed onto
 	// hugeFree for reuse.
 	huge     map[uint32][]byte
+	hugeMeta map[uint32]*SlotMeta // parallel metadata for huge entries
 	hugeNext uint32
 	hugeFree []uint32
 
@@ -47,8 +48,9 @@ type Allocator struct {
 // pre-allocated and leaked at startup — a 64-byte sunk cost.
 func NewAllocator() *Allocator {
 	a := &Allocator{
-		classes: make([]*slabClass, numClasses),
-		huge:    make(map[uint32][]byte),
+		classes:  make([]*slabClass, numClasses),
+		huge:     make(map[uint32][]byte),
+		hugeMeta: make(map[uint32]*SlotMeta),
 	}
 	for i := 0; i < numClasses; i++ {
 		classSize := minClassSize << i
@@ -156,12 +158,14 @@ func (a *Allocator) allocHuge(size uint32) SlabPointer {
 		id = a.hugeNext
 	}
 	a.huge[id] = make([]byte, size)
+	a.hugeMeta[id] = &SlotMeta{}
 	return packPointer(hugeClassID, 0, id)
 }
 
 func (a *Allocator) freeHuge(p SlabPointer) {
 	id := p.Entry()
 	delete(a.huge, id)
+	delete(a.hugeMeta, id)
 	a.hugeFree = append(a.hugeFree, id)
 }
 

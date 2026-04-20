@@ -15,6 +15,10 @@ type slab struct {
 	// data[start:start+valueLen].
 	valueLen []uint32
 
+	// meta stores LRU pointers + LastAccessNs per entry. A flat array with
+	// no pointer fields — GC-opaque. Updated under the cache write lock.
+	meta []SlotMeta
+
 	// freeList is a LIFO stack of free entry indices. Sized to
 	// entriesPerSlab; len shrinks as entries are allocated.
 	freeList []uint32
@@ -27,6 +31,7 @@ func newSlab(classID uint8, classSize uint32, entriesPerSlab uint32) *slab {
 		entriesPerSlab: entriesPerSlab,
 		data:           make([]byte, classSize*entriesPerSlab),
 		valueLen:       make([]uint32, entriesPerSlab),
+		meta:           make([]SlotMeta, entriesPerSlab),
 		freeList:       make([]uint32, entriesPerSlab),
 	}
 	// Initial free list: all entries free, popped from the end.
@@ -57,6 +62,7 @@ func (s *slab) allocEntry() uint32 {
 // freeEntry returns an entry index to the free pool.
 func (s *slab) freeEntry(idx uint32) {
 	s.valueLen[idx] = 0
+	s.meta[idx] = SlotMeta{}
 	s.freeList = append(s.freeList, idx)
 }
 

@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"gocache/api/logger"
@@ -78,10 +77,11 @@ type Entry struct {
 	// *SortedSet). For EncPacked entries Value is nil and the bytes live
 	// inside the slab allocator — resolve via Cache.ResolvePacked.
 	Value any `json:"value"`
-	// Ptr identifies the slab-allocated byte region for EncPacked entries.
-	// Zero (NilPointer) for EncNative entries.
-	Ptr          slab.SlabPointer `json:"-"`
-	LastAccessed time.Time        `json:"-"`
+	// Ptr identifies the slab slot backing this entry. Populated for every
+	// entry regardless of encoding: packed entries store their payload in
+	// the slot, native entries use a minimum-class slot purely to host
+	// their LRU / access-time metadata (slab.SlotMeta).
+	Ptr slab.SlabPointer `json:"-"`
 }
 
 // PackedThresholds controls when a collection is promoted from its packed
@@ -105,13 +105,21 @@ type Cache struct {
 	maxBytes       int64 // 0 = unlimited
 	usedBytes      int64
 	evictionPolicy EvictionPolicy
-	lruList        *list.List // front = most recently used
-	lruMap         map[string]*list.Element
-	sizes          map[string]int64
-	packed         PackedThresholds
-	slabs          *slab.Allocator  // backs EncPacked byte payloads
-	OnMutate       func(key string) // called after a key is set or deleted (for WATCH)
-	OnMutateAll    func()           // called when all keys are invalidated (FLUSHDB)
+	// LRU list is threaded through slab.SlotMeta's LRUPrev/LRUNext. The
+	// head is the most-recently used entry; tail is the eviction target.
+	// A NilPointer head/tail means the list is empty.
+	lruHead slab.SlabPointer
+	lruTail slab.SlabPointer
+	// keysBySlot maps a slab pointer back to the key that owns it. Needed
+	// during eviction: the slot meta knows its LRU neighbours but not the
+	// key. The uint64 key is inert to the GC; only the string value
+	// contributes a per-entry pointer (shared backing array with items).
+	keysBySlot  map[slab.SlabPointer]string
+	sizes       map[string]int64
+	packed      PackedThresholds
+	slabs       *slab.Allocator  // backs EncPacked byte payloads + per-entry meta
+	OnMutate    func(key string) // called after a key is set or deleted (for WATCH)
+	OnMutateAll func()           // called when all keys are invalidated (FLUSHDB)
 }
 
 func New() *Cache {
@@ -137,8 +145,7 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 		ttl:            make(map[string]int64),
 		maxBytes:       maxBytes,
 		evictionPolicy: policy,
-		lruList:        list.New(),
-		lruMap:         make(map[string]*list.Element),
+		keysBySlot:     make(map[slab.SlabPointer]string),
 		sizes:          make(map[string]int64),
 		slabs:          slab.NewAllocator(),
 		// Defaults mirror Valkey 8 (src/config.c). SetPackedThresholds
@@ -153,6 +160,20 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 			ListMaxBytes:   8192,
 		},
 	}
+}
+
+// LastAccess returns the wall-clock time of the last access to this entry,
+// sourced from the slab meta's LastAccessNs. Zero time means "unknown"
+// (never accessed or slot freed).
+func (c *Cache) LastAccess(e *Entry) time.Time {
+	if e == nil || e.Ptr.IsNil() {
+		return time.Time{}
+	}
+	ns := c.slabs.Meta(e.Ptr).LastAccessNs
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
 
 // ResolvePacked returns a zero-copy view of an EncPacked entry's bytes. The
@@ -190,7 +211,7 @@ func (c *Cache) SetExpiration(key string, expiration int64) bool {
 }
 
 // Rename moves src's entry to dst in place, preserving the slab allocation
-// and LRU node. Any existing dst entry is freed. The dst TTL is set to
+// and LRU position. Any existing dst entry is freed. The dst TTL is set to
 // newExpiration (0 = no TTL). Returns false if src is absent. Must be called
 // under the write lock.
 func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
@@ -207,10 +228,8 @@ func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
 		c.sizes[dst] = sz
 		delete(c.sizes, src)
 	}
-	if elem, ok := c.lruMap[src]; ok {
-		elem.Value = dst
-		c.lruMap[dst] = elem
-		delete(c.lruMap, src)
+	if !entry.Ptr.IsNil() {
+		c.keysBySlot[entry.Ptr] = dst
 	}
 	delete(c.items, src)
 	delete(c.ttl, src)
@@ -330,10 +349,7 @@ func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration in
 
 // RawLoad stores a key-value pair, bypassing the memory limit check.
 // Intended for snapshot loading only. Still maintains LRU and size tracking.
-// Must be called while holding the cache write lock. The OnMutate callback
-// is suppressed since this is a bulk load, not a client mutation — the
-// previous implementation stashed and restored c.OnMutate around the call,
-// which left the callback nil if setInternal ever panicked.
+// Must be called while holding the cache write lock.
 func (c *Cache) RawLoad(key string, value any, expiration int64) {
 	c.setInternal(key, value, expiration, true)
 }
@@ -367,6 +383,53 @@ func (c *Cache) RawLoadPacked(key string, vt ValueType, buf []byte, expiration i
 	c.setPackedInternal(key, vt, buf, expiration, true)
 }
 
+// LRU helpers --------------------------------------------------------------
+//
+// The LRU list is doubly linked via LRUPrev/LRUNext fields inside each
+// slab slot's SlotMeta. Head is the most-recently used; tail is the next
+// eviction candidate. A NilPointer head/tail means the list is empty.
+
+func (c *Cache) lruPushFront(ptr slab.SlabPointer) {
+	meta := c.slabs.Meta(ptr)
+	meta.LRUPrev = slab.NilPointer
+	meta.LRUNext = c.lruHead
+	if !c.lruHead.IsNil() {
+		c.slabs.Meta(c.lruHead).LRUPrev = ptr
+	}
+	c.lruHead = ptr
+	if c.lruTail.IsNil() {
+		c.lruTail = ptr
+	}
+	meta.LastAccessNs = time.Now().UnixNano()
+}
+
+func (c *Cache) lruRemove(ptr slab.SlabPointer) {
+	meta := c.slabs.Meta(ptr)
+	prev := meta.LRUPrev
+	next := meta.LRUNext
+	if !prev.IsNil() {
+		c.slabs.Meta(prev).LRUNext = next
+	} else {
+		c.lruHead = next
+	}
+	if !next.IsNil() {
+		c.slabs.Meta(next).LRUPrev = prev
+	} else {
+		c.lruTail = prev
+	}
+	meta.LRUPrev = slab.NilPointer
+	meta.LRUNext = slab.NilPointer
+}
+
+func (c *Cache) lruMoveToFront(ptr slab.SlabPointer) {
+	if c.lruHead == ptr {
+		c.slabs.Meta(ptr).LastAccessNs = time.Now().UnixNano()
+		return
+	}
+	c.lruRemove(ptr)
+	c.lruPushFront(ptr)
+}
+
 // setPackedInternal performs the raw packed-storage operation. The byte
 // payload is copied into a slab slot and the returned SlabPointer is stored
 // on Entry.Ptr. Existing packed entries reuse their current slot when the
@@ -378,32 +441,34 @@ func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expirati
 	c.usedBytes += newSize - oldSize
 	c.sizes[key] = newSize
 
-	if elem, ok := c.lruMap[key]; ok {
-		c.lruList.MoveToFront(elem)
-	} else {
-		elem = c.lruList.PushFront(key)
-		c.lruMap[key] = elem
-	}
-
+	prev, had := c.items[key]
 	var ptr slab.SlabPointer
-	if prev, ok := c.items[key]; ok && prev.Encoding == EncPacked && !prev.Ptr.IsNil() &&
-		c.slabs.Capacity(prev.Ptr) >= uint32(len(buf)) {
-		// Reuse the existing slot — same or shrinking payload fits.
+
+	switch {
+	case had && prev.Encoding == EncPacked && !prev.Ptr.IsNil() &&
+		c.slabs.Capacity(prev.Ptr) >= uint32(len(buf)):
+		// Same slot fits the new payload: reuse it in place.
 		ptr = prev.Ptr
-	} else {
-		// Free the old slot if it existed as a packed entry.
-		if prev, ok := c.items[key]; ok && prev.Encoding == EncPacked && !prev.Ptr.IsNil() {
+		c.slabs.Write(ptr, buf)
+		c.lruMoveToFront(ptr)
+	default:
+		// New slot needed. Unlink the old LRU node and free the old slot
+		// (packed or native — both have slab slots after Phase 3).
+		if had && !prev.Ptr.IsNil() {
+			c.lruRemove(prev.Ptr)
+			delete(c.keysBySlot, prev.Ptr)
 			c.slabs.Free(prev.Ptr)
 		}
 		ptr = c.slabs.Alloc(uint32(len(buf)))
+		c.slabs.Write(ptr, buf)
+		c.keysBySlot[ptr] = key
+		c.lruPushFront(ptr)
 	}
-	c.slabs.Write(ptr, buf)
 
 	c.items[key] = &Entry{
-		ValueType:    vt,
-		Encoding:     EncPacked,
-		Ptr:          ptr,
-		LastAccessed: time.Now(),
+		ValueType: vt,
+		Encoding:  EncPacked,
+		Ptr:       ptr,
 	}
 	if expiration > 0 {
 		c.ttl[key] = expiration
@@ -416,9 +481,7 @@ func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expirati
 }
 
 // estimateBytesSize charges the exact encoded size of a packed []byte value
-// plus the key and per-entry overhead. The slab allocator (Phase 2) will
-// supersede this with a slab-aware accounting that knows the exact slab
-// page and fragment cost.
+// plus the key and per-entry overhead.
 func estimateBytesSize(key string, buf []byte) int64 {
 	return int64(entryOverhead) + int64(len(key)) + int64(len(buf))
 }
@@ -429,7 +492,8 @@ func estimateBytesSize(key string, buf []byte) int64 {
 //
 // Values of []byte / string are routed to the slab-backed packed path so
 // string entries never allocate a GC-tracked payload. Native container shapes
-// stay in Entry.Value as before.
+// are stored in Entry.Value and get a minimum-class slab slot purely to
+// host LRU metadata.
 func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
 	switch v := value.(type) {
 	case []byte:
@@ -445,18 +509,17 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	c.usedBytes += newSize - oldSize
 	c.sizes[key] = newSize
 
-	if elem, ok := c.lruMap[key]; ok {
-		c.lruList.MoveToFront(elem)
-	} else {
-		elem = c.lruList.PushFront(key)
-		c.lruMap[key] = elem
-	}
-
-	// If we're overwriting an existing packed entry with a native shape,
-	// free its slab slot first.
-	if prev, ok := c.items[key]; ok && prev.Encoding == EncPacked && !prev.Ptr.IsNil() {
+	// Native entries still need a slab slot for LRU metadata. Free the old
+	// slot (whatever encoding) and allocate a fresh one.
+	prev, had := c.items[key]
+	if had && !prev.Ptr.IsNil() {
+		c.lruRemove(prev.Ptr)
+		delete(c.keysBySlot, prev.Ptr)
 		c.slabs.Free(prev.Ptr)
 	}
+	ptr := c.slabs.Alloc(0) // minimum class; data region unused for native
+	c.keysBySlot[ptr] = key
+	c.lruPushFront(ptr)
 
 	valueType := ObjTypeBytes
 	switch value.(type) {
@@ -471,10 +534,10 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	}
 
 	c.items[key] = &Entry{
-		ValueType:    valueType,
-		Encoding:     EncNative,
-		Value:        value,
-		LastAccessed: time.Now(),
+		ValueType: valueType,
+		Encoding:  EncNative,
+		Value:     value,
+		Ptr:       ptr,
 	}
 	if expiration > 0 {
 		c.ttl[key] = expiration
@@ -490,11 +553,16 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 // accommodated within the memory limit.
 func (c *Cache) evictLRU(ctx context.Context, delta int64) {
 	for c.maxBytes > 0 && c.usedBytes+delta > c.maxBytes {
-		elem := c.lruList.Back()
-		if elem == nil {
+		if c.lruTail.IsNil() {
 			break
 		}
-		evictKey := elem.Value.(string)
+		evictKey, ok := c.keysBySlot[c.lruTail]
+		if !ok {
+			// LRU list holds a pointer whose reverse map was somehow
+			// dropped — fatal invariant violation. Log and bail.
+			logger.Warn(ctx).Msg("evictLRU: keysBySlot has no entry for lruTail; bailing")
+			break
+		}
 		logger.Debug(ctx).Str("key", evictKey).Msg("lru eviction")
 		c.delete(evictKey)
 	}
@@ -504,11 +572,8 @@ func (c *Cache) evictLRU(ctx context.Context, delta int64) {
 // Must be called while holding the cache lock.
 func (c *Cache) RawGet(key string) (*Entry, bool) {
 	entry, found := c.items[key]
-	if found {
-		entry.LastAccessed = time.Now()
-		if elem, ok := c.lruMap[key]; ok {
-			c.lruList.MoveToFront(elem)
-		}
+	if found && !entry.Ptr.IsNil() {
+		c.lruMoveToFront(entry.Ptr)
 	}
 	return entry, found
 }
@@ -545,16 +610,14 @@ func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
 }
 
 func (c *Cache) delete(key string) {
-	if entry, ok := c.items[key]; ok && entry.Encoding == EncPacked && !entry.Ptr.IsNil() {
+	if entry, ok := c.items[key]; ok && !entry.Ptr.IsNil() {
+		c.lruRemove(entry.Ptr)
+		delete(c.keysBySlot, entry.Ptr)
 		c.slabs.Free(entry.Ptr)
 	}
 	if sz, ok := c.sizes[key]; ok {
 		c.usedBytes -= sz
 		delete(c.sizes, key)
-	}
-	if elem, ok := c.lruMap[key]; ok {
-		c.lruList.Remove(elem)
-		delete(c.lruMap, key)
 	}
 	delete(c.ttl, key)
 	delete(c.items, key)
@@ -581,8 +644,9 @@ func (c *Cache) Clear(ctx context.Context) {
 	logger.Info(ctx).Int("items", len(c.items)).Msg("cache cleared")
 	c.items = make(map[string]*Entry)
 	c.ttl = make(map[string]int64)
-	c.lruList.Init()
-	c.lruMap = make(map[string]*list.Element)
+	c.keysBySlot = make(map[slab.SlabPointer]string)
+	c.lruHead = slab.NilPointer
+	c.lruTail = slab.NilPointer
 	c.sizes = make(map[string]int64)
 	c.usedBytes = 0
 	// Drop the entire slab arena — faster than walking entries to Free().
@@ -593,10 +657,6 @@ func (c *Cache) Clear(ctx context.Context) {
 }
 
 // estimateSize returns an approximate memory usage in bytes for a key-value pair.
-// Note: []byte values are charged their exact byte length — this is the
-// target invariant for all types once Phase 1 completes; the string / []string
-// / map / *SortedSet branches remain for the handlers that haven't migrated
-// to byte-encoded values yet.
 func estimateSize(key string, value any) int64 {
 	size := int64(entryOverhead) + int64(len(key))
 	switch v := value.(type) {
