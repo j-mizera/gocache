@@ -12,7 +12,7 @@ import (
 
 // Sorted-set commands operate on two encodings:
 //
-//   EncPacked: entry.Value.([]byte) — a packed.ZSet buffer sorted by
+//   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a packed.ZSet buffer sorted by
 //             (score asc, member asc). ZADD inserts at the correct sort
 //             position; ZRANGE/ZRANGEBYSCORE walk forward.
 //   EncNative: entry.Value.(*cache.SortedSet) — the skiplist-style shape
@@ -46,7 +46,7 @@ func HandleZadd(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			return zaddPacked(cmdCtx, key, entry.Value.([]byte), pairs)
+			return zaddPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), pairs)
 		default:
 			return zaddNative(cmdCtx, key, entry.Value.(*cache.SortedSet), pairs)
 		}
@@ -119,7 +119,7 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			buf := entry.Value.([]byte)
+			buf := cmdCtx.Cache.ResolvePacked(entry)
 			removed := 0
 			for _, m := range members {
 				var rm bool
@@ -177,7 +177,7 @@ func HandleZscore(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			score, found, err := packed.ZSetScoreOf(entry.Value.([]byte), member)
+			score, found, err := packed.ZSetScoreOf(cmdCtx.Cache.ResolvePacked(entry), member)
 			if err != nil {
 				return err
 			}
@@ -211,7 +211,7 @@ func HandleZcard(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			n, err := packed.ZSetLen(entry.Value.([]byte))
+			n, err := packed.ZSetLen(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -254,7 +254,7 @@ func HandleZrange(cmdCtx *command.Context) command.Result {
 		switch entry.Encoding {
 		case cache.EncPacked:
 			var err error
-			members, err = packed.ZSetRangeByIndex(entry.Value.([]byte), start, stop)
+			members, err = packed.ZSetRangeByIndex(cmdCtx.Cache.ResolvePacked(entry), start, stop)
 			if err != nil {
 				return err
 			}
@@ -294,7 +294,7 @@ func HandleZrank(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			rank, _, found, err := packed.ZSetRank(entry.Value.([]byte), member)
+			rank, _, found, err := packed.ZSetRank(cmdCtx.Cache.ResolvePacked(entry), member)
 			if err != nil {
 				return err
 			}
@@ -333,7 +333,7 @@ func HandleZcount(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			n, err := packed.ZSetCountByScore(entry.Value.([]byte), min, max)
+			n, err := packed.ZSetCountByScore(cmdCtx.Cache.ResolvePacked(entry), min, max)
 			if err != nil {
 				return err
 			}

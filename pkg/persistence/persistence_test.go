@@ -37,17 +37,8 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 	if !ok {
 		t.Fatal("str not found")
 	}
-	// After the Phase 1 hybrid encoding, strings are canonically stored
-	// as []byte; coerce defensively so the test tolerates either shape.
-	got := ""
-	switch v := entry.Value.(type) {
-	case string:
-		got = v
-	case []byte:
-		got = string(v)
-	}
-	if got != "hello" {
-		t.Errorf("str: expected 'hello', got %q (%T)", got, entry.Value)
+	if got := string(c2.ResolvePacked(entry)); got != "hello" {
+		t.Errorf("str: expected 'hello', got %q", got)
 	}
 
 	entry, ok = c2.RawGet("list")

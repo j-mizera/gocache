@@ -9,7 +9,7 @@ import (
 
 // Set commands operate on two encodings:
 //
-//   EncPacked: entry.Value.([]byte) — a sorted, length-prefixed buffer.
+//   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a sorted, length-prefixed buffer.
 //             Mutations go through packed.Set*. SADD keeps the buffer
 //             sorted via binary insertion.
 //   EncNative: entry.Value.(map[string]struct{}) — the Go map shape used
@@ -34,7 +34,7 @@ func getSetAsMap(c *cache.Cache, key string) (map[string]struct{}, error) {
 	}
 	switch entry.Encoding {
 	case cache.EncPacked:
-		m, err := packed.SetToMap(entry.Value.([]byte))
+		m, err := packed.SetToMap(c.ResolvePacked(entry))
 		if err != nil {
 			return nil, err
 		}
@@ -142,7 +142,7 @@ func HandleSadd(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			return saddPacked(cmdCtx, key, entry.Value.([]byte), members)
+			return saddPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), members)
 		default:
 			return saddNative(cmdCtx, key, entry.Value.(map[string]struct{}), members)
 		}
@@ -216,7 +216,7 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			buf := entry.Value.([]byte)
+			buf := cmdCtx.Cache.ResolvePacked(entry)
 			removed := 0
 			for _, m := range members {
 				var rm bool
@@ -273,7 +273,7 @@ func HandleSmembers(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			members, err := packed.SetMembers(entry.Value.([]byte))
+			members, err := packed.SetMembers(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -310,7 +310,7 @@ func HandleSismember(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			ok, err := packed.SetContains(entry.Value.([]byte), member)
+			ok, err := packed.SetContains(cmdCtx.Cache.ResolvePacked(entry), member)
 			if err != nil {
 				return err
 			}
@@ -344,7 +344,7 @@ func HandleScard(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			n, err := packed.SetLen(entry.Value.([]byte))
+			n, err := packed.SetLen(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -375,7 +375,7 @@ func HandleSpop(cmdCtx *command.Context) command.Result {
 			// "a random element"; native map-range is pseudo-random, but
 			// lex-first is equally valid under the spec and avoids an
 			// intermediate []string.
-			buf := entry.Value.([]byte)
+			buf := cmdCtx.Cache.ResolvePacked(entry)
 			var popped string
 			err := packed.SetIterate(buf, func(m []byte) bool {
 				popped = string(m)

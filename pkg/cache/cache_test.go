@@ -16,8 +16,11 @@ func TestCache_Basic(t *testing.T) {
 	}
 
 	val, found := c.RawGet("key")
-	if !found || val.Value != "value" {
-		t.Errorf("expected value, got %v", val)
+	if !found {
+		t.Fatalf("expected key to be found")
+	}
+	if got := string(c.ResolvePacked(val)); got != "value" {
+		t.Errorf("expected %q, got %q", "value", got)
 	}
 
 	c.RawDelete("key")
@@ -51,16 +54,8 @@ func TestCache_Snapshot(t *testing.T) {
 	if !found {
 		t.Fatal("snap key not loaded")
 	}
-	// Strings are canonically []byte after Phase 1; accept either shape.
-	got := ""
-	switch v := val.Value.(type) {
-	case string:
-		got = v
-	case []byte:
-		got = string(v)
-	}
-	if got != "data" {
-		t.Errorf("expected data, got %q (%T)", got, val.Value)
+	if got := string(cacheInstance2.ResolvePacked(val)); got != "data" {
+		t.Errorf("expected %q, got %q", "data", got)
 	}
 }
 

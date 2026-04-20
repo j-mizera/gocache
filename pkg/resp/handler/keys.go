@@ -57,25 +57,15 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(src)
-		if !found {
+		if _, found := cmdCtx.Cache.RawGet(src); !found {
 			return resp.MarshalError("ERR no such key")
 		}
 		if lazyExpire(cmdCtx.Cache, src) {
 			return resp.MarshalError("ERR no such key")
 		}
 		ttl := cmdCtx.Cache.RawTTL(src)
-
-		// Determine absolute expiration for the destination.
-		var expiration int64
-		if ttl > 0 {
-			expiration = ttl
-		}
-
-		cmdCtx.Cache.RawDelete(dst)
-		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.Rename(src, dst, ttl) {
+			return resp.MarshalError("ERR no such key")
 		}
 		return "OK"
 	}
@@ -87,8 +77,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(src)
-		if !found {
+		if _, found := cmdCtx.Cache.RawGet(src); !found {
 			return resp.MarshalError("ERR no such key")
 		}
 		if lazyExpire(cmdCtx.Cache, src) {
@@ -104,14 +93,8 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 		}
 
 		ttl := cmdCtx.Cache.RawTTL(src)
-		var expiration int64
-		if ttl > 0 {
-			expiration = ttl
-		}
-
-		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.Rename(src, dst, ttl) {
+			return resp.MarshalError("ERR no such key")
 		}
 		return 1
 	}
@@ -262,7 +245,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
-				b, _ := entry.Value.([]byte)
+				b := cmdCtx.Cache.ResolvePacked(entry)
 				if len(b) <= embstrMaxLen {
 					return "embstr"
 				}

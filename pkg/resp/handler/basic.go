@@ -122,10 +122,10 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 
 		existing := 0.0
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
-			b, ok := entry.Value.([]byte)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				return resp.ErrWrongType
 			}
+			b := cmdCtx.Cache.ResolvePacked(entry)
 			existing, err = strconv.ParseFloat(string(b), 64)
 			if err != nil {
 				return resp.ErrNotFloat
@@ -153,11 +153,10 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 		var existing []byte
 		rawTTL := int64(0)
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
-			b, ok := entry.Value.([]byte)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				return resp.ErrWrongType
 			}
-			existing = b
+			existing = cmdCtx.Cache.ResolvePacked(entry)
 			rawTTL = cmdCtx.Cache.RawTTL(key)
 		}
 
@@ -183,11 +182,10 @@ func HandleStrlen(cmdCtx *command.Context) command.Result {
 		if !found {
 			return int64(0)
 		}
-		b, ok := entry.Value.([]byte)
-		if !ok {
+		if entry.ValueType != cache.ObjTypeBytes {
 			return resp.ErrWrongType
 		}
-		return int64(len(b))
+		return int64(len(cmdCtx.Cache.ResolvePacked(entry)))
 	})
 }
 
@@ -206,12 +204,17 @@ func HandleMget(cmdCtx *command.Context) command.Result {
 				result[i] = nil
 				continue
 			}
-			b, ok := entry.Value.([]byte)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				result[i] = nil
 				continue
 			}
-			result[i] = b
+			// Copy out: the slice returned by ResolvePacked aliases the
+			// slab region, which is not safe to hand off to the RESP
+			// serializer when subsequent mutations may reuse the slot.
+			src := cmdCtx.Cache.ResolvePacked(entry)
+			buf := make([]byte, len(src))
+			copy(buf, src)
+			result[i] = buf
 		}
 		return result
 	})
@@ -240,10 +243,10 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 	current := int64(0)
 	rawTTL := int64(0)
 	if entry, found := cmdCtx.Cache.RawGet(key); found {
-		b, ok := entry.Value.([]byte)
-		if !ok {
+		if entry.ValueType != cache.ObjTypeBytes {
 			return resp.ErrWrongType
 		}
+		b := cmdCtx.Cache.ResolvePacked(entry)
 		parsed, err := strconv.ParseInt(string(b), 10, 64)
 		if err != nil {
 			return resp.ErrNotInteger
@@ -366,9 +369,10 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
+		_ = entry
 		expiration := time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.SetExpiration(key, expiration) {
+			return 0
 		}
 		return 1
 	}
@@ -408,7 +412,15 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 		if lazyExpire(cmdCtx.Cache, key) {
 			return nil
 		}
-		return entry.Value
+		if entry.ValueType != cache.ObjTypeBytes {
+			return resp.ErrWrongType
+		}
+		// Copy out — the returned slice must not alias the slab slot
+		// once the cache lock is released.
+		src := cmdCtx.Cache.ResolvePacked(entry)
+		buf := make([]byte, len(src))
+		copy(buf, src)
+		return buf
 	}
 	return command.Dispatch(cmdCtx, executeFn)
 }
@@ -462,12 +474,13 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 
+		_ = entry
 		var expiration int64
 		if ttl > 0 {
 			expiration = time.Now().Add(ttl).UnixNano()
 		}
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
-			return err
+		if !cmdCtx.Cache.SetExpiration(key, expiration) {
+			return 0
 		}
 		return 1
 	}

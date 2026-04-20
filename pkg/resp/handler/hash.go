@@ -9,7 +9,7 @@ import (
 
 // Hash commands operate on two physical encodings:
 //
-//   EncPacked: entry.Value.([]byte) — a packed.Hash* buffer. Mutations go
+//   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a packed.Hash* buffer. Mutations go
 //             through the packed package (in-place splice, same-size
 //             replacements are alloc-free).
 //   EncNative: entry.Value.(map[string]string) — Go-map path. Used for
@@ -41,7 +41,7 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			return hsetPacked(cmdCtx, key, entry.Value.([]byte), cmdCtx.Args[1:])
+			return hsetPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), cmdCtx.Args[1:])
 		default:
 			return hsetNative(cmdCtx, key, entry.Value.(map[string]string), cmdCtx.Args[1:])
 		}
@@ -148,7 +148,7 @@ func HandleHget(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			v, ok, err := packed.HashGet(entry.Value.([]byte), field)
+			v, ok, err := packed.HashGet(cmdCtx.Cache.ResolvePacked(entry), field)
 			if err != nil {
 				return err
 			}
@@ -185,7 +185,7 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			buf := entry.Value.([]byte)
+			buf := cmdCtx.Cache.ResolvePacked(entry)
 			deleted := 0
 			for _, field := range fields {
 				var removed bool
@@ -244,7 +244,7 @@ func HandleHexists(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			ok, err := packed.HashContains(entry.Value.([]byte), field)
+			ok, err := packed.HashContains(cmdCtx.Cache.ResolvePacked(entry), field)
 			if err != nil {
 				return err
 			}
@@ -280,7 +280,7 @@ func HandleHgetall(cmdCtx *command.Context) command.Result {
 		switch entry.Encoding {
 		case cache.EncPacked:
 			// Materialize out-of-cache so the returned map owns its strings.
-			m, err := packed.HashToMap(entry.Value.([]byte))
+			m, err := packed.HashToMap(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -308,7 +308,7 @@ func HandleHkeys(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			fields, err := packed.HashFields(entry.Value.([]byte))
+			fields, err := packed.HashFields(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -345,7 +345,7 @@ func HandleHvals(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			values, err := packed.HashValues(entry.Value.([]byte))
+			values, err := packed.HashValues(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -382,7 +382,7 @@ func HandleHlen(cmdCtx *command.Context) command.Result {
 
 		switch entry.Encoding {
 		case cache.EncPacked:
-			n, err := packed.HashLen(entry.Value.([]byte))
+			n, err := packed.HashLen(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}

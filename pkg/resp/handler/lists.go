@@ -19,7 +19,7 @@ var ErrInvalidTimeout = errors.New("timeout is not a float or out of range")
 
 // List commands operate on two encodings:
 //
-//   EncPacked: entry.Value.([]byte) — a packed.List buffer, bounded by
+//   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a packed.List buffer, bounded by
 //             PackedThresholds.ListMaxBytes. Mutations splice in place.
 //   EncNative: entry.Value.([]string) — the Go slice used by large lists
 //             and lists that have outgrown the packed threshold.
@@ -41,7 +41,7 @@ func HandleLpush(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			return lpushPacked(cmdCtx, key, entry.Value.([]byte), values)
+			return lpushPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), values)
 		default:
 			return lpushNative(cmdCtx, key, entry.Value.([]string), values)
 		}
@@ -118,7 +118,7 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			return rpushPacked(cmdCtx, key, entry.Value.([]byte), values)
+			return rpushPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), values)
 		default:
 			return rpushNative(cmdCtx, key, entry.Value.([]string), values)
 		}
@@ -223,7 +223,7 @@ func HandleRpop(cmdCtx *command.Context) command.Result {
 func popList(cmdCtx *command.Context, key string, entry *cache.Entry, fromLeft bool, ttl int64) (any, error) {
 	switch entry.Encoding {
 	case cache.EncPacked:
-		buf := entry.Value.([]byte)
+		buf := cmdCtx.Cache.ResolvePacked(entry)
 		var popped []byte
 		var ok bool
 		var err error
@@ -284,7 +284,7 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			n, err := packed.ListLen(entry.Value.([]byte))
+			n, err := packed.ListLen(cmdCtx.Cache.ResolvePacked(entry))
 			if err != nil {
 				return err
 			}
@@ -316,7 +316,7 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
-			items, err := packed.ListRange(entry.Value.([]byte), start, stop)
+			items, err := packed.ListRange(cmdCtx.Cache.ResolvePacked(entry), start, stop)
 			if err != nil {
 				return err
 			}

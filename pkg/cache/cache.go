@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"gocache/api/logger"
+	"gocache/pkg/cache/slab"
 	"strings"
 	"sync"
 	"time"
@@ -71,10 +72,16 @@ const (
 )
 
 type Entry struct {
-	ValueType    ValueType `json:"value_type"`
-	Encoding     Encoding  `json:"encoding"`
-	Value        any       `json:"value"`
-	LastAccessed time.Time `json:"-"`
+	ValueType ValueType `json:"value_type"`
+	Encoding  Encoding  `json:"encoding"`
+	// Value holds the native Go shape for EncNative entries (map/slice/
+	// *SortedSet). For EncPacked entries Value is nil and the bytes live
+	// inside the slab allocator — resolve via Cache.ResolvePacked.
+	Value any `json:"value"`
+	// Ptr identifies the slab-allocated byte region for EncPacked entries.
+	// Zero (NilPointer) for EncNative entries.
+	Ptr          slab.SlabPointer `json:"-"`
+	LastAccessed time.Time        `json:"-"`
 }
 
 // PackedThresholds controls when a collection is promoted from its packed
@@ -102,6 +109,7 @@ type Cache struct {
 	lruMap         map[string]*list.Element
 	sizes          map[string]int64
 	packed         PackedThresholds
+	slabs          *slab.Allocator  // backs EncPacked byte payloads
 	OnMutate       func(key string) // called after a key is set or deleted (for WATCH)
 	OnMutateAll    func()           // called when all keys are invalidated (FLUSHDB)
 }
@@ -132,6 +140,7 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 		lruList:        list.New(),
 		lruMap:         make(map[string]*list.Element),
 		sizes:          make(map[string]int64),
+		slabs:          slab.NewAllocator(),
 		// Defaults mirror Valkey 8 (src/config.c). SetPackedThresholds
 		// overrides them with config values at boot.
 		packed: PackedThresholds{
@@ -144,6 +153,79 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 			ListMaxBytes:   8192,
 		},
 	}
+}
+
+// ResolvePacked returns a zero-copy view of an EncPacked entry's bytes. The
+// returned slice aliases the slab allocator's backing storage; callers must
+// not retain it past the current cache-lock hold.
+func (c *Cache) ResolvePacked(e *Entry) []byte {
+	if e == nil || e.Encoding != EncPacked || e.Ptr.IsNil() {
+		return nil
+	}
+	return c.slabs.Read(e.Ptr)
+}
+
+// SlabStats returns a point-in-time snapshot of slab allocator accounting.
+// Exposed for INFO / diagnostics. Must be called under a read lock.
+func (c *Cache) SlabStats() slab.Stats {
+	return c.slabs.Stats()
+}
+
+// SetExpiration updates only the TTL for an existing key, leaving the value
+// in place. Returns true if the key existed and the expiration was applied;
+// false if the key was absent. Must be called under the write lock.
+func (c *Cache) SetExpiration(key string, expiration int64) bool {
+	if _, ok := c.items[key]; !ok {
+		return false
+	}
+	if expiration > 0 {
+		c.ttl[key] = expiration
+	} else {
+		delete(c.ttl, key)
+	}
+	if c.OnMutate != nil {
+		c.OnMutate(key)
+	}
+	return true
+}
+
+// Rename moves src's entry to dst in place, preserving the slab allocation
+// and LRU node. Any existing dst entry is freed. The dst TTL is set to
+// newExpiration (0 = no TTL). Returns false if src is absent. Must be called
+// under the write lock.
+func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
+	entry, ok := c.items[src]
+	if !ok {
+		return false
+	}
+	if _, exists := c.items[dst]; exists {
+		c.delete(dst)
+	}
+
+	c.items[dst] = entry
+	if sz, ok := c.sizes[src]; ok {
+		c.sizes[dst] = sz
+		delete(c.sizes, src)
+	}
+	if elem, ok := c.lruMap[src]; ok {
+		elem.Value = dst
+		c.lruMap[dst] = elem
+		delete(c.lruMap, src)
+	}
+	delete(c.items, src)
+	delete(c.ttl, src)
+
+	if newExpiration > 0 {
+		c.ttl[dst] = newExpiration
+	} else {
+		delete(c.ttl, dst)
+	}
+
+	if c.OnMutate != nil {
+		c.OnMutate(src)
+		c.OnMutate(dst)
+	}
+	return true
 }
 
 func (c *Cache) Lock() {
@@ -285,10 +367,11 @@ func (c *Cache) RawLoadPacked(key string, vt ValueType, buf []byte, expiration i
 	c.setPackedInternal(key, vt, buf, expiration, true)
 }
 
-// setPackedInternal performs the raw packed-storage operation. Distinct
-// from setInternal because the packed path knows the ValueType up front
-// (handlers pass it explicitly) and does not need the reflective switch on
-// the concrete Go type.
+// setPackedInternal performs the raw packed-storage operation. The byte
+// payload is copied into a slab slot and the returned SlabPointer is stored
+// on Entry.Ptr. Existing packed entries reuse their current slot when the
+// slab class capacity allows, avoiding churn on same-size or shrinking
+// updates; otherwise the old slot is freed and a fresh one is allocated.
 func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expiration int64, suppressMutate bool) {
 	newSize := estimateBytesSize(key, buf)
 	oldSize := c.sizes[key]
@@ -302,10 +385,24 @@ func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expirati
 		c.lruMap[key] = elem
 	}
 
+	var ptr slab.SlabPointer
+	if prev, ok := c.items[key]; ok && prev.Encoding == EncPacked && !prev.Ptr.IsNil() &&
+		c.slabs.Capacity(prev.Ptr) >= uint32(len(buf)) {
+		// Reuse the existing slot — same or shrinking payload fits.
+		ptr = prev.Ptr
+	} else {
+		// Free the old slot if it existed as a packed entry.
+		if prev, ok := c.items[key]; ok && prev.Encoding == EncPacked && !prev.Ptr.IsNil() {
+			c.slabs.Free(prev.Ptr)
+		}
+		ptr = c.slabs.Alloc(uint32(len(buf)))
+	}
+	c.slabs.Write(ptr, buf)
+
 	c.items[key] = &Entry{
 		ValueType:    vt,
 		Encoding:     EncPacked,
-		Value:        buf,
+		Ptr:          ptr,
 		LastAccessed: time.Now(),
 	}
 	if expiration > 0 {
@@ -329,7 +426,20 @@ func estimateBytesSize(key string, buf []byte) int64 {
 // setInternal performs the raw storage operation, updating LRU and size tracking.
 // When suppressMutate is true the OnMutate callback is not invoked (used by
 // snapshot loads that bulk-populate without triggering WATCH dirty marks).
+//
+// Values of []byte / string are routed to the slab-backed packed path so
+// string entries never allocate a GC-tracked payload. Native container shapes
+// stay in Entry.Value as before.
 func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
+	switch v := value.(type) {
+	case []byte:
+		c.setPackedInternal(key, ObjTypeBytes, v, expiration, suppressMutate)
+		return
+	case string:
+		c.setPackedInternal(key, ObjTypeBytes, []byte(v), expiration, suppressMutate)
+		return
+	}
+
 	newSize := estimateSize(key, value)
 	oldSize := c.sizes[key]
 	c.usedBytes += newSize - oldSize
@@ -342,14 +452,14 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 		c.lruMap[key] = elem
 	}
 
+	// If we're overwriting an existing packed entry with a native shape,
+	// free its slab slot first.
+	if prev, ok := c.items[key]; ok && prev.Encoding == EncPacked && !prev.Ptr.IsNil() {
+		c.slabs.Free(prev.Ptr)
+	}
+
 	valueType := ObjTypeBytes
-	encoding := EncNative
 	switch value.(type) {
-	case []byte, string:
-		// string kept for compatibility with un-migrated types; []byte is the
-		// new canonical storage for ObjTypeBytes after the Phase 1 migration.
-		valueType = ObjTypeBytes
-		encoding = EncPacked
 	case []string:
 		valueType = ObjTypeList
 	case map[string]string:
@@ -362,7 +472,7 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 
 	c.items[key] = &Entry{
 		ValueType:    valueType,
-		Encoding:     encoding,
+		Encoding:     EncNative,
 		Value:        value,
 		LastAccessed: time.Now(),
 	}
@@ -435,6 +545,9 @@ func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
 }
 
 func (c *Cache) delete(key string) {
+	if entry, ok := c.items[key]; ok && entry.Encoding == EncPacked && !entry.Ptr.IsNil() {
+		c.slabs.Free(entry.Ptr)
+	}
 	if sz, ok := c.sizes[key]; ok {
 		c.usedBytes -= sz
 		delete(c.sizes, key)
@@ -472,6 +585,8 @@ func (c *Cache) Clear(ctx context.Context) {
 	c.lruMap = make(map[string]*list.Element)
 	c.sizes = make(map[string]int64)
 	c.usedBytes = 0
+	// Drop the entire slab arena — faster than walking entries to Free().
+	c.slabs = slab.NewAllocator()
 	if c.OnMutateAll != nil {
 		c.OnMutateAll()
 	}
