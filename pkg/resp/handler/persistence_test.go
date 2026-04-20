@@ -69,7 +69,7 @@ func TestHandler_Snapshot(t *testing.T) {
 	}
 
 	res = eval(t, c2, e2, ctx2, "GET", []string{"snap"})
-	if res.Value != "data" {
+	if valueAsString(res.Value) != "data" {
 		t.Errorf("GET snap: expected data, got %v", res.Value)
 	}
 }

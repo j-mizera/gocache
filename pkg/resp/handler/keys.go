@@ -262,8 +262,8 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
-				s, _ := entry.Value.(string)
-				if len(s) <= embstrMaxLen {
+				b, _ := entry.Value.([]byte)
+				if len(b) <= embstrMaxLen {
 					return "embstr"
 				}
 				return "raw"

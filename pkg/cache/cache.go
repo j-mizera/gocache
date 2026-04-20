@@ -220,6 +220,10 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 
 	valueType := ObjTypeBytes
 	switch value.(type) {
+	case []byte, string:
+		// string kept for compatibility with un-migrated types; []byte is the
+		// new canonical storage for ObjTypeBytes after the Phase 1 migration.
+		valueType = ObjTypeBytes
 	case []string:
 		valueType = ObjTypeList
 	case map[string]string:
@@ -347,9 +351,15 @@ func (c *Cache) Clear(ctx context.Context) {
 }
 
 // estimateSize returns an approximate memory usage in bytes for a key-value pair.
+// Note: []byte values are charged their exact byte length — this is the
+// target invariant for all types once Phase 1 completes; the string / []string
+// / map / *SortedSet branches remain for the handlers that haven't migrated
+// to byte-encoded values yet.
 func estimateSize(key string, value any) int64 {
 	size := int64(entryOverhead) + int64(len(key))
 	switch v := value.(type) {
+	case []byte:
+		size += int64(len(v))
 	case string:
 		size += int64(len(v))
 	case []string:

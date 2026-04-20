@@ -70,7 +70,7 @@ func TestHandler_Transactions(t *testing.T) {
 
 	// Verify values were set
 	res = eval(t, c, e, ctx, "GET", []string{"a"})
-	if res.Value != "1" {
+	if valueAsString(res.Value) != "1" {
 		t.Errorf("GET a: expected 1, got %v", res.Value)
 	}
 }
