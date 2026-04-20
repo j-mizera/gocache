@@ -208,7 +208,7 @@ func (w *CleanupWorker) Start(parentCtx context.Context) {
 				op, opCtx := w.startOp(parentCtx, ops.TypeCleanup)
 				if err := w.engine.Dispatch(opCtx, func() {
 					now := time.Now().UnixNano()
-					w.cache.Range(func(key string, entry *cache.Entry, expiration int64) bool {
+					w.cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 						if expiration > 0 && now > expiration {
 							w.cache.RawDelete(key)
 						}

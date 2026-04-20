@@ -47,7 +47,7 @@ func SaveSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 
 	// Collect all entries first so we can write the count header.
 	var entries []SnapshotEntry
-	cacheInstance.Range(func(key string, entry *cache.Entry, expiration int64) bool {
+	cacheInstance.Range(func(key string, entry cache.Entry, expiration int64) bool {
 		var v any
 		if entry.Encoding == cache.EncPacked {
 			// Copy slab-backed bytes out of the allocator so the gob

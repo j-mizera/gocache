@@ -220,7 +220,7 @@ func HandleRpop(cmdCtx *command.Context) command.Result {
 // (fromLeft=false) element. Returns nil-any when the list is empty. ttl is
 // the existing expiration in nanoseconds that must be preserved on
 // write-back; 0 means no TTL.
-func popList(cmdCtx *command.Context, key string, entry *cache.Entry, fromLeft bool, ttl int64) (any, error) {
+func popList(cmdCtx *command.Context, key string, entry cache.Entry, fromLeft bool, ttl int64) (any, error) {
 	switch entry.Encoding {
 	case cache.EncPacked:
 		buf := cmdCtx.Cache.ResolvePacked(entry)

@@ -107,7 +107,7 @@ func HandleKeys(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		var keys []string
 		now := time.Now().UnixNano()
-		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
+		cmdCtx.Cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 			if expiration > 0 && expiration <= now {
 				return true // skip expired
 			}
@@ -163,7 +163,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 
 		// Collect all non-expired keys.
 		var allKeys []string
-		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
+		cmdCtx.Cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 			if expiration > 0 && expiration <= now {
 				return true
 			}
@@ -211,7 +211,7 @@ func HandleRandomKey(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		now := time.Now().UnixNano()
 		var found string
-		cmdCtx.Cache.Range(func(key string, _ *cache.Entry, expiration int64) bool {
+		cmdCtx.Cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 			if expiration > 0 && expiration <= now {
 				return true
 			}
