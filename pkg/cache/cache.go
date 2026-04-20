@@ -43,6 +43,13 @@ const bytesPerMB int64 = 1024 * 1024
 type ValueState int
 type ValueType int
 
+// Encoding distinguishes the two physical shapes a collection can take.
+// Small collections live as EncPacked — a flat byte buffer that handlers
+// mutate in place via pkg/cache/packed. Large ones live as EncNative — the
+// existing Go-map / Go-slice / *SortedSet shapes. Strings are always
+// EncPacked ([]byte); this field is orthogonal to ValueType.
+type Encoding uint8
+
 const (
 	ValuePresent  ValueState = 0
 	ValueNoExpire ValueState = -1
@@ -58,8 +65,14 @@ const (
 	ObjTypeSortedSet
 )
 
+const (
+	EncNative Encoding = iota // Go-native map/slice/*SortedSet
+	EncPacked                 // flat []byte (pkg/cache/packed layouts)
+)
+
 type Entry struct {
 	ValueType    ValueType `json:"value_type"`
+	Encoding     Encoding  `json:"encoding"`
 	Value        any       `json:"value"`
 	LastAccessed time.Time `json:"-"`
 }
@@ -202,6 +215,76 @@ func (c *Cache) RawLoad(key string, value any, expiration int64) {
 	c.setInternal(key, value, expiration, true)
 }
 
+// RawSetPacked stores a packed byte-encoded value for the given ValueType.
+// The buffer layout must match pkg/cache/packed for that type. Enforces
+// the memory limit (evicting or returning ErrOutOfMemory as configured).
+// Must be called while holding the cache write lock.
+func (c *Cache) RawSetPacked(ctx context.Context, key string, vt ValueType, buf []byte, expiration int64) error {
+	if c.maxBytes > 0 {
+		newSize := estimateBytesSize(key, buf)
+		oldSize := c.sizes[key]
+		delta := newSize - oldSize
+		if delta > 0 && c.usedBytes+delta > c.maxBytes {
+			switch c.evictionPolicy {
+			case EvictionLRU:
+				c.evictLRU(ctx, delta)
+			case EvictionNone:
+				logger.Warn(ctx).Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
+				return ErrOutOfMemory
+			}
+		}
+	}
+	c.setPackedInternal(key, vt, buf, expiration, false)
+	return nil
+}
+
+// RawLoadPacked stores a packed byte buffer, bypassing the memory limit
+// check. Snapshot-loading uses this for entries with Encoding == EncPacked.
+func (c *Cache) RawLoadPacked(key string, vt ValueType, buf []byte, expiration int64) {
+	c.setPackedInternal(key, vt, buf, expiration, true)
+}
+
+// setPackedInternal performs the raw packed-storage operation. Distinct
+// from setInternal because the packed path knows the ValueType up front
+// (handlers pass it explicitly) and does not need the reflective switch on
+// the concrete Go type.
+func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expiration int64, suppressMutate bool) {
+	newSize := estimateBytesSize(key, buf)
+	oldSize := c.sizes[key]
+	c.usedBytes += newSize - oldSize
+	c.sizes[key] = newSize
+
+	if elem, ok := c.lruMap[key]; ok {
+		c.lruList.MoveToFront(elem)
+	} else {
+		elem = c.lruList.PushFront(key)
+		c.lruMap[key] = elem
+	}
+
+	c.items[key] = &Entry{
+		ValueType:    vt,
+		Encoding:     EncPacked,
+		Value:        buf,
+		LastAccessed: time.Now(),
+	}
+	if expiration > 0 {
+		c.ttl[key] = expiration
+	} else {
+		delete(c.ttl, key)
+	}
+	if !suppressMutate && c.OnMutate != nil {
+		c.OnMutate(key)
+	}
+}
+
+// estimateBytesSize charges the exact encoded size of a packed []byte value
+// plus the key and per-entry overhead. The slab allocator (Phase 2) will
+// supersede this with a slab-aware accounting that knows the exact slab
+// page and fragment cost.
+func estimateBytesSize(key string, buf []byte) int64 {
+	return int64(entryOverhead) + int64(len(key)) + int64(len(buf))
+}
+
 // setInternal performs the raw storage operation, updating LRU and size tracking.
 // When suppressMutate is true the OnMutate callback is not invoked (used by
 // snapshot loads that bulk-populate without triggering WATCH dirty marks).
@@ -219,11 +302,13 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	}
 
 	valueType := ObjTypeBytes
+	encoding := EncNative
 	switch value.(type) {
 	case []byte, string:
 		// string kept for compatibility with un-migrated types; []byte is the
 		// new canonical storage for ObjTypeBytes after the Phase 1 migration.
 		valueType = ObjTypeBytes
+		encoding = EncPacked
 	case []string:
 		valueType = ObjTypeList
 	case map[string]string:
@@ -236,6 +321,7 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 
 	c.items[key] = &Entry{
 		ValueType:    valueType,
+		Encoding:     encoding,
 		Value:        value,
 		LastAccessed: time.Now(),
 	}

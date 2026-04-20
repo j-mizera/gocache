@@ -25,6 +25,17 @@ const (
 	defaultLoadOnStartup     = true
 	defaultMaxMemoryMB       = int64(1024)
 	defaultEvictionPolicy    = "lru"
+
+	// Hybrid-encoding thresholds. Defaults match Valkey 8 (src/config.c).
+	// Collections that exceed either threshold (count or per-item length)
+	// are promoted from the byte-packed encoding to native Go shapes.
+	defaultHashMaxPackedEntries = 512
+	defaultHashMaxPackedValue   = 64
+	defaultSetMaxPackedEntries  = 128
+	defaultSetMaxPackedValue    = 64
+	defaultZSetMaxPackedEntries = 128
+	defaultZSetMaxPackedValue   = 64
+	defaultListMaxPackedSize    = 8192 // bytes, not entries
 	defaultCleanupInterval   = time.Minute
 	defaultEventsReplayCapacity = 10_000
 	defaultPluginsEnabled    = false
@@ -65,10 +76,24 @@ type PersistenceConfig struct {
 	LoadOnStartup    bool          `yaml:"load_on_startup"   mapstructure:"load_on_startup"`
 }
 
-// MemoryConfig holds memory management configuration
+// MemoryConfig holds memory management configuration.
+//
+// The HashMaxPacked*, SetMaxPacked*, ZSetMaxPacked*, and ListMaxPackedSize
+// fields govern hybrid collection encoding. Small collections are stored as
+// a flat byte buffer (Packed) and mutated in place; when a collection
+// exceeds one of the thresholds it is promoted to a native Go map/slice
+// (Native). Defaults mirror Valkey 8.
 type MemoryConfig struct {
 	MaxMemoryMB    int64  `yaml:"max_memory_mb"    mapstructure:"max_memory_mb"`
 	EvictionPolicy string `yaml:"eviction_policy"  mapstructure:"eviction_policy"`
+
+	HashMaxPackedEntries int `yaml:"hash_max_packed_entries" mapstructure:"hash_max_packed_entries"`
+	HashMaxPackedValue   int `yaml:"hash_max_packed_value"   mapstructure:"hash_max_packed_value"`
+	SetMaxPackedEntries  int `yaml:"set_max_packed_entries"  mapstructure:"set_max_packed_entries"`
+	SetMaxPackedValue    int `yaml:"set_max_packed_value"    mapstructure:"set_max_packed_value"`
+	ZSetMaxPackedEntries int `yaml:"zset_max_packed_entries" mapstructure:"zset_max_packed_entries"`
+	ZSetMaxPackedValue   int `yaml:"zset_max_packed_value"   mapstructure:"zset_max_packed_value"`
+	ListMaxPackedSize    int `yaml:"list_max_packed_size"    mapstructure:"list_max_packed_size"`
 }
 
 // WorkersConfig holds background worker configuration
@@ -99,8 +124,15 @@ func DefaultConfig() *Config {
 			LoadOnStartup:    defaultLoadOnStartup,
 		},
 		Memory: MemoryConfig{
-			MaxMemoryMB:    defaultMaxMemoryMB,
-			EvictionPolicy: defaultEvictionPolicy,
+			MaxMemoryMB:          defaultMaxMemoryMB,
+			EvictionPolicy:       defaultEvictionPolicy,
+			HashMaxPackedEntries: defaultHashMaxPackedEntries,
+			HashMaxPackedValue:   defaultHashMaxPackedValue,
+			SetMaxPackedEntries:  defaultSetMaxPackedEntries,
+			SetMaxPackedValue:    defaultSetMaxPackedValue,
+			ZSetMaxPackedEntries: defaultZSetMaxPackedEntries,
+			ZSetMaxPackedValue:   defaultZSetMaxPackedValue,
+			ListMaxPackedSize:    defaultListMaxPackedSize,
 		},
 		Workers: WorkersConfig{
 			CleanupInterval: defaultCleanupInterval,
@@ -141,6 +173,13 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v.SetDefault("persistence.load_on_startup", defaultLoadOnStartup)
 	v.SetDefault("memory.max_memory_mb", defaultMaxMemoryMB)
 	v.SetDefault("memory.eviction_policy", defaultEvictionPolicy)
+	v.SetDefault("memory.hash_max_packed_entries", defaultHashMaxPackedEntries)
+	v.SetDefault("memory.hash_max_packed_value", defaultHashMaxPackedValue)
+	v.SetDefault("memory.set_max_packed_entries", defaultSetMaxPackedEntries)
+	v.SetDefault("memory.set_max_packed_value", defaultSetMaxPackedValue)
+	v.SetDefault("memory.zset_max_packed_entries", defaultZSetMaxPackedEntries)
+	v.SetDefault("memory.zset_max_packed_value", defaultZSetMaxPackedValue)
+	v.SetDefault("memory.list_max_packed_size", defaultListMaxPackedSize)
 	v.SetDefault("workers.cleanup_interval", defaultCleanupInterval)
 	v.SetDefault("events.replay_capacity", defaultEventsReplayCapacity)
 
