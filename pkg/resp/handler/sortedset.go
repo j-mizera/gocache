@@ -9,6 +9,58 @@ import (
 	"gocache/pkg/resp"
 )
 
+// readZSet decodes the byte-encoded sorted set at key. Returns the reusable
+// SortedSet for mutating handlers (ZADD, ZREM) and the score-sorted pair
+// slice for read-only handlers (ZRANGE, ZRANK, ZCOUNT). Split via two
+// helpers so ZRANGE doesn't pay the map-allocation of a full SortedSet
+// restore when it only needs a linear walk.
+func readZSet(c *cache.Cache, key string) (*cache.SortedSet, bool, bool) {
+	entry, ok := c.RawGet(key)
+	if !ok {
+		return nil, false, false
+	}
+	if entry.ValueType != cache.ObjTypeSortedSet {
+		return nil, true, true
+	}
+	b, _ := entry.Value.([]byte)
+	z, err := cache.DecodeZSet(b)
+	if err != nil {
+		return nil, true, true
+	}
+	return z, true, false
+}
+
+// readZSetPairs returns the pre-sorted pair slice directly — cheaper than
+// restoring a SortedSet for read-only handlers.
+func readZSetPairs(c *cache.Cache, key string) ([]cache.ScoredMember, bool, bool) {
+	entry, ok := c.RawGet(key)
+	if !ok {
+		return nil, false, false
+	}
+	if entry.ValueType != cache.ObjTypeSortedSet {
+		return nil, true, true
+	}
+	b, _ := entry.Value.([]byte)
+	pairs, err := cache.DecodeZSetPairs(b)
+	if err != nil {
+		return nil, true, true
+	}
+	return pairs, true, false
+}
+
+// writeZSet encodes z and stores it under key. An empty zset deletes the key.
+func writeZSet(cmdCtx *command.Context, key string, z *cache.SortedSet) error {
+	if z.Card() == 0 {
+		cmdCtx.Cache.RawDelete(key)
+		return nil
+	}
+	encoded, err := cache.EncodeZSet(z)
+	if err != nil {
+		return err
+	}
+	return cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeSortedSet, encoded, 0)
+}
+
 // HandleZadd implements ZADD key score member [score member ...]
 func HandleZadd(cmdCtx *command.Context) command.Result {
 	if (len(cmdCtx.Args)-1)%2 != 0 {
@@ -18,35 +70,28 @@ func HandleZadd(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
-		var zset *cache.SortedSet
-		added := 0
-
-		if !found {
+		zset, _, wrongType := readZSet(cmdCtx.Cache, key)
+		if wrongType {
+			return resp.ErrWrongType
+		}
+		if zset == nil {
 			zset = cache.NewSortedSet()
-		} else {
-			if entry.ValueType != cache.ObjTypeSortedSet {
-				return resp.ErrWrongType
-			}
-			zset = entry.Value.(*cache.SortedSet)
 		}
 
-		// Process score-member pairs
+		added := 0
 		for i := 1; i < len(cmdCtx.Args); i += 2 {
 			scoreStr := cmdCtx.Args[i]
 			member := cmdCtx.Args[i+1]
-
 			score, err := strconv.ParseFloat(scoreStr, 64)
 			if err != nil {
 				return resp.ErrNotFloat
 			}
-
 			if zset.Add(member, score) {
 				added++
 			}
 		}
 
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, zset, 0); err != nil {
+		if err := writeZSet(cmdCtx, key, zset); err != nil {
 			return err
 		}
 		return added
@@ -61,32 +106,24 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 	members := cmdCtx.Args[1:]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		zset, found, wrongType := readZSet(cmdCtx.Cache, key)
 		if !found {
 			return 0
 		}
-
-		if entry.ValueType != cache.ObjTypeSortedSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
 
-		zset := entry.Value.(*cache.SortedSet)
 		removed := 0
-
 		for _, member := range members {
 			if zset.Remove(member) {
 				removed++
 			}
 		}
 
-		if zset.Card() == 0 {
-			cmdCtx.Cache.RawDelete(key)
-		} else {
-			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, zset, 0); err != nil {
-				return err
-			}
+		if err := writeZSet(cmdCtx, key, zset); err != nil {
+			return err
 		}
-
 		return removed
 	}
 
@@ -99,18 +136,17 @@ func HandleZscore(cmdCtx *command.Context) command.Result {
 	member := cmdCtx.Args[1]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		pairs, found, wrongType := readZSetPairs(cmdCtx.Cache, key)
 		if !found {
 			return nil
 		}
-
-		if entry.ValueType != cache.ObjTypeSortedSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		zset := entry.Value.(*cache.SortedSet)
-		if score, exists := zset.Score(member); exists {
-			return strconv.FormatFloat(score, 'f', -1, 64)
+		for _, p := range pairs {
+			if p.Member == member {
+				return strconv.FormatFloat(p.Score, 'f', -1, 64)
+			}
 		}
 		return nil
 	}
@@ -127,13 +163,14 @@ func HandleZcard(cmdCtx *command.Context) command.Result {
 		if !found {
 			return 0
 		}
-
 		if entry.ValueType != cache.ObjTypeSortedSet {
 			return resp.ErrWrongType
 		}
-
-		zset := entry.Value.(*cache.SortedSet)
-		return zset.Card()
+		n, err := cache.ZSetLen(entry.Value.([]byte))
+		if err != nil {
+			return resp.ErrWrongType
+		}
+		return n
 	}
 
 	return command.Dispatch(cmdCtx, executeFn)
@@ -158,28 +195,42 @@ func HandleZrange(cmdCtx *command.Context) command.Result {
 	}
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		pairs, found, wrongType := readZSetPairs(cmdCtx.Cache, key)
 		if !found {
 			return []any{}
 		}
-
-		if entry.ValueType != cache.ObjTypeSortedSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
+		length := len(pairs)
 
-		zset := entry.Value.(*cache.SortedSet)
-		members := zset.Range(start, stop)
+		// Redis index semantics: negative = from end, clamped to bounds.
+		if start < 0 {
+			start = length + start
+		}
+		if stop < 0 {
+			stop = length + stop
+		}
+		if start < 0 {
+			start = 0
+		}
+		if stop >= length {
+			stop = length - 1
+		}
+		if start > stop || start >= length {
+			return []any{}
+		}
+		slice := pairs[start : stop+1]
 
 		if withScores {
-			result := make([]any, 0, len(members)*2)
-			for _, sm := range members {
+			result := make([]any, 0, len(slice)*2)
+			for _, sm := range slice {
 				result = append(result, sm.Member, sm.Score)
 			}
 			return result
 		}
-
-		result := make([]any, 0, len(members))
-		for _, sm := range members {
+		result := make([]any, 0, len(slice))
+		for _, sm := range slice {
 			result = append(result, sm.Member)
 		}
 		return result
@@ -194,18 +245,17 @@ func HandleZrank(cmdCtx *command.Context) command.Result {
 	member := cmdCtx.Args[1]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		pairs, found, wrongType := readZSetPairs(cmdCtx.Cache, key)
 		if !found {
 			return nil
 		}
-
-		if entry.ValueType != cache.ObjTypeSortedSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		zset := entry.Value.(*cache.SortedSet)
-		if rank, exists := zset.Rank(member); exists {
-			return rank
+		for i, p := range pairs {
+			if p.Member == member {
+				return i
+			}
 		}
 		return nil
 	}
@@ -224,17 +274,20 @@ func HandleZcount(cmdCtx *command.Context) command.Result {
 	}
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		pairs, found, wrongType := readZSetPairs(cmdCtx.Cache, key)
 		if !found {
 			return 0
 		}
-
-		if entry.ValueType != cache.ObjTypeSortedSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		zset := entry.Value.(*cache.SortedSet)
-		return zset.Count(min, max)
+		count := 0
+		for _, p := range pairs {
+			if p.Score >= min && p.Score <= max {
+				count++
+			}
+		}
+		return count
 	}
 
 	return command.Dispatch(cmdCtx, executeFn)
