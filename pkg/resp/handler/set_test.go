@@ -2,8 +2,11 @@ package handler_test
 
 import (
 	"errors"
-	"gocache/pkg/resp"
+	"strings"
 	"testing"
+
+	"gocache/pkg/cache"
+	"gocache/pkg/resp"
 )
 
 func TestEvaluator_Set(t *testing.T) {
@@ -119,5 +122,49 @@ func TestEvaluator_Set(t *testing.T) {
 	res = eval(t, c, e, ctx, "SADD", []string{"stringkey", "member"})
 	if !errors.Is(res.Err, resp.ErrWrongType) {
 		t.Error("Expected WRONGTYPE error for SADD on string key")
+	}
+}
+
+// TestSet_EncodingPromotion verifies a set starts as EncPacked when small
+// and promotes to EncNative once the entry count crosses SetMaxEntries.
+func TestSet_EncodingPromotion(t *testing.T) {
+	c, e, ctx := setup(t)
+	c.SetPackedThresholds(cache.PackedThresholds{SetMaxEntries: 3, SetMaxValue: 1024})
+
+	for i := 0; i < 3; i++ {
+		eval(t, c, e, ctx, "SADD", []string{"s", "m" + string(rune('0'+i))})
+	}
+	entry, _ := c.RawGet("s")
+	if entry.Encoding != cache.EncPacked {
+		t.Errorf("after 3 adds: Encoding = %v; want EncPacked", entry.Encoding)
+	}
+
+	eval(t, c, e, ctx, "SADD", []string{"s", "m3"})
+	entry, _ = c.RawGet("s")
+	if entry.Encoding != cache.EncNative {
+		t.Errorf("after 4 adds: Encoding = %v; want EncNative", entry.Encoding)
+	}
+
+	// Semantics still intact after promotion.
+	res := eval(t, c, e, ctx, "SCARD", []string{"s"})
+	if res.Value != 4 {
+		t.Errorf("SCARD = %v; want 4", res.Value)
+	}
+}
+
+// TestSet_PromotionOnMemberLength exercises the per-member length threshold.
+func TestSet_PromotionOnMemberLength(t *testing.T) {
+	c, e, ctx := setup(t)
+	c.SetPackedThresholds(cache.PackedThresholds{SetMaxEntries: 512, SetMaxValue: 5})
+
+	eval(t, c, e, ctx, "SADD", []string{"s", "short"})
+	entry, _ := c.RawGet("s")
+	if entry.Encoding != cache.EncPacked {
+		t.Errorf("short member: Encoding = %v; want EncPacked", entry.Encoding)
+	}
+	eval(t, c, e, ctx, "SADD", []string{"s", strings.Repeat("x", 6)})
+	entry, _ = c.RawGet("s")
+	if entry.Encoding != cache.EncNative {
+		t.Errorf("after long member: Encoding = %v; want EncNative", entry.Encoding)
 	}
 }
