@@ -34,8 +34,20 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 	defer c2.Unlock()
 
 	entry, ok := c2.RawGet("str")
-	if !ok || entry.Value != "hello" {
-		t.Errorf("str: expected 'hello', got %v", entry)
+	if !ok {
+		t.Fatal("str not found")
+	}
+	// After the Phase 1 hybrid encoding, strings are canonically stored
+	// as []byte; coerce defensively so the test tolerates either shape.
+	got := ""
+	switch v := entry.Value.(type) {
+	case string:
+		got = v
+	case []byte:
+		got = string(v)
+	}
+	if got != "hello" {
+		t.Errorf("str: expected 'hello', got %q (%T)", got, entry.Value)
 	}
 
 	entry, ok = c2.RawGet("list")

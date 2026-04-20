@@ -22,6 +22,7 @@ func init() {
 type SnapshotEntry struct {
 	Key        string
 	ValueType  cache.ValueType
+	Encoding   cache.Encoding
 	Value      any
 	Expiration int64
 }
@@ -50,6 +51,7 @@ func SaveSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 		entries = append(entries, SnapshotEntry{
 			Key:        key,
 			ValueType:  entry.ValueType,
+			Encoding:   entry.Encoding,
 			Value:      entry.Value,
 			Expiration: expiration,
 		})
@@ -124,7 +126,24 @@ func LoadSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 			logger.Trace(ctx).Str("key", e.Key).Msg("skipped expired entry during load")
 			continue
 		}
-		cacheInstance.RawLoad(e.Key, e.Value, e.Expiration)
+		if e.Encoding == cache.EncPacked {
+			// Strings were written as `string` before the Phase 1 hybrid
+			// encoding — accept both shapes so pre-migration snapshots are
+			// still loadable. The canonical form is []byte; coerce strings.
+			var buf []byte
+			switch v := e.Value.(type) {
+			case []byte:
+				buf = v
+			case string:
+				buf = []byte(v)
+			default:
+				logger.Warn(ctx).Str("key", e.Key).Msg("packed snapshot entry has non-byte payload; skipping")
+				continue
+			}
+			cacheInstance.RawLoadPacked(e.Key, e.ValueType, buf, e.Expiration)
+		} else {
+			cacheInstance.RawLoad(e.Key, e.Value, e.Expiration)
+		}
 		loaded++
 	}
 

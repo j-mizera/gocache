@@ -77,6 +77,20 @@ type Entry struct {
 	LastAccessed time.Time `json:"-"`
 }
 
+// PackedThresholds controls when a collection is promoted from its packed
+// (byte-encoded) form to its native Go shape. Handlers read these to
+// decide after each mutation whether the post-op state crosses a limit.
+// Defaults mirror Valkey 8 and live in pkg/config.
+type PackedThresholds struct {
+	HashMaxEntries int // hash promotes when count > HashMaxEntries
+	HashMaxValue   int // hash promotes when any value length > HashMaxValue
+	SetMaxEntries  int
+	SetMaxValue    int
+	ZSetMaxEntries int
+	ZSetMaxValue   int
+	ListMaxBytes   int // list promotes when encoded buffer > ListMaxBytes
+}
+
 type Cache struct {
 	mu             sync.RWMutex
 	items          map[string]*Entry
@@ -87,6 +101,7 @@ type Cache struct {
 	lruList        *list.List // front = most recently used
 	lruMap         map[string]*list.Element
 	sizes          map[string]int64
+	packed         PackedThresholds
 	OnMutate       func(key string) // called after a key is set or deleted (for WATCH)
 	OnMutateAll    func()           // called when all keys are invalidated (FLUSHDB)
 }
@@ -117,6 +132,17 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 		lruList:        list.New(),
 		lruMap:         make(map[string]*list.Element),
 		sizes:          make(map[string]int64),
+		// Defaults mirror Valkey 8 (src/config.c). SetPackedThresholds
+		// overrides them with config values at boot.
+		packed: PackedThresholds{
+			HashMaxEntries: 512,
+			HashMaxValue:   64,
+			SetMaxEntries:  128,
+			SetMaxValue:    64,
+			ZSetMaxEntries: 128,
+			ZSetMaxValue:   64,
+			ListMaxBytes:   8192,
+		},
 	}
 }
 
@@ -159,6 +185,21 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 // Len returns the number of keys in the cache.
 func (c *Cache) Len() int {
 	return len(c.items)
+}
+
+// PackedThresholds returns the current hybrid-encoding thresholds.
+func (c *Cache) PackedThresholds() PackedThresholds {
+	return c.packed
+}
+
+// SetPackedThresholds replaces the hybrid-encoding thresholds. Safe to call
+// at boot or during config hot-reload. Existing entries are not migrated;
+// they stay at whatever encoding they were written with until their next
+// mutation.
+func (c *Cache) SetPackedThresholds(t PackedThresholds) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.packed = t
 }
 
 // EvictionPolicyString returns the eviction policy as a human-readable string.

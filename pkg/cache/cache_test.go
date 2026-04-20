@@ -48,8 +48,19 @@ func TestCache_Snapshot(t *testing.T) {
 	}
 
 	val, found := cacheInstance2.RawGet("snap")
-	if !found || val.Value != "data" {
-		t.Errorf("expected data, got %v", val)
+	if !found {
+		t.Fatal("snap key not loaded")
+	}
+	// Strings are canonically []byte after Phase 1; accept either shape.
+	got := ""
+	switch v := val.Value.(type) {
+	case string:
+		got = v
+	case []byte:
+		got = string(v)
+	}
+	if got != "data" {
+		t.Errorf("expected data, got %q (%T)", got, val.Value)
 	}
 }
 

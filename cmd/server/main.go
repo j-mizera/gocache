@@ -186,6 +186,15 @@ func main() {
 		cfg.Memory.MaxMemoryMB,
 		cache.ParseEvictionPolicy(cfg.Memory.EvictionPolicy),
 	)
+	cacheInstance.SetPackedThresholds(cache.PackedThresholds{
+		HashMaxEntries: cfg.Memory.HashMaxPackedEntries,
+		HashMaxValue:   cfg.Memory.HashMaxPackedValue,
+		SetMaxEntries:  cfg.Memory.SetMaxPackedEntries,
+		SetMaxValue:    cfg.Memory.SetMaxPackedValue,
+		ZSetMaxEntries: cfg.Memory.ZSetMaxPackedEntries,
+		ZSetMaxValue:   cfg.Memory.ZSetMaxPackedValue,
+		ListMaxBytes:   cfg.Memory.ListMaxPackedSize,
+	})
 	engineInstance := engine.New(cacheInstance)
 	blockingRegistry := blocking.NewRegistry()
 	watchManager := watch.NewManager()
