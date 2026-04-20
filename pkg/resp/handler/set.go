@@ -6,40 +6,55 @@ import (
 	"gocache/pkg/resp"
 )
 
-// getSet retrieves the set stored at key. Returns nil (not an error) for a
-// missing key (empty set semantics). Returns resp.ErrWrongType if the key
-// holds a different data type.
-func getSet(c *cache.Cache, key string) (map[string]struct{}, error) {
-	entry, found := c.RawGet(key)
-	if !found {
-		return nil, nil
+// readSet decodes the byte-encoded set at key, returning (map, found,
+// wrongType). Same contract as readList/readHash.
+func readSet(c *cache.Cache, key string) (map[string]struct{}, bool, bool) {
+	entry, ok := c.RawGet(key)
+	if !ok {
+		return nil, false, false
 	}
 	if entry.ValueType != cache.ObjTypeSet {
-		return nil, resp.ErrWrongType
+		return nil, true, true
 	}
-	return entry.Value.(map[string]struct{}), nil
+	b, _ := entry.Value.([]byte)
+	decoded, err := cache.DecodeSet(b)
+	if err != nil {
+		return nil, true, true
+	}
+	return decoded, true, false
+}
+
+// writeSet encodes s and stores it under key. An empty set deletes the key.
+func writeSet(cmdCtx *command.Context, key string, s map[string]struct{}) error {
+	if len(s) == 0 {
+		cmdCtx.Cache.RawDelete(key)
+		return nil
+	}
+	encoded, err := cache.EncodeSet(s)
+	if err != nil {
+		return err
+	}
+	return cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeSet, encoded, 0)
 }
 
 // HandleSinter implements SINTER key [key ...]
 func HandleSinter(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
 	executeFn := func() any {
-		first, err := getSet(cmdCtx.Cache, keys[0])
-		if err != nil {
-			return err
+		first, _, wrongType := readSet(cmdCtx.Cache, keys[0])
+		if wrongType {
+			return resp.ErrWrongType
 		}
-		// Copy first set so we can mutate it.
 		intersection := make(map[string]struct{}, len(first))
 		for m := range first {
 			intersection[m] = struct{}{}
 		}
 
 		for _, key := range keys[1:] {
-			s, err := getSet(cmdCtx.Cache, key)
-			if err != nil {
-				return err
+			s, _, wrongType := readSet(cmdCtx.Cache, key)
+			if wrongType {
+				return resp.ErrWrongType
 			}
-			// Remove members not present in s.
 			for m := range intersection {
 				if _, ok := s[m]; !ok {
 					delete(intersection, m)
@@ -62,9 +77,9 @@ func HandleSunion(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		union := make(map[string]struct{})
 		for _, key := range keys {
-			s, err := getSet(cmdCtx.Cache, key)
-			if err != nil {
-				return err
+			s, _, wrongType := readSet(cmdCtx.Cache, key)
+			if wrongType {
+				return resp.ErrWrongType
 			}
 			for m := range s {
 				union[m] = struct{}{}
@@ -83,20 +98,19 @@ func HandleSunion(cmdCtx *command.Context) command.Result {
 func HandleSdiff(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
 	executeFn := func() any {
-		first, err := getSet(cmdCtx.Cache, keys[0])
-		if err != nil {
-			return err
+		first, _, wrongType := readSet(cmdCtx.Cache, keys[0])
+		if wrongType {
+			return resp.ErrWrongType
 		}
-		// Copy first set.
 		diff := make(map[string]struct{}, len(first))
 		for m := range first {
 			diff[m] = struct{}{}
 		}
 
 		for _, key := range keys[1:] {
-			s, err := getSet(cmdCtx.Cache, key)
-			if err != nil {
-				return err
+			s, _, wrongType := readSet(cmdCtx.Cache, key)
+			if wrongType {
+				return resp.ErrWrongType
 			}
 			for m := range s {
 				delete(diff, m)
@@ -118,19 +132,15 @@ func HandleSadd(cmdCtx *command.Context) command.Result {
 	members := cmdCtx.Args[1:]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
-		var set map[string]struct{}
-		added := 0
-
-		if !found {
+		set, _, wrongType := readSet(cmdCtx.Cache, key)
+		if wrongType {
+			return resp.ErrWrongType
+		}
+		if set == nil {
 			set = make(map[string]struct{})
-		} else {
-			if entry.ValueType != cache.ObjTypeSet {
-				return resp.ErrWrongType
-			}
-			set = entry.Value.(map[string]struct{})
 		}
 
+		added := 0
 		for _, member := range members {
 			if _, exists := set[member]; !exists {
 				set[member] = struct{}{}
@@ -138,7 +148,7 @@ func HandleSadd(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0); err != nil {
+		if err := writeSet(cmdCtx, key, set); err != nil {
 			return err
 		}
 		return added
@@ -153,18 +163,15 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 	members := cmdCtx.Args[1:]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		set, found, wrongType := readSet(cmdCtx.Cache, key)
 		if !found {
 			return 0
 		}
-
-		if entry.ValueType != cache.ObjTypeSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
 
-		set := entry.Value.(map[string]struct{})
 		removed := 0
-
 		for _, member := range members {
 			if _, exists := set[member]; exists {
 				delete(set, member)
@@ -172,14 +179,9 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 			}
 		}
 
-		if len(set) == 0 {
-			cmdCtx.Cache.RawDelete(key)
-		} else {
-			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0); err != nil {
-				return err
-			}
+		if err := writeSet(cmdCtx, key, set); err != nil {
+			return err
 		}
-
 		return removed
 	}
 
@@ -195,18 +197,19 @@ func HandleSmembers(cmdCtx *command.Context) command.Result {
 		if !found {
 			return []any{}
 		}
-
 		if entry.ValueType != cache.ObjTypeSet {
 			return resp.ErrWrongType
 		}
-
-		set := entry.Value.(map[string]struct{})
-		result := make([]any, 0, len(set))
-
-		for member := range set {
-			result = append(result, member)
+		// SMEMBERS doesn't need the map — the encoded form already stores
+		// members sorted, so DecodeSetSlice skips the map allocation.
+		members, err := cache.DecodeSetSlice(entry.Value.([]byte))
+		if err != nil {
+			return resp.ErrWrongType
 		}
-
+		result := make([]any, len(members))
+		for i, m := range members {
+			result[i] = m
+		}
 		return result
 	}
 
@@ -219,16 +222,13 @@ func HandleSismember(cmdCtx *command.Context) command.Result {
 	member := cmdCtx.Args[1]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		set, found, wrongType := readSet(cmdCtx.Cache, key)
 		if !found {
 			return 0
 		}
-
-		if entry.ValueType != cache.ObjTypeSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		set := entry.Value.(map[string]struct{})
 		if _, exists := set[member]; exists {
 			return 1
 		}
@@ -247,13 +247,14 @@ func HandleScard(cmdCtx *command.Context) command.Result {
 		if !found {
 			return 0
 		}
-
 		if entry.ValueType != cache.ObjTypeSet {
 			return resp.ErrWrongType
 		}
-
-		set := entry.Value.(map[string]struct{})
-		return len(set)
+		n, err := cache.SetLen(entry.Value.([]byte))
+		if err != nil {
+			return resp.ErrWrongType
+		}
+		return n
 	}
 
 	return command.Dispatch(cmdCtx, executeFn)
@@ -264,36 +265,30 @@ func HandleSpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		set, found, wrongType := readSet(cmdCtx.Cache, key)
 		if !found {
 			return nil
 		}
-
-		if entry.ValueType != cache.ObjTypeSet {
+		if wrongType {
 			return resp.ErrWrongType
 		}
-
-		set := entry.Value.(map[string]struct{})
 		if len(set) == 0 {
 			return nil
 		}
 
+		// Non-deterministic pop matches existing behavior (today's map-range
+		// iteration). After Phase 1 the on-disk form is sorted, so we iterate
+		// the map we just decoded — still map iteration, still non-deterministic.
 		var popped string
 		for member := range set {
 			popped = member
 			break
 		}
-
 		delete(set, popped)
 
-		if len(set) == 0 {
-			cmdCtx.Cache.RawDelete(key)
-		} else {
-			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0); err != nil {
-				return err
-			}
+		if err := writeSet(cmdCtx, key, set); err != nil {
+			return err
 		}
-
 		return popped
 	}
 
