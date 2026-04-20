@@ -16,60 +16,30 @@ import (
 // is not a valid non-negative float.
 var ErrInvalidTimeout = errors.New("timeout is not a float or out of range")
 
-// readList reads the byte-encoded list at key, returning (items, found, wrongType).
-// Returns items=nil, found=false on miss; wrongType=true if the stored entry is
-// some other collection type (handlers must convert to resp.ErrWrongType).
-func readList(cacheInst *cache.Cache, key string) (items []string, found bool, wrongType bool) {
-	entry, ok := cacheInst.RawGet(key)
-	if !ok {
-		return nil, false, false
-	}
-	if entry.ValueType != cache.ObjTypeList {
-		return nil, true, true
-	}
-	b, _ := entry.Value.([]byte)
-	decoded, err := cache.DecodeList(b)
-	if err != nil {
-		// Decoder failure on a live entry is a server-side invariant break —
-		// surface it as WrongType rather than leak internals.
-		return nil, true, true
-	}
-	return decoded, true, false
-}
-
-// writeList encodes items and stores them under key with the given expiration.
-// When items is empty the key is deleted, mirroring Redis LPOP/RPOP semantics.
-func writeList(cmdCtx *command.Context, key string, items []string, expiration int64) error {
-	if len(items) == 0 {
-		cmdCtx.Cache.RawDelete(key)
-		return nil
-	}
-	encoded, err := cache.EncodeList(items)
-	if err != nil {
-		return err
-	}
-	return cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeList, encoded, expiration)
-}
-
 func HandleLpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
 	executeFn := func() any {
-		list, _, wrongType := readList(cmdCtx.Cache, key)
-		if wrongType {
-			return resp.ErrWrongType
+		entry, found := cmdCtx.Cache.RawGet(key)
+		var list []string
+		if !found {
+			list = []string{}
+		} else {
+			if entry.ValueType != cache.ObjTypeList {
+				return resp.ErrWrongType
+			}
+			list = entry.Value.([]string)
 		}
-		// LPUSH k a b c  →  c b a appended to front one at a time,
-		// so the leftmost element ends up being the last arg.
-		reversed := make([]string, len(values)+len(list))
+
+		reversed := make([]string, len(values))
 		for i, v := range values {
 			reversed[len(values)-1-i] = v
 		}
-		copy(reversed[len(values):], list)
-		if err := writeList(cmdCtx, key, reversed, 0); err != nil {
+		list = append(reversed, list...)
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
 			return err
 		}
-		return len(reversed)
+		return len(list)
 	}
 	result := command.Dispatch(cmdCtx, executeFn)
 	if result.Err == nil {
@@ -82,12 +52,19 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
 	executeFn := func() any {
-		list, _, wrongType := readList(cmdCtx.Cache, key)
-		if wrongType {
-			return resp.ErrWrongType
+		entry, found := cmdCtx.Cache.RawGet(key)
+		var list []string
+		if !found {
+			list = []string{}
+		} else {
+			if entry.ValueType != cache.ObjTypeList {
+				return resp.ErrWrongType
+			}
+			list = entry.Value.([]string)
 		}
+
 		list = append(list, values...)
-		if err := writeList(cmdCtx, key, list, 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
 			return err
 		}
 		return len(list)
@@ -102,20 +79,25 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 func HandleLpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
-		list, found, wrongType := readList(cmdCtx.Cache, key)
+		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
 		}
-		if wrongType {
+		if entry.ValueType != cache.ObjTypeList {
 			return resp.ErrWrongType
 		}
+		list := entry.Value.([]string)
 		if len(list) == 0 {
 			return nil
 		}
 		val := list[0]
 		list = list[1:]
-		if err := writeList(cmdCtx, key, list, 0); err != nil {
-			return err
+		if len(list) == 0 {
+			cmdCtx.Cache.RawDelete(key)
+		} else {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
+				return err
+			}
 		}
 		return val
 	}
@@ -125,20 +107,25 @@ func HandleLpop(cmdCtx *command.Context) command.Result {
 func HandleRpop(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
-		list, found, wrongType := readList(cmdCtx.Cache, key)
+		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
 		}
-		if wrongType {
+		if entry.ValueType != cache.ObjTypeList {
 			return resp.ErrWrongType
 		}
+		list := entry.Value.([]string)
 		if len(list) == 0 {
 			return nil
 		}
 		val := list[len(list)-1]
 		list = list[:len(list)-1]
-		if err := writeList(cmdCtx, key, list, 0); err != nil {
-			return err
+		if len(list) == 0 {
+			cmdCtx.Cache.RawDelete(key)
+		} else {
+			if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
+				return err
+			}
 		}
 		return val
 	}
@@ -155,12 +142,7 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 		if entry.ValueType != cache.ObjTypeList {
 			return resp.ErrWrongType
 		}
-		// O(1) — just reads the count prefix.
-		n, err := cache.ListLen(entry.Value.([]byte))
-		if err != nil {
-			return resp.ErrWrongType
-		}
-		return n
+		return len(entry.Value.([]string))
 	}
 	return command.Dispatch(cmdCtx, executeFn)
 }
@@ -176,13 +158,14 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 		return command.Result{Err: resp.ErrNotInteger}
 	}
 	executeFn := func() any {
-		list, found, wrongType := readList(cmdCtx.Cache, key)
+		entry, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return nil
 		}
-		if wrongType {
+		if entry.ValueType != cache.ObjTypeList {
 			return resp.ErrWrongType
 		}
+		list := entry.Value.([]string)
 		length := len(list)
 
 		if start < 0 {
@@ -227,11 +210,19 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	// Phase 1: attempt an immediate non-blocking pop.
 	result := command.Dispatch(cmdCtx, func() any {
 		for _, key := range keys {
+			entry, found := cmdCtx.Cache.RawGet(key)
+			if !found {
+				continue
+			}
+			// Skip expired keys.
 			if lazyExpire(cmdCtx.Cache, key) {
 				continue
 			}
-			list, found, wrongType := readList(cmdCtx.Cache, key)
-			if !found || wrongType || len(list) == 0 {
+			if entry.ValueType != cache.ObjTypeList {
+				continue
+			}
+			list := entry.Value.([]string)
+			if len(list) == 0 {
 				continue
 			}
 			var val string
@@ -242,10 +233,14 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 				val = list[len(list)-1]
 				list = list[:len(list)-1]
 			}
-			// Shrinking write — RawSetTyped cannot return ErrOutOfMemory because
-			// delta ≤ 0, but surface any unexpected error instead of dropping it.
-			if err := writeList(cmdCtx, key, list, cmdCtx.Cache.RawTTL(key)); err != nil {
-				logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on pop write-back")
+			if len(list) == 0 {
+				cmdCtx.Cache.RawDelete(key)
+			} else {
+				// Shrinking write — RawSet cannot return ErrOutOfMemory because
+				// delta ≤ 0, but surface any unexpected error instead of dropping it.
+				if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, cmdCtx.Cache.RawTTL(key)); err != nil {
+					logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on pop write-back")
+				}
 			}
 			return []any{key, val}
 		}
@@ -304,14 +299,27 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 			return
 		}
 		popResult, dispatchErr := cmdCtx.Engine.DispatchWithResult(cmdCtx.Context(), func() any {
-			list, ok, wrongType := readList(cmdCtx.Cache, key)
-			if !ok || wrongType || len(list) == 0 {
+			entry, ok := cmdCtx.Cache.RawGet(key)
+			if !ok {
+				return nil
+			}
+			if entry.ValueType != cache.ObjTypeList {
+				return nil
+			}
+			list := entry.Value.([]string)
+			if len(list) == 0 {
 				return nil
 			}
 			val := list[0]
 			list = list[1:]
-			if err := writeList(cmdCtx, key, list, cmdCtx.Cache.RawTTL(key)); err != nil {
-				logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on blocked-pop write-back")
+			if len(list) == 0 {
+				cmdCtx.Cache.RawDelete(key)
+			} else {
+				// Shrinking write — RawSet cannot return ErrOutOfMemory because
+				// delta ≤ 0, but surface any unexpected error instead of dropping it.
+				if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, cmdCtx.Cache.RawTTL(key)); err != nil {
+					logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("unexpected error on blocked-pop write-back")
+				}
 			}
 			return val
 		})

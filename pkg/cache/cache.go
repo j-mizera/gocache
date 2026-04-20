@@ -173,11 +173,6 @@ func (c *Cache) MaxBytes() int64 {
 // ErrOutOfMemory (EvictionNone) when the limit would be exceeded.
 // Must be called while holding the cache write lock. ctx carries the
 // operation (command, cleanup, etc.) for log correlation.
-//
-// The ValueType is inferred from the Go type of value — legacy callers
-// using Go-native collection shapes still work. Byte-encoded collection
-// callers (list/hash/set/zset after the Phase 1 migration) must use
-// RawSetTyped so the type is carried explicitly.
 func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration int64) error {
 	if c.maxBytes > 0 {
 		newSize := estimateSize(key, value)
@@ -197,30 +192,6 @@ func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration in
 	return nil
 }
 
-// RawSetTyped stores a byte-encoded value with an explicit ValueType,
-// bypassing RawSet's Go-type switch. This is the canonical write path for
-// collection handlers after Phase 1 migrates them to flat byte encodings —
-// []byte alone can't distinguish ObjTypeBytes from ObjTypeList, so the
-// caller must carry the discriminator.
-func (c *Cache) RawSetTyped(ctx context.Context, key string, vt ValueType, value []byte, expiration int64) error {
-	if c.maxBytes > 0 {
-		newSize := int64(entryOverhead) + int64(len(key)) + int64(len(value))
-		oldSize := c.sizes[key]
-		delta := newSize - oldSize
-		if delta > 0 && c.usedBytes+delta > c.maxBytes {
-			switch c.evictionPolicy {
-			case EvictionLRU:
-				c.evictLRU(ctx, delta)
-			case EvictionNone:
-				logger.Warn(ctx).Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
-				return ErrOutOfMemory
-			}
-		}
-	}
-	c.setInternalTyped(key, vt, value, expiration, false)
-	return nil
-}
-
 // RawLoad stores a key-value pair, bypassing the memory limit check.
 // Intended for snapshot loading only. Still maintains LRU and size tracking.
 // Must be called while holding the cache write lock. The OnMutate callback
@@ -236,6 +207,17 @@ func (c *Cache) RawLoad(key string, value any, expiration int64) {
 // snapshot loads that bulk-populate without triggering WATCH dirty marks).
 func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
 	newSize := estimateSize(key, value)
+	oldSize := c.sizes[key]
+	c.usedBytes += newSize - oldSize
+	c.sizes[key] = newSize
+
+	if elem, ok := c.lruMap[key]; ok {
+		c.lruList.MoveToFront(elem)
+	} else {
+		elem = c.lruList.PushFront(key)
+		c.lruMap[key] = elem
+	}
+
 	valueType := ObjTypeBytes
 	switch value.(type) {
 	case []byte, string:
@@ -251,35 +233,9 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	case *SortedSet:
 		valueType = ObjTypeSortedSet
 	}
-	c.writeEntry(key, valueType, value, newSize, expiration, suppressMutate)
-}
-
-// setInternalTyped is the byte-encoded equivalent of setInternal used by
-// RawSetTyped. The caller provides the ValueType explicitly, so no type
-// switch is needed and the size is exact (len(value)) rather than
-// estimated.
-func (c *Cache) setInternalTyped(key string, vt ValueType, value []byte, expiration int64, suppressMutate bool) {
-	newSize := int64(entryOverhead) + int64(len(key)) + int64(len(value))
-	c.writeEntry(key, vt, value, newSize, expiration, suppressMutate)
-}
-
-// writeEntry is the shared tail of setInternal / setInternalTyped: updates
-// bookkeeping (sizes, LRU), installs the entry, and fires the OnMutate
-// callback. Callers are responsible for pre-computing size + value-type.
-func (c *Cache) writeEntry(key string, vt ValueType, value any, newSize int64, expiration int64, suppressMutate bool) {
-	oldSize := c.sizes[key]
-	c.usedBytes += newSize - oldSize
-	c.sizes[key] = newSize
-
-	if elem, ok := c.lruMap[key]; ok {
-		c.lruList.MoveToFront(elem)
-	} else {
-		elem = c.lruList.PushFront(key)
-		c.lruMap[key] = elem
-	}
 
 	c.items[key] = &Entry{
-		ValueType:    vt,
+		ValueType:    valueType,
 		Value:        value,
 		LastAccessed: time.Now(),
 	}
