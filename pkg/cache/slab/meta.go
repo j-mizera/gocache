@@ -7,12 +7,14 @@ package slab
 // Size: 40 bytes, 8-byte aligned. Prev+next pointers + a nanosecond
 // timestamp make each entry an LRU list node. ValueType and Encoding live
 // here so the forward key index can be a bare `map[string]SlabPointer` —
-// no `*Entry` indirection. The cache package maps its own enums onto
+// no `*Entry` indirection. ExpirationNs replaces the Cache.ttl map —
+// zero means "no TTL set". The cache package maps its own enums onto
 // these bytes.
 type SlotMeta struct {
 	LRUPrev      SlabPointer // zero = LRU head (no predecessor)
 	LRUNext      SlabPointer // zero = LRU tail (no successor)
 	LastAccessNs int64       // Unix nanos; ordering source for LRU eviction
+	ExpirationNs int64       // Unix nanos; zero = no TTL
 	ValueType    uint8       // cache.ValueType (ObjTypeBytes/List/Hash/Set/SortedSet)
 	Encoding     uint8       // cache.Encoding (EncNative / EncPacked)
 	_pad         [6]byte

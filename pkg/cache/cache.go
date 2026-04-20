@@ -111,8 +111,7 @@ type Cache struct {
 	mu             sync.RWMutex
 	items          map[string]slab.SlabPointer
 	nativeValues   map[slab.SlabPointer]any // populated only for EncNative entries
-	ttl            map[string]int64
-	maxBytes       int64 // 0 = unlimited
+	maxBytes       int64                    // 0 = unlimited
 	usedBytes      int64
 	evictionPolicy EvictionPolicy
 	// LRU list is threaded through slab.SlotMeta's LRUPrev/LRUNext. The
@@ -125,7 +124,6 @@ type Cache struct {
 	// key. The uint64 key is inert to the GC; only the string value
 	// contributes a per-entry pointer (shared backing array with items).
 	keysBySlot  map[slab.SlabPointer]string
-	sizes       map[string]int64
 	packed      PackedThresholds
 	slabs       *slab.Allocator  // backs EncPacked byte payloads + per-entry meta
 	OnMutate    func(key string) // called after a key is set or deleted (for WATCH)
@@ -153,11 +151,9 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 	return &Cache{
 		items:          make(map[string]slab.SlabPointer),
 		nativeValues:   make(map[slab.SlabPointer]any),
-		ttl:            make(map[string]int64),
 		maxBytes:       maxBytes,
 		evictionPolicy: policy,
 		keysBySlot:     make(map[slab.SlabPointer]string),
-		sizes:          make(map[string]int64),
 		slabs:          slab.NewAllocator(),
 		// Defaults mirror Valkey 8 (src/config.c). SetPackedThresholds
 		// overrides them with config values at boot.
@@ -224,13 +220,14 @@ func (c *Cache) SlabStats() slab.Stats {
 // in place. Returns true if the key existed and the expiration was applied;
 // false if the key was absent. Must be called under the write lock.
 func (c *Cache) SetExpiration(key string, expiration int64) bool {
-	if _, ok := c.items[key]; !ok {
+	ptr, ok := c.items[key]
+	if !ok {
 		return false
 	}
 	if expiration > 0 {
-		c.ttl[key] = expiration
+		c.slabs.Meta(ptr).ExpirationNs = expiration
 	} else {
-		delete(c.ttl, key)
+		c.slabs.Meta(ptr).ExpirationNs = 0
 	}
 	if c.OnMutate != nil {
 		c.OnMutate(key)
@@ -240,8 +237,9 @@ func (c *Cache) SetExpiration(key string, expiration int64) bool {
 
 // Rename moves src's entry to dst in place, preserving the slab allocation
 // and LRU position. Any existing dst entry is freed. The dst TTL is set to
-// newExpiration (0 = no TTL). Returns false if src is absent. Must be called
-// under the write lock.
+// newExpiration (0 = no TTL). Returns false if src is absent. usedBytes is
+// re-charged because the key string component of the per-entry cost changes.
+// Must be called under the write lock.
 func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
 	ptr, ok := c.items[src]
 	if !ok {
@@ -251,22 +249,18 @@ func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
 		c.delete(dst)
 	}
 
+	c.usedBytes += int64(len(dst)) - int64(len(src))
+
 	c.items[dst] = ptr
-	if sz, ok := c.sizes[src]; ok {
-		c.sizes[dst] = sz
-		delete(c.sizes, src)
-	}
 	if !ptr.IsNil() {
 		c.keysBySlot[ptr] = dst
+		if newExpiration > 0 {
+			c.slabs.Meta(ptr).ExpirationNs = newExpiration
+		} else {
+			c.slabs.Meta(ptr).ExpirationNs = 0
+		}
 	}
 	delete(c.items, src)
-	delete(c.ttl, src)
-
-	if newExpiration > 0 {
-		c.ttl[dst] = newExpiration
-	} else {
-		delete(c.ttl, dst)
-	}
 
 	if c.OnMutate != nil {
 		c.OnMutate(src)
@@ -359,7 +353,7 @@ func (c *Cache) MaxBytes() int64 {
 func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration int64) error {
 	if c.maxBytes > 0 {
 		newSize := estimateSize(key, value)
-		oldSize := c.sizes[key]
+		oldSize := c.keySize(key)
 		delta := newSize - oldSize
 		if delta > 0 && c.usedBytes+delta > c.maxBytes {
 			switch c.evictionPolicy {
@@ -389,7 +383,7 @@ func (c *Cache) RawLoad(key string, value any, expiration int64) {
 func (c *Cache) RawSetPacked(ctx context.Context, key string, vt ValueType, buf []byte, expiration int64) error {
 	if c.maxBytes > 0 {
 		newSize := estimateBytesSize(key, buf)
-		oldSize := c.sizes[key]
+		oldSize := c.keySize(key)
 		delta := newSize - oldSize
 		if delta > 0 && c.usedBytes+delta > c.maxBytes {
 			switch c.evictionPolicy {
@@ -459,15 +453,14 @@ func (c *Cache) lruMoveToFront(ptr slab.SlabPointer) {
 }
 
 // setPackedInternal performs the raw packed-storage operation. The byte
-// payload is copied into a slab slot; ValueType + Encoding + LRU state
-// live in that slot's SlotMeta. Existing packed entries reuse the current
-// slot when the class capacity fits; otherwise old is freed, new is
-// allocated.
+// payload is copied into a slab slot; ValueType + Encoding + LRU state +
+// TTL live in that slot's SlotMeta. Existing packed entries reuse the
+// current slot when the class capacity fits; otherwise old is freed, new
+// is allocated.
 func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expiration int64, suppressMutate bool) {
 	newSize := estimateBytesSize(key, buf)
-	oldSize := c.sizes[key]
+	oldSize := c.keySize(key)
 	c.usedBytes += newSize - oldSize
-	c.sizes[key] = newSize
 
 	prevPtr, had := c.items[key]
 	var ptr slab.SlabPointer
@@ -496,13 +489,13 @@ func (c *Cache) setPackedInternal(key string, vt ValueType, buf []byte, expirati
 	meta := c.slabs.Meta(ptr)
 	meta.ValueType = uint8(vt)
 	meta.Encoding = uint8(EncPacked)
+	if expiration > 0 {
+		meta.ExpirationNs = expiration
+	} else {
+		meta.ExpirationNs = 0
+	}
 
 	c.items[key] = ptr
-	if expiration > 0 {
-		c.ttl[key] = expiration
-	} else {
-		delete(c.ttl, key)
-	}
 	if !suppressMutate && c.OnMutate != nil {
 		c.OnMutate(key)
 	}
@@ -529,9 +522,8 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	}
 
 	newSize := estimateSize(key, value)
-	oldSize := c.sizes[key]
+	oldSize := c.keySize(key)
 	c.usedBytes += newSize - oldSize
-	c.sizes[key] = newSize
 
 	// Free the old slot (if any) regardless of previous encoding, then
 	// allocate a new minimum-class slot for the native entry.
@@ -560,14 +552,14 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	meta := c.slabs.Meta(ptr)
 	meta.ValueType = uint8(valueType)
 	meta.Encoding = uint8(EncNative)
+	if expiration > 0 {
+		meta.ExpirationNs = expiration
+	} else {
+		meta.ExpirationNs = 0
+	}
 
 	c.nativeValues[ptr] = value
 	c.items[key] = ptr
-	if expiration > 0 {
-		c.ttl[key] = expiration
-	} else {
-		delete(c.ttl, key)
-	}
 	if !suppressMutate && c.OnMutate != nil {
 		c.OnMutate(key)
 	}
@@ -611,7 +603,7 @@ func (c *Cache) RawDelete(key string) {
 //
 // States:
 //
-//	ValuePresent   — key exists with a future expiration (ttl > 0)
+//	ValuePresent   — key exists with a future expiration (ExpirationNs > 0)
 //	ValueExpired   — key has a TTL that has already passed (caller should
 //	                 lazyExpire to clean it up)
 //	ValueNoExpire  — key exists but no TTL is set
@@ -621,35 +613,63 @@ func (c *Cache) RawDelete(key string) {
 // rely on ValueAbsent vs ValueNoExpire directly. Must be called while
 // holding the cache read lock.
 func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
-	if expiration, found := c.ttl[key]; found {
-		expirationTime := time.Unix(0, expiration)
-		if expirationTime.Before(time.Now()) {
-			return 0, ValueExpired
-		}
-		return time.Until(expirationTime), ValuePresent
+	ptr, exists := c.items[key]
+	if !exists {
+		return 0, ValueAbsent
 	}
-	if _, exists := c.items[key]; exists {
+	expiration := c.slabs.Meta(ptr).ExpirationNs
+	if expiration == 0 {
 		return 0, ValueNoExpire
 	}
-	return 0, ValueAbsent
+	expirationTime := time.Unix(0, expiration)
+	if expirationTime.Before(time.Now()) {
+		return 0, ValueExpired
+	}
+	return time.Until(expirationTime), ValuePresent
 }
 
 func (c *Cache) delete(key string) {
-	if ptr, ok := c.items[key]; ok && !ptr.IsNil() {
+	ptr, ok := c.items[key]
+	if !ok {
+		return
+	}
+	if !ptr.IsNil() {
+		c.usedBytes -= c.chargedSize(key, ptr)
 		c.lruRemove(ptr)
 		delete(c.keysBySlot, ptr)
 		delete(c.nativeValues, ptr)
 		c.slabs.Free(ptr)
 	}
-	if sz, ok := c.sizes[key]; ok {
-		c.usedBytes -= sz
-		delete(c.sizes, key)
-	}
-	delete(c.ttl, key)
 	delete(c.items, key)
 	if c.OnMutate != nil {
 		c.OnMutate(key)
 	}
+}
+
+// keySize returns the currently-charged byte cost for key, or 0 if absent.
+// Used by set paths to compute the delta against usedBytes without a
+// sidecar map. For packed entries the charge is entryOverhead + len(key) +
+// len(value); for native entries it's estimateSize(key, nativeValue).
+func (c *Cache) keySize(key string) int64 {
+	ptr, ok := c.items[key]
+	if !ok || ptr.IsNil() {
+		return 0
+	}
+	return c.chargedSize(key, ptr)
+}
+
+// chargedSize returns the byte cost to subtract from usedBytes when freeing
+// the slot identified by ptr (which maps to key). Packed entries use the
+// slab-held value length; native entries re-estimate from the sidecar.
+func (c *Cache) chargedSize(key string, ptr slab.SlabPointer) int64 {
+	enc := Encoding(c.slabs.Meta(ptr).Encoding)
+	if enc == EncPacked {
+		return int64(entryOverhead) + int64(len(key)) + int64(c.slabs.Size(ptr))
+	}
+	if v, ok := c.nativeValues[ptr]; ok {
+		return estimateSize(key, v)
+	}
+	return int64(entryOverhead) + int64(len(key))
 }
 
 // Range iterates over all cache entries. The callback receives a value-type
@@ -657,27 +677,29 @@ func (c *Cache) delete(key string) {
 // to stop iteration.
 func (c *Cache) Range(fn func(key string, entry Entry, expiration int64) bool) {
 	for key, ptr := range c.items {
-		if !fn(key, c.entryFromSlot(ptr), c.ttl[key]) {
+		if !fn(key, c.entryFromSlot(ptr), c.slabs.Meta(ptr).ExpirationNs) {
 			break
 		}
 	}
 }
 
 // RawTTL returns the raw expiration timestamp in nanoseconds for the given key.
-// Returns 0 if the key has no TTL set.
+// Returns 0 if the key has no TTL set or the key is absent.
 func (c *Cache) RawTTL(key string) int64 {
-	return c.ttl[key]
+	ptr, ok := c.items[key]
+	if !ok {
+		return 0
+	}
+	return c.slabs.Meta(ptr).ExpirationNs
 }
 
 func (c *Cache) Clear(ctx context.Context) {
 	logger.Info(ctx).Int("items", len(c.items)).Msg("cache cleared")
 	c.items = make(map[string]slab.SlabPointer)
 	c.nativeValues = make(map[slab.SlabPointer]any)
-	c.ttl = make(map[string]int64)
 	c.keysBySlot = make(map[slab.SlabPointer]string)
 	c.lruHead = slab.NilPointer
 	c.lruTail = slab.NilPointer
-	c.sizes = make(map[string]int64)
 	c.usedBytes = 0
 	// Drop the entire slab arena — faster than walking entries to Free().
 	c.slabs = slab.NewAllocator()
