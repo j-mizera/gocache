@@ -17,7 +17,7 @@ func readHash(cacheInst *cache.Cache, key string) (map[string]string, bool, bool
 	if entry.ValueType != cache.ObjTypeHash {
 		return nil, true, true
 	}
-	b := entry.Value
+	b, _ := entry.Value.([]byte)
 	decoded, err := cache.DecodeHash(b)
 	if err != nil {
 		return nil, true, true
@@ -224,7 +224,7 @@ func HandleHlen(cmdCtx *command.Context) command.Result {
 			return resp.ErrWrongType
 		}
 		// O(1) — just reads the count prefix.
-		n, err := cache.HashLen(entry.Value)
+		n, err := cache.HashLen(entry.Value.([]byte))
 		if err != nil {
 			return resp.ErrWrongType
 		}

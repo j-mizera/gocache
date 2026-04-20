@@ -16,7 +16,7 @@ func readSet(c *cache.Cache, key string) (map[string]struct{}, bool, bool) {
 	if entry.ValueType != cache.ObjTypeSet {
 		return nil, true, true
 	}
-	b := entry.Value
+	b, _ := entry.Value.([]byte)
 	decoded, err := cache.DecodeSet(b)
 	if err != nil {
 		return nil, true, true
@@ -202,7 +202,7 @@ func HandleSmembers(cmdCtx *command.Context) command.Result {
 		}
 		// SMEMBERS doesn't need the map — the encoded form already stores
 		// members sorted, so DecodeSetSlice skips the map allocation.
-		members, err := cache.DecodeSetSlice(entry.Value)
+		members, err := cache.DecodeSetSlice(entry.Value.([]byte))
 		if err != nil {
 			return resp.ErrWrongType
 		}
@@ -250,7 +250,7 @@ func HandleScard(cmdCtx *command.Context) command.Result {
 		if entry.ValueType != cache.ObjTypeSet {
 			return resp.ErrWrongType
 		}
-		n, err := cache.SetLen(entry.Value)
+		n, err := cache.SetLen(entry.Value.([]byte))
 		if err != nil {
 			return resp.ErrWrongType
 		}

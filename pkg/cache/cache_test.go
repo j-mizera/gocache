@@ -9,23 +9,14 @@ import (
 	"testing"
 )
 
-// rawSetString is a test convenience wrapper: the pre-Phase-1 RawSet(any)
-// helper is gone, every production write now flows through RawSetTyped with
-// an explicit ValueType. Tests that used to pass Go strings now pass []byte
-// and ObjTypeBytes via this helper so they stay readable.
-func rawSetString(t *testing.T, c *cache.Cache, key, value string, exp int64) error {
-	t.Helper()
-	return c.RawSetTyped(context.Background(), key, cache.ObjTypeBytes, []byte(value), exp)
-}
-
 func TestCache_Basic(t *testing.T) {
 	c := cache.New()
-	if err := rawSetString(t, c, "key", "value", 0); err != nil {
+	if err := c.RawSet(context.Background(), "key", "value", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	val, found := c.RawGet("key")
-	if !found || string(val.Value) != "value" {
+	if !found || val.Value != "value" {
 		t.Errorf("expected value, got %v", val)
 	}
 
@@ -41,7 +32,7 @@ func TestCache_Snapshot(t *testing.T) {
 	defer os.Remove(filename)
 
 	c := cache.New()
-	if err := rawSetString(t, c, "snap", "data", 0); err != nil {
+	if err := c.RawSet(context.Background(), "snap", "data", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -57,7 +48,7 @@ func TestCache_Snapshot(t *testing.T) {
 	}
 
 	val, found := cacheInstance2.RawGet("snap")
-	if !found || string(val.Value) != "data" {
+	if !found || val.Value != "data" {
 		t.Errorf("expected data, got %v", val)
 	}
 }
@@ -69,7 +60,7 @@ func TestCache_MemoryLimit_LRU(t *testing.T) {
 	// Fill it: each write evicts the previous LRU entry
 	for i := 0; i < 5; i++ {
 		key := string(rune('a' + i))
-		if err := rawSetString(t, c, key, "value", 0); err != nil {
+		if err := c.RawSet(context.Background(), key, "value", 0); err != nil {
 			t.Fatalf("unexpected OOM on LRU cache at key %s: %v", key, err)
 		}
 	}
@@ -90,12 +81,12 @@ func TestCache_MemoryLimit_NoEviction(t *testing.T) {
 	c := cache.NewWithBytes(200, cache.EvictionNone)
 
 	// First write should succeed (cache is empty)
-	if err := rawSetString(t, c, "first", "v", 0); err != nil {
+	if err := c.RawSet(context.Background(), "first", "v", 0); err != nil {
 		t.Fatalf("unexpected error on first write: %v", err)
 	}
 
 	// Subsequent writes that exceed the limit must return ErrOutOfMemory
-	err := rawSetString(t, c, "second", "v", 0)
+	err := c.RawSet(context.Background(), "second", "v", 0)
 	if !errors.Is(err, cache.ErrOutOfMemory) {
 		t.Errorf("expected ErrOutOfMemory, got %v", err)
 	}
@@ -108,7 +99,7 @@ func TestCache_MemoryTracking(t *testing.T) {
 		t.Errorf("expected 0 used bytes on empty cache, got %d", c.UsedBytes())
 	}
 
-	_ = rawSetString(t, c, "key", "hello", 0)
+	_ = c.RawSet(context.Background(), "key", "hello", 0)
 	usedAfterSet := c.UsedBytes()
 	if usedAfterSet <= 0 {
 		t.Errorf("expected usedBytes > 0 after set, got %d", usedAfterSet)
@@ -124,14 +115,14 @@ func TestCache_LRU_OrderOnGet(t *testing.T) {
 	// Cache that holds ~2 small entries; verify that GET refreshes LRU order
 	c := cache.NewWithBytes(300, cache.EvictionLRU)
 
-	_ = rawSetString(t, c, "a", "1", 0)
-	_ = rawSetString(t, c, "b", "2", 0) // b is now MRU, a is LRU
+	_ = c.RawSet(context.Background(), "a", "1", 0)
+	_ = c.RawSet(context.Background(), "b", "2", 0) // b is now MRU, a is LRU
 
 	// Access "a" to make it MRU; "b" becomes LRU
 	c.RawGet("a")
 
 	// Writing a new key should evict "b" (now LRU), not "a"
-	_ = rawSetString(t, c, "c", "3", 0)
+	_ = c.RawSet(context.Background(), "c", "3", 0)
 
 	_, aFound := c.RawGet("a")
 	_, bFound := c.RawGet("b")
@@ -153,7 +144,7 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	c := cache.New()
 	for i := 0; i < 10; i++ {
 		key := "key" + string(rune('a'+i))
-		if err := rawSetString(t, c, key, "somevalue", 0); err != nil {
+		if err := c.RawSet(context.Background(), key, "somevalue", 0); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
@@ -168,10 +159,12 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 
 	// Lower the limit to something tiny — should trigger eviction.
 	c.SetMemoryLimit(context.Background(), 1, cache.EvictionLRU) // 1 MB — still bigger than our data
+	// Use a byte-level limit via the internal path: set maxBytes directly by
+	// creating a new cache with bytes limit to test eviction trigger.
 	small := cache.NewWithBytes(200, cache.EvictionLRU)
 	for i := 0; i < 5; i++ {
 		key := "k" + string(rune('a'+i))
-		_ = rawSetString(t, small, key, "val", 0)
+		_ = small.RawSet(context.Background(), key, "val", 0)
 	}
 	before := small.Len()
 	if before == 0 {
@@ -180,9 +173,11 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 
 	// Lower to 1 byte — must evict down.
 	small.SetMemoryLimit(context.Background(), 0, cache.EvictionLRU) // disable limit first
+	// Manually set a very small byte limit. Since SetMemoryLimit takes MB,
+	// we use NewWithBytes + re-populate to test the eviction path.
 	tiny := cache.NewWithBytes(1, cache.EvictionLRU)
 	for i := 0; i < 5; i++ {
-		_ = rawSetString(t, tiny, "k"+string(rune('a'+i)), "val", 0)
+		_ = tiny.RawSet(context.Background(), "k"+string(rune('a'+i)), "val", 0)
 	}
 	// Only one key should survive (each entry > 128 bytes overhead).
 	if tiny.Len() > 1 {
@@ -193,7 +188,7 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 func TestCache_LargeEntryExceedsMaxBytes(t *testing.T) {
 	// A single entry larger than maxBytes should be rejected with noeviction.
 	c := cache.NewWithBytes(1, cache.EvictionNone)
-	err := rawSetString(t, c, "big", "this is way more than 1 byte of data", 0)
+	err := c.RawSet(context.Background(), "big", "this is way more than 1 byte of data", 0)
 	if !errors.Is(err, cache.ErrOutOfMemory) {
 		t.Errorf("expected ErrOutOfMemory for oversized entry, got %v", err)
 	}

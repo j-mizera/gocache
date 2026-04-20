@@ -74,7 +74,7 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 
 		cmdCtx.Cache.RawDelete(dst)
 		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), dst, entry.ValueType, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
 			return err
 		}
 		return "OK"
@@ -110,7 +110,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 		}
 
 		cmdCtx.Cache.RawDelete(src)
-		if err := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), dst, entry.ValueType, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), dst, entry.Value, expiration); err != nil {
 			return err
 		}
 		return 1
@@ -262,7 +262,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
-				b := entry.Value
+				b, _ := entry.Value.([]byte)
 				if len(b) <= embstrMaxLen {
 					return "embstr"
 				}

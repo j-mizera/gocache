@@ -13,19 +13,16 @@ import (
 	"gocache/pkg/cache"
 )
 
-// SnapshotEntry is the on-disk form of a cache entry. Post-Phase-1 of the
-// slab-allocator plan every value is a byte-encoded payload; Value is
-// []byte, and ValueType tells the loader which encoding (string / list /
-// hash / set / zset) produced those bytes.
-//
-// Snapshots written before Phase 1 embedded Go-native collection types
-// (map[string]string, []string, *SortedSet) via gob's any field. Those
-// snapshots will fail to decode into this struct — the fix is regenerate,
-// not auto-migrate. Documented in the Phase 1 session note.
+func init() {
+	gob.Register(map[string]string{})
+	gob.Register(map[string]struct{}{})
+	gob.Register([]string{})
+}
+
 type SnapshotEntry struct {
 	Key        string
 	ValueType  cache.ValueType
-	Value      []byte
+	Value      any
 	Expiration int64
 }
 
@@ -127,7 +124,7 @@ func LoadSnapshot(ctx context.Context, filename string, cacheInstance *cache.Cac
 			logger.Trace(ctx).Str("key", e.Key).Msg("skipped expired entry during load")
 			continue
 		}
-		cacheInstance.RawLoad(e.Key, e.ValueType, e.Value, e.Expiration)
+		cacheInstance.RawLoad(e.Key, e.Value, e.Expiration)
 		loaded++
 	}
 
