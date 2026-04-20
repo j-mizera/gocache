@@ -9,16 +9,46 @@ import (
 	"time"
 )
 
+// mustEncode* helpers wrap the encoding-layer calls whose error is
+// impossible for the small inputs used in these tests — keeps the test
+// bodies readable.
+func mustEncodeList(t *testing.T, items []string) []byte {
+	t.Helper()
+	b, err := cache.EncodeList(items)
+	if err != nil {
+		t.Fatalf("EncodeList: %v", err)
+	}
+	return b
+}
+
+func mustEncodeHash(t *testing.T, m map[string]string) []byte {
+	t.Helper()
+	b, err := cache.EncodeHash(m)
+	if err != nil {
+		t.Fatalf("EncodeHash: %v", err)
+	}
+	return b
+}
+
+func mustEncodeSet(t *testing.T, m map[string]struct{}) []byte {
+	t.Helper()
+	b, err := cache.EncodeSet(m)
+	if err != nil {
+		t.Fatalf("EncodeSet: %v", err)
+	}
+	return b
+}
+
 func TestSaveAndLoadRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "snapshot.dat")
 
 	c := cache.New()
 	c.Lock()
-	_ = c.RawSet(context.Background(), "str", "hello", 0)
-	_ = c.RawSet(context.Background(), "list", []string{"a", "b", "c"}, 0)
-	_ = c.RawSet(context.Background(), "hash", map[string]string{"k": "v"}, 0)
-	_ = c.RawSet(context.Background(), "set", map[string]struct{}{"x": {}, "y": {}}, 0)
+	_ = c.RawSetTyped(context.Background(), "str", cache.ObjTypeBytes, []byte("hello"), 0)
+	_ = c.RawSetTyped(context.Background(), "list", cache.ObjTypeList, mustEncodeList(t, []string{"a", "b", "c"}), 0)
+	_ = c.RawSetTyped(context.Background(), "hash", cache.ObjTypeHash, mustEncodeHash(t, map[string]string{"k": "v"}), 0)
+	_ = c.RawSetTyped(context.Background(), "set", cache.ObjTypeSet, mustEncodeSet(t, map[string]struct{}{"x": {}, "y": {}}), 0)
 	c.Unlock()
 
 	if err := SaveSnapshot(context.Background(), file, c); err != nil {
@@ -34,7 +64,7 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 	defer c2.Unlock()
 
 	entry, ok := c2.RawGet("str")
-	if !ok || entry.Value != "hello" {
+	if !ok || string(entry.Value) != "hello" {
 		t.Errorf("str: expected 'hello', got %v", entry)
 	}
 
@@ -42,7 +72,10 @@ func TestSaveAndLoadRoundtrip(t *testing.T) {
 	if !ok {
 		t.Fatal("list not found")
 	}
-	list, _ := entry.Value.([]string)
+	list, err := cache.DecodeList(entry.Value)
+	if err != nil {
+		t.Fatalf("DecodeList: %v", err)
+	}
 	if len(list) != 3 {
 		t.Errorf("list: expected 3 items, got %d", len(list))
 	}
@@ -67,8 +100,8 @@ func TestLoadSnapshot_SkipsExpired(t *testing.T) {
 	c := cache.New()
 	c.Lock()
 	// Set a key that's already expired.
-	_ = c.RawSet(context.Background(), "expired", "val", time.Now().Add(-time.Hour).UnixNano())
-	_ = c.RawSet(context.Background(), "alive", "val", 0)
+	_ = c.RawSetTyped(context.Background(), "expired", cache.ObjTypeBytes, []byte("val"), time.Now().Add(-time.Hour).UnixNano())
+	_ = c.RawSetTyped(context.Background(), "alive", cache.ObjTypeBytes, []byte("val"), 0)
 	c.Unlock()
 
 	if err := SaveSnapshot(context.Background(), file, c); err != nil {

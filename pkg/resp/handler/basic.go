@@ -122,10 +122,10 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 
 		existing := 0.0
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
-			b, ok := entry.Value.([]byte)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				return resp.ErrWrongType
 			}
+			b := entry.Value
 			existing, err = strconv.ParseFloat(string(b), 64)
 			if err != nil {
 				return resp.ErrNotFloat
@@ -135,7 +135,7 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 		newVal := existing + incr
 		newStr := strconv.FormatFloat(newVal, 'f', -1, 64)
 		rawTTL := cmdCtx.Cache.RawTTL(key)
-		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(newStr), rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeBytes, []byte(newStr), rawTTL); setErr != nil {
 			return setErr
 		}
 		return newStr
@@ -153,10 +153,10 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 		var existing []byte
 		rawTTL := int64(0)
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
-			b, ok := entry.Value.([]byte)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				return resp.ErrWrongType
 			}
+			b := entry.Value
 			existing = b
 			rawTTL = cmdCtx.Cache.RawTTL(key)
 		}
@@ -164,7 +164,7 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 		newBytes := make([]byte, len(existing)+len(suffix))
 		copy(newBytes, existing)
 		copy(newBytes[len(existing):], suffix)
-		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newBytes, rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeBytes, newBytes, rawTTL); setErr != nil {
 			return setErr
 		}
 		return int64(len(newBytes))
@@ -183,11 +183,10 @@ func HandleStrlen(cmdCtx *command.Context) command.Result {
 		if !found {
 			return int64(0)
 		}
-		b, ok := entry.Value.([]byte)
-		if !ok {
+		if entry.ValueType != cache.ObjTypeBytes {
 			return resp.ErrWrongType
 		}
-		return int64(len(b))
+		return int64(len(entry.Value))
 	})
 }
 
@@ -206,12 +205,11 @@ func HandleMget(cmdCtx *command.Context) command.Result {
 				result[i] = nil
 				continue
 			}
-			b, ok := entry.Value.([]byte)
-			if !ok {
+			if entry.ValueType != cache.ObjTypeBytes {
 				result[i] = nil
 				continue
 			}
-			result[i] = b
+			result[i] = entry.Value
 		}
 		return result
 	})
@@ -224,7 +222,7 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 	}
 	return command.Dispatch(cmdCtx, func() any {
 		for i := 0; i < len(cmdCtx.Args); i += 2 {
-			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], []byte(cmdCtx.Args[i+1]), 0); setErr != nil {
+			if setErr := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), cmdCtx.Args[i], cache.ObjTypeBytes, []byte(cmdCtx.Args[i+1]), 0); setErr != nil {
 				return setErr
 			}
 		}
@@ -240,11 +238,10 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 	current := int64(0)
 	rawTTL := int64(0)
 	if entry, found := cmdCtx.Cache.RawGet(key); found {
-		b, ok := entry.Value.([]byte)
-		if !ok {
+		if entry.ValueType != cache.ObjTypeBytes {
 			return resp.ErrWrongType
 		}
-		parsed, err := strconv.ParseInt(string(b), 10, 64)
+		parsed, err := strconv.ParseInt(string(entry.Value), 10, 64)
 		if err != nil {
 			return resp.ErrNotInteger
 		}
@@ -254,7 +251,7 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 
 	newVal := current + delta
 	newBytes := strconv.AppendInt(make([]byte, 0, 20), newVal, 10)
-	if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newBytes, rawTTL); setErr != nil {
+	if setErr := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeBytes, newBytes, rawTTL); setErr != nil {
 		return setErr
 	}
 	return newVal
@@ -323,7 +320,7 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 			exp = cmdCtx.Cache.RawTTL(key)
 		}
 
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(val), exp); err != nil {
+		if err := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeBytes, []byte(val), exp); err != nil {
 			return err
 		}
 		return "OK"
@@ -343,7 +340,7 @@ func HandleSetnx(cmdCtx *command.Context) command.Result {
 				return 0
 			}
 		}
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(val), 0); err != nil {
+		if err := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, cache.ObjTypeBytes, []byte(val), 0); err != nil {
 			return err
 		}
 		return 1
@@ -367,7 +364,7 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		expiration := time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, entry.ValueType, entry.Value, expiration); err != nil {
 			return err
 		}
 		return 1
@@ -466,7 +463,7 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 		if ttl > 0 {
 			expiration = time.Now().Add(ttl).UnixNano()
 		}
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, entry.Value, expiration); err != nil {
+		if err := cmdCtx.Cache.RawSetTyped(cmdCtx.Context(), key, entry.ValueType, entry.Value, expiration); err != nil {
 			return err
 		}
 		return 1

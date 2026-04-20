@@ -58,9 +58,14 @@ const (
 	ObjTypeSortedSet
 )
 
+// Entry is the stored form of every cached value after Phase 1 of the
+// slab-allocator plan. Value always holds a byte-encoded payload; the shape
+// depends on ValueType (see encoding.go for the layouts). The on-storage
+// size is exactly `entryOverhead + len(key) + len(Value)` — estimateSize
+// is gone.
 type Entry struct {
 	ValueType    ValueType `json:"value_type"`
-	Value        any       `json:"value"`
+	Value        []byte    `json:"value"`
 	LastAccessed time.Time `json:"-"`
 }
 
@@ -73,7 +78,6 @@ type Cache struct {
 	evictionPolicy EvictionPolicy
 	lruList        *list.List // front = most recently used
 	lruMap         map[string]*list.Element
-	sizes          map[string]int64
 	OnMutate       func(key string) // called after a key is set or deleted (for WATCH)
 	OnMutateAll    func()           // called when all keys are invalidated (FLUSHDB)
 }
@@ -103,8 +107,14 @@ func newCache(maxBytes int64, policy EvictionPolicy) *Cache {
 		evictionPolicy: policy,
 		lruList:        list.New(),
 		lruMap:         make(map[string]*list.Element),
-		sizes:          make(map[string]int64),
 	}
+}
+
+// entrySize returns the storage cost (header overhead + key + encoded value)
+// for a byte-encoded entry. Exact: this replaces the reflective estimateSize
+// of the pre-Phase-1 implementation.
+func entrySize(key string, value []byte) int64 {
+	return int64(entryOverhead) + int64(len(key)) + int64(len(value))
 }
 
 func (c *Cache) Lock() {
@@ -168,44 +178,15 @@ func (c *Cache) MaxBytes() int64 {
 	return c.maxBytes
 }
 
-// RawSet stores a key with the given value and expiration, enforcing the
-// memory limit. It evicts LRU entries as needed (EvictionLRU) or returns
-// ErrOutOfMemory (EvictionNone) when the limit would be exceeded.
-// Must be called while holding the cache write lock. ctx carries the
-// operation (command, cleanup, etc.) for log correlation.
-//
-// The ValueType is inferred from the Go type of value — legacy callers
-// using Go-native collection shapes still work. Byte-encoded collection
-// callers (list/hash/set/zset after the Phase 1 migration) must use
-// RawSetTyped so the type is carried explicitly.
-func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration int64) error {
-	if c.maxBytes > 0 {
-		newSize := estimateSize(key, value)
-		oldSize := c.sizes[key]
-		delta := newSize - oldSize
-		if delta > 0 && c.usedBytes+delta > c.maxBytes {
-			switch c.evictionPolicy {
-			case EvictionLRU:
-				c.evictLRU(ctx, delta)
-			case EvictionNone:
-				logger.Warn(ctx).Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
-				return ErrOutOfMemory
-			}
-		}
-	}
-	c.setInternal(key, value, expiration, false)
-	return nil
-}
-
-// RawSetTyped stores a byte-encoded value with an explicit ValueType,
-// bypassing RawSet's Go-type switch. This is the canonical write path for
-// collection handlers after Phase 1 migrates them to flat byte encodings —
-// []byte alone can't distinguish ObjTypeBytes from ObjTypeList, so the
-// caller must carry the discriminator.
+// RawSetTyped stores a byte-encoded value under the given ValueType,
+// enforcing the memory limit. It evicts LRU entries as needed
+// (EvictionLRU) or returns ErrOutOfMemory (EvictionNone) when the limit
+// would be exceeded. Must be called while holding the cache write lock.
+// ctx carries the operation (command, cleanup, etc.) for log correlation.
 func (c *Cache) RawSetTyped(ctx context.Context, key string, vt ValueType, value []byte, expiration int64) error {
 	if c.maxBytes > 0 {
-		newSize := int64(entryOverhead) + int64(len(key)) + int64(len(value))
-		oldSize := c.sizes[key]
+		newSize := entrySize(key, value)
+		oldSize := c.oldEntrySize(key)
 		delta := newSize - oldSize
 		if delta > 0 && c.usedBytes+delta > c.maxBytes {
 			switch c.evictionPolicy {
@@ -217,59 +198,26 @@ func (c *Cache) RawSetTyped(ctx context.Context, key string, vt ValueType, value
 			}
 		}
 	}
-	c.setInternalTyped(key, vt, value, expiration, false)
+	c.setInternal(key, vt, value, expiration, false)
 	return nil
 }
 
-// RawLoad stores a key-value pair, bypassing the memory limit check.
-// Intended for snapshot loading only. Still maintains LRU and size tracking.
+// RawLoad stores a byte-encoded entry, bypassing the memory limit check.
+// Intended for snapshot loading only. Still maintains LRU and accounting.
 // Must be called while holding the cache write lock. The OnMutate callback
-// is suppressed since this is a bulk load, not a client mutation — the
-// previous implementation stashed and restored c.OnMutate around the call,
-// which left the callback nil if setInternal ever panicked.
-func (c *Cache) RawLoad(key string, value any, expiration int64) {
-	c.setInternal(key, value, expiration, true)
+// is suppressed since this is a bulk load, not a client mutation.
+func (c *Cache) RawLoad(key string, vt ValueType, value []byte, expiration int64) {
+	c.setInternal(key, vt, value, expiration, true)
 }
 
-// setInternal performs the raw storage operation, updating LRU and size tracking.
-// When suppressMutate is true the OnMutate callback is not invoked (used by
-// snapshot loads that bulk-populate without triggering WATCH dirty marks).
-func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
-	newSize := estimateSize(key, value)
-	valueType := ObjTypeBytes
-	switch value.(type) {
-	case []byte, string:
-		// string kept for compatibility with un-migrated types; []byte is the
-		// new canonical storage for ObjTypeBytes after the Phase 1 migration.
-		valueType = ObjTypeBytes
-	case []string:
-		valueType = ObjTypeList
-	case map[string]string:
-		valueType = ObjTypeHash
-	case map[string]struct{}:
-		valueType = ObjTypeSet
-	case *SortedSet:
-		valueType = ObjTypeSortedSet
-	}
-	c.writeEntry(key, valueType, value, newSize, expiration, suppressMutate)
-}
-
-// setInternalTyped is the byte-encoded equivalent of setInternal used by
-// RawSetTyped. The caller provides the ValueType explicitly, so no type
-// switch is needed and the size is exact (len(value)) rather than
-// estimated.
-func (c *Cache) setInternalTyped(key string, vt ValueType, value []byte, expiration int64, suppressMutate bool) {
-	newSize := int64(entryOverhead) + int64(len(key)) + int64(len(value))
-	c.writeEntry(key, vt, value, newSize, expiration, suppressMutate)
-}
-
-// writeEntry is the shared tail of setInternal / setInternalTyped: updates
-// bookkeeping (sizes, LRU), installs the entry, and fires the OnMutate
-// callback. Callers are responsible for pre-computing size + value-type.
-func (c *Cache) writeEntry(key string, vt ValueType, value any, newSize int64, expiration int64, suppressMutate bool) {
-	oldSize := c.sizes[key]
+// setInternal installs a byte-encoded entry under the given ValueType,
+// updating LRU and usedBytes bookkeeping. When suppressMutate is true the
+// OnMutate callback is not invoked (used by snapshot loads that bulk-
+// populate without triggering WATCH dirty marks).
+func (c *Cache) setInternal(key string, vt ValueType, value []byte, expiration int64, suppressMutate bool) {
+	newSize := entrySize(key, value)
+	oldSize := c.oldEntrySize(key)
 	c.usedBytes += newSize - oldSize
-	c.sizes[key] = newSize
 
 	if elem, ok := c.lruMap[key]; ok {
 		c.lruList.MoveToFront(elem)
@@ -291,6 +239,15 @@ func (c *Cache) writeEntry(key string, vt ValueType, value any, newSize int64, e
 	if !suppressMutate && c.OnMutate != nil {
 		c.OnMutate(key)
 	}
+}
+
+// oldEntrySize returns the storage cost of whatever is currently at key, or
+// 0 if the key is unset. Used to compute the delta during a replace.
+func (c *Cache) oldEntrySize(key string) int64 {
+	if existing, ok := c.items[key]; ok {
+		return entrySize(key, existing.Value)
+	}
+	return 0
 }
 
 // evictLRU removes least recently used entries until delta bytes can be
@@ -352,9 +309,8 @@ func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
 }
 
 func (c *Cache) delete(key string) {
-	if sz, ok := c.sizes[key]; ok {
-		c.usedBytes -= sz
-		delete(c.sizes, key)
+	if existing, ok := c.items[key]; ok {
+		c.usedBytes -= entrySize(key, existing.Value)
 	}
 	if elem, ok := c.lruMap[key]; ok {
 		c.lruList.Remove(elem)
@@ -387,39 +343,8 @@ func (c *Cache) Clear(ctx context.Context) {
 	c.ttl = make(map[string]int64)
 	c.lruList.Init()
 	c.lruMap = make(map[string]*list.Element)
-	c.sizes = make(map[string]int64)
 	c.usedBytes = 0
 	if c.OnMutateAll != nil {
 		c.OnMutateAll()
 	}
-}
-
-// estimateSize returns an approximate memory usage in bytes for a key-value pair.
-// Note: []byte values are charged their exact byte length — this is the
-// target invariant for all types once Phase 1 completes; the string / []string
-// / map / *SortedSet branches remain for the handlers that haven't migrated
-// to byte-encoded values yet.
-func estimateSize(key string, value any) int64 {
-	size := int64(entryOverhead) + int64(len(key))
-	switch v := value.(type) {
-	case []byte:
-		size += int64(len(v))
-	case string:
-		size += int64(len(v))
-	case []string:
-		for _, s := range v {
-			size += int64(len(s)) + 16
-		}
-	case map[string]string:
-		for k, val := range v {
-			size += int64(len(k)) + int64(len(val)) + 32
-		}
-	case map[string]struct{}:
-		for k := range v {
-			size += int64(len(k)) + 16
-		}
-	case *SortedSet:
-		size += v.EstimateSize()
-	}
-	return size
 }

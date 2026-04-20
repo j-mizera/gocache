@@ -27,7 +27,7 @@ func readList(cacheInst *cache.Cache, key string) (items []string, found bool, w
 	if entry.ValueType != cache.ObjTypeList {
 		return nil, true, true
 	}
-	b, _ := entry.Value.([]byte)
+	b := entry.Value
 	decoded, err := cache.DecodeList(b)
 	if err != nil {
 		// Decoder failure on a live entry is a server-side invariant break —
@@ -156,7 +156,7 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 			return resp.ErrWrongType
 		}
 		// O(1) — just reads the count prefix.
-		n, err := cache.ListLen(entry.Value.([]byte))
+		n, err := cache.ListLen(entry.Value)
 		if err != nil {
 			return resp.ErrWrongType
 		}

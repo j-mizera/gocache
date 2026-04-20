@@ -22,7 +22,7 @@ func readZSet(c *cache.Cache, key string) (*cache.SortedSet, bool, bool) {
 	if entry.ValueType != cache.ObjTypeSortedSet {
 		return nil, true, true
 	}
-	b, _ := entry.Value.([]byte)
+	b := entry.Value
 	z, err := cache.DecodeZSet(b)
 	if err != nil {
 		return nil, true, true
@@ -40,7 +40,7 @@ func readZSetPairs(c *cache.Cache, key string) ([]cache.ScoredMember, bool, bool
 	if entry.ValueType != cache.ObjTypeSortedSet {
 		return nil, true, true
 	}
-	b, _ := entry.Value.([]byte)
+	b := entry.Value
 	pairs, err := cache.DecodeZSetPairs(b)
 	if err != nil {
 		return nil, true, true
@@ -166,7 +166,7 @@ func HandleZcard(cmdCtx *command.Context) command.Result {
 		if entry.ValueType != cache.ObjTypeSortedSet {
 			return resp.ErrWrongType
 		}
-		n, err := cache.ZSetLen(entry.Value.([]byte))
+		n, err := cache.ZSetLen(entry.Value)
 		if err != nil {
 			return resp.ErrWrongType
 		}

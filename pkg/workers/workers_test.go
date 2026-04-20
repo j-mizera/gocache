@@ -24,7 +24,7 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 
 	// Add some data.
 	e.Dispatch(context.Background(), func() {
-		_ = c.RawSet(context.Background(), "key", "val", 0)
+		_ = c.RawSetTyped(context.Background(), "key", cache.ObjTypeBytes, []byte("val"), 0)
 	})
 
 	dir := t.TempDir()
@@ -47,8 +47,8 @@ func TestCleanupWorker_RemovesExpired(t *testing.T) {
 
 	// Add an already-expired key.
 	e.Dispatch(context.Background(), func() {
-		_ = c.RawSet(context.Background(), "expired", "val", time.Now().Add(-time.Hour).UnixNano())
-		_ = c.RawSet(context.Background(), "alive", "val", 0)
+		_ = c.RawSetTyped(context.Background(), "expired", cache.ObjTypeBytes, []byte("val"), time.Now().Add(-time.Hour).UnixNano())
+		_ = c.RawSetTyped(context.Background(), "alive", cache.ObjTypeBytes, []byte("val"), 0)
 	})
 
 	w := NewCleanupWorker(c, e, 50*time.Millisecond)
@@ -103,7 +103,7 @@ func TestWorker_UpdateInterval(t *testing.T) {
 func TestSnapshotWorker_UpdateFile(t *testing.T) {
 	c, e := setup(t)
 	e.Dispatch(context.Background(), func() {
-		_ = c.RawSet(context.Background(), "k", "v", 0)
+		_ = c.RawSetTyped(context.Background(), "k", cache.ObjTypeBytes, []byte("v"), 0)
 	})
 
 	dir := t.TempDir()
