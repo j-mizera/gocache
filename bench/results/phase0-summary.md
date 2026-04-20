@@ -20,11 +20,21 @@ Every RESP write is now **zero-allocation** in steady state. `strconv.Append*` r
 
 ## Read path (bulk-string scratch only)
 
-| Benchmark         | Baseline              | Pooled                  | Alloc reduction |
-|-------------------|----------------------:|------------------------:|----------------:|
-| Read_BulkString   |  801 ns 4 336 B/7     |  718 ns 4 276 B/6       | 1 alloc / call  |
-| Read_Array        | 1 679 ns 5 264 B/45   | 1 720 ns 5 213 B/35     | 10 allocs / call|
-| Read_ArrayLarge   | 108 920 ns 117 000 B/4005 | 112 024 ns 102 174 B/3005 | 1 000 allocs / call |
+After the go-reviewer pass the read benchmarks hoist `NewReader` out of the
+timed loop — the previous numbers were inflated by a per-iteration
+`bufio.NewReader` allocation that isn't representative of production where
+readers are per-connection.
+
+| Benchmark         | Baseline (v1)         | Pooled (v1)             | Pooled (reviewed) |
+|-------------------|----------------------:|------------------------:|------------------:|
+| Read_BulkString   |  801 ns 4 336 B/7     |  718 ns 4 276 B/6       | **103 ns 72 B/3** |
+| Read_Array        | 1 679 ns 5 264 B/45   | 1 720 ns 5 213 B/35     | **1 180 ns 1 009 B/32** |
+| Read_ArrayLarge   | 108 920 ns 117 000 B/4005 | 112 024 ns 102 174 B/3005 | **108 710 ns 97 968 B/3002** |
+
+The reviewed Read_ArrayLarge allocs = 3002 breaks down as: ~1 `string(buf)` per
+bulk (×1000) + per-element `[]Value` slice in the recursive `readArray` +
+miscellaneous. The bulk-scratch pool savings (1000 allocs vs the v1 baseline)
+are still intact, now cleanly measurable.
 
 Each bulk string saves one `make([]byte, n)` allocation (the scratch that feeds the `string(buf)` conversion). The unavoidable remainders:
 
@@ -40,8 +50,8 @@ Pipelined-write delivers **100%** allocation reduction. Full RESP round-trip (wr
 
 ## What changed in code
 
-- `pkg/resp/pool.go` (new) — `scratchBufPool` + `bulkScratchPool`, capped at 64 KiB to prevent idle-worker memory bloat.
-- `pkg/resp/resp.go` — `marshal*` methods (return `[]byte`) replaced with `append*` funcs (append to caller's slice). Single recursion point is `appendValue(b, v) ([]byte, error)`. `Writer.Write` acquires one pooled buffer, calls `appendValue`, flushes, releases. Bulk-string + bulk-error read paths acquire from the bulk pool.
-- `pkg/resp/bench_test.go` (new) — 8 benchmarks covering single/array/map/pipelined write + single/array read paths.
+- `pkg/resp/pool.go` (new) — `scratchBufPool` + `bulkScratchPool`, capped at **512 KiB** to keep the pool effective for large LRANGE replies and multi-KB SET values; reviewer-bumped from an initial 64 KiB that cut off at the p90+ reply size.
+- `pkg/resp/resp.go` — `marshal*` methods (return `[]byte`) replaced with `append*` funcs (append to caller's slice). Single recursion point is `appendValue(b, v) ([]byte, error)`. `Writer.Write` acquires one pooled buffer, calls `appendValue`, flushes, resets-then-releases (defer resets `len=0` before pool Put to keep the slot safe against future zero-copy paths). Bulk-string + bulk-error read paths acquire from the bulk pool.
+- `pkg/resp/bench_test.go` (new) — 8 benchmarks covering single/array/map/pipelined write + single/array read paths. Read benchmarks use a `multiReader` to keep one `bufio.Reader` alive across iterations so allocation counts reflect the RESP parser, not the reader constructor.
 
-Public API unchanged.
+Public API unchanged. `appendArray` now returns an error on unknown-type inner values, matching `appendMap` / `appendSet`; catches wire-format corruption that the old silent-drop behavior would have emitted.

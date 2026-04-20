@@ -112,17 +112,38 @@ func buildArrayPayload(items []string) []byte {
 	return b.Bytes()
 }
 
+// multiReader repeats a fixed payload indefinitely. Lets Read benchmarks hoist
+// Reader construction out of the timed loop while still giving each iteration
+// fresh bytes to parse — otherwise the bufio.Reader would hit EOF after the
+// first parse.
+type multiReader struct {
+	payload []byte
+	pos     int
+}
+
+func (m *multiReader) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		if m.pos >= len(m.payload) {
+			m.pos = 0
+		}
+		c := copy(p[n:], m.payload[m.pos:])
+		m.pos += c
+		n += c
+	}
+	return n, nil
+}
+
 // BenchmarkRead_BulkString parses a bulk string (e.g. SET value payload).
 func BenchmarkRead_BulkString(b *testing.B) {
 	payload := buildBulkStringPayload(strings.Repeat("x", 64))
-	src := bytes.NewReader(nil)
-	r := NewReader(src)
+	r := NewReader(&multiReader{payload: payload})
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		src.Reset(payload)
-		r = NewReader(src)
-		_, _ = r.Read()
+		if _, err := r.Read(); err != nil {
+			b.Fatalf("read: %v", err)
+		}
 	}
 }
 
@@ -133,14 +154,13 @@ func BenchmarkRead_Array(b *testing.B) {
 		items[i] = "item" + strconv.Itoa(i)
 	}
 	payload := buildArrayPayload(items)
-	src := bytes.NewReader(nil)
-	var r *Reader
+	r := NewReader(&multiReader{payload: payload})
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		src.Reset(payload)
-		r = NewReader(src)
-		_, _ = r.Read()
+		if _, err := r.Read(); err != nil {
+			b.Fatalf("read: %v", err)
+		}
 	}
 }
 
@@ -151,13 +171,12 @@ func BenchmarkRead_ArrayLarge(b *testing.B) {
 		items[i] = "item" + strconv.Itoa(i)
 	}
 	payload := buildArrayPayload(items)
-	src := bytes.NewReader(nil)
-	var r *Reader
+	r := NewReader(&multiReader{payload: payload})
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		src.Reset(payload)
-		r = NewReader(src)
-		_, _ = r.Read()
+		if _, err := r.Read(); err != nil {
+			b.Fatalf("read: %v", err)
+		}
 	}
 }

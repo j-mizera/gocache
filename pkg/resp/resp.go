@@ -348,10 +348,17 @@ func (w *Writer) Flush() error {
 
 func (w *Writer) Write(v Value) error {
 	bufp := getScratch()
-	defer putScratch(bufp)
+	// Reset + release after every exit path. The buffer is fully consumed by
+	// the synchronous w.writer.Write below — holding the scratch slot as
+	// len=0 (rather than handing it back populated) keeps the pool slot safe
+	// against any future zero-copy path that might hold a reference to buf.
+	defer func() {
+		*bufp = (*bufp)[:0]
+		putScratch(bufp)
+	}()
 
 	buf, err := appendValue((*bufp)[:0], v)
-	*bufp = buf
+	*bufp = buf // retain any grown capacity so a subsequent Write can reuse it
 	if err != nil {
 		return err
 	}
@@ -370,7 +377,7 @@ func (w *Writer) Write(v Value) error {
 func appendValue(b []byte, v Value) ([]byte, error) {
 	switch v.Type {
 	case Array:
-		return appendArray(b, v), nil
+		return appendArray(b, v)
 	case BulkString:
 		return appendBulkString(b, v), nil
 	case SimpleString:
@@ -396,15 +403,18 @@ func appendValue(b []byte, v Value) ([]byte, error) {
 	}
 }
 
-func appendArray(b []byte, v Value) []byte {
+func appendArray(b []byte, v Value) ([]byte, error) {
 	b = append(b, Array)
 	b = strconv.AppendInt(b, int64(len(v.Array)), 10)
 	b = append(b, '\r', '\n')
 	for i := range v.Array {
-		// Children of an Array are always well-formed; ignore the error.
-		b, _ = appendValue(b, v.Array[i])
+		var err error
+		b, err = appendValue(b, v.Array[i])
+		if err != nil {
+			return b, err
+		}
 	}
-	return b
+	return b, nil
 }
 
 func appendMap(b []byte, v Value) ([]byte, error) {

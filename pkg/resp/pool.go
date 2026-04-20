@@ -7,14 +7,15 @@ import "sync"
 // goroutines. Buffers over the cap are released to the GC instead of pooled.
 const (
 	// maxPooledScratchCap bounds the write-path scratch buffer we keep in the
-	// pool. 64 KiB covers >99% of realistic replies — anything bigger is
-	// expected to be rare enough that re-allocation is cheaper than memory
-	// bloat per pool slot.
-	maxPooledScratchCap = 64 * 1024
+	// pool. 512 KiB covers LRANGE of ~5–10k items with realistic value sizes;
+	// above this the workload is far from typical and re-allocation is
+	// cheaper than per-worker memory bloat.
+	maxPooledScratchCap = 512 * 1024
 
-	// maxPooledBulkCap bounds the read-path bulk-string scratch buffer. Same
-	// rationale as above.
-	maxPooledBulkCap = 64 * 1024
+	// maxPooledBulkCap bounds the read-path bulk-string scratch buffer. 512
+	// KiB keeps the pool useful for values up to that size; gigantic bulk
+	// writes (SET with a multi-MB payload) fall through to one-off allocation.
+	maxPooledBulkCap = 512 * 1024
 
 	// initialScratchCap is the starting capacity for a freshly-minted scratch
 	// buffer. Sized for typical GET/SET replies.
