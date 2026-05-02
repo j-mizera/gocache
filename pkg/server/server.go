@@ -203,6 +203,16 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	remoteAddr := conn.RemoteAddr().String()
 	connStart := time.Now()
 
+	// Disable Nagle so single-command-per-RTT clients don't pay the kernel's
+	// 40 ms delayed-ack stall on every command. Matches valkey/redis-server
+	// default. Without this, redis-benchmark standard-mode collection writes
+	// stall at ~1k rps. Errors are non-fatal.
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if err := tcpConn.SetNoDelay(true); err != nil {
+			logger.WarnNoCtx().Err(err).Msg("set TCP_NODELAY failed")
+		}
+	}
+
 	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
 	connOp.Enrich(command.RemoteAddrKey, remoteAddr)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -175,5 +177,97 @@ func TestServer_Shutdown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not shut down")
+	}
+}
+
+// captureListener wraps an underlying net.Listener and records each accepted
+// connection so tests can inspect the server-side socket options after the
+// server has processed connection setup.
+type captureListener struct {
+	inner net.Listener
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+func (c *captureListener) Accept() (net.Conn, error) {
+	conn, err := c.inner.Accept()
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.conns = append(c.conns, conn)
+	c.mu.Unlock()
+	return conn, nil
+}
+
+func (c *captureListener) Close() error   { return c.inner.Close() }
+func (c *captureListener) Addr() net.Addr { return c.inner.Addr() }
+
+// TestServer_TCPNoDelay verifies handleConnection sets TCP_NODELAY on
+// accepted connections so single-command-per-RTT clients don't pay Nagle's
+// 40 ms delayed-ack stall. Closes #24.
+func TestServer_TCPNoDelay(t *testing.T) {
+	c := cache.New()
+	e := engine.New(c)
+	go e.Run()
+	t.Cleanup(func() { e.Stop() })
+
+	br := blocking.NewRegistry()
+	wm := watch.NewManager()
+	c.OnMutate = wm.NotifyMutation
+
+	srv := New("127.0.0.1:0", c, e, "", "", br, wm)
+	srv.SetTracker(serverOps.NewTracker())
+
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	cap := &captureListener{inner: inner}
+	srv.listener = cap
+
+	go srv.acceptConnections(context.Background())
+	t.Cleanup(func() { _ = srv.Shutdown(2 * time.Second) })
+
+	// Drive a real exchange so handleConnection's setup code (including
+	// SetNoDelay) runs to completion before we inspect the socket.
+	conn, err := net.Dial("tcp", inner.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	if v := sendCommand(t, conn, "PING"); v.Str != "PONG" {
+		t.Fatalf("unexpected PING reply: %q", v.Str)
+	}
+
+	cap.mu.Lock()
+	if len(cap.conns) == 0 {
+		cap.mu.Unlock()
+		t.Fatal("captureListener saw no accepted connections")
+	}
+	srvConn := cap.conns[0]
+	cap.mu.Unlock()
+
+	tcpConn, ok := srvConn.(*net.TCPConn)
+	if !ok {
+		t.Fatalf("server-side conn is not *net.TCPConn: %T", srvConn)
+	}
+	raw, err := tcpConn.SyscallConn()
+	if err != nil {
+		t.Fatalf("SyscallConn: %v", err)
+	}
+
+	var noDelay int
+	var sockErr error
+	if err := raw.Control(func(fd uintptr) {
+		noDelay, sockErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY)
+	}); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if sockErr != nil {
+		t.Fatalf("getsockopt TCP_NODELAY: %v", sockErr)
+	}
+	if noDelay != 1 {
+		t.Errorf("server-side TCP_NODELAY = %d, want 1 (Nagle disabled)", noDelay)
 	}
 }
