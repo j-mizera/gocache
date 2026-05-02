@@ -183,3 +183,96 @@ func TestIT_WatchPropagation_ReadLockBypass(t *testing.T) {
 		setCount.Load(), watchAttempts.Load(), watchAborted.Load(),
 		float64(watchAborted.Load())/float64(watchAttempts.Load())*100)
 }
+
+// TestIT_FlushDBPropagation_AcrossConnections exercises the watch.Manager
+// NotifyAll path: one connection runs WATCH/MULTI/EXEC loops on a single
+// key while another connection issues FLUSHDB repeatedly. FLUSHDB
+// invalidates every watching client by calling Manager.NotifyAll, which
+// writes ctx.watchDirty across all clients (cross-connection mutation).
+//
+// Audit coverage for #35: the watchDirty fix from PR #32 also has to
+// hold for the NotifyAll path (not only NotifyMutation). The same
+// atomic.Bool carries both; this test gives -race coverage for the
+// broader notification surface. Without the fix this would race;
+// with it the race detector stays clean.
+func TestIT_FlushDBPropagation_AcrossConnections(t *testing.T) {
+	_, addr := startTestServer(t, "")
+
+	{
+		c := dial(t, addr)
+		assertOK(t, sendCommand(t, c, "SET", "fkey", "0"))
+		c.Close()
+	}
+
+	const dur = 300 * time.Millisecond
+	stop := make(chan struct{})
+	go func() {
+		time.Sleep(dur)
+		close(stop)
+	}()
+
+	var flushCount atomic.Int64
+	var watchAttempts atomic.Int64
+	var watchAborted atomic.Int64
+
+	var wg sync.WaitGroup
+
+	// FLUSHDB-loop on its own connection.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn := dial(t, addr)
+		defer conn.Close()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			sendCommand(t, conn, "FLUSHDB")
+			// Re-seed so the watcher has something to look at.
+			sendCommand(t, conn, "SET", "fkey", "0")
+			flushCount.Add(1)
+		}
+	}()
+
+	// Watcher: WATCH/MULTI/GET/EXEC loop. Some EXECs MUST abort because
+	// FLUSHDB invalidates the watched key via NotifyAll.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn := dial(t, addr)
+		defer conn.Close()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			watchAttempts.Add(1)
+			sendCommand(t, conn, "WATCH", "fkey")
+			sendCommand(t, conn, "MULTI")
+			sendCommand(t, conn, "GET", "fkey")
+			v := sendCommand(t, conn, "EXEC")
+			if v.IsNull {
+				watchAborted.Add(1)
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	if flushCount.Load() == 0 {
+		t.Fatal("FLUSHDB loop never ran")
+	}
+	if watchAttempts.Load() == 0 {
+		t.Fatal("watcher never attempted")
+	}
+	if watchAborted.Load() == 0 {
+		t.Fatalf("expected at least one FLUSHDB-aborted EXEC; got flushes=%d watches=%d aborted=0",
+			flushCount.Load(), watchAttempts.Load())
+	}
+	t.Logf("flushdb stress: flushes=%d watches=%d aborted=%d (%.1f%%)",
+		flushCount.Load(), watchAttempts.Load(), watchAborted.Load(),
+		float64(watchAborted.Load())/float64(watchAttempts.Load())*100)
+}
