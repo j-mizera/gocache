@@ -1,0 +1,23 @@
+File: shardproto.test
+Build ID: c0c8f5446940d7fbacbaab893d70a68f0337cabe
+Type: delay
+Time: 2026-05-02 22:50:46 UTC
+Showing nodes accounting for 84.56ms, 91.94% of 91.98ms total
+Dropped 58 nodes (cum <= 0.46ms)
+Showing top 15 nodes out of 96
+      flat  flat%   sum%        cum   cum%
+   84.56ms 91.94% 91.94%    84.56ms 91.94%  runtime.unlock (inline)
+         0     0% 91.94%    45.69ms 49.67%  runtime.selectgo
+         0     0% 91.94%    38.39ms 41.74%  gocache/pkg/shardproto.(*Server).Serve.func1
+         0     0% 91.94%    38.39ms 41.74%  gocache/pkg/shardproto.(*Server).handleConn
+         0     0% 91.94%    35.75ms 38.86%  gocache/pkg/shardproto.(*Server).dispatch
+         0     0% 91.94%    33.72ms 36.66%  runtime.selunlock
+         0     0% 91.94%    28.79ms 31.30%  gocache/pkg/shardproto.(*Engine).Dispatch
+         0     0% 91.94%    21.83ms 23.74%  runtime.mcall
+         0     0% 91.94%    21.42ms 23.29%  runtime.park_m
+         0     0% 91.94%    19.22ms 20.89%  gocache/pkg/shardproto.(*Server).handleGet
+         0     0% 91.94%    18.40ms 20.01%  gocache/pkg/shardproto.(*shardEngine).run
+         0     0% 91.94%    17.47ms 18.99%  runtime.selparkcommit
+         0     0% 91.94%    16.53ms 17.97%  gocache/pkg/shardproto.(*Server).handleSet
+         0     0% 91.94%    12.83ms 13.95%  runtime.systemstack
+         0     0% 91.94%    11.01ms 11.97%  runtime.blockevent

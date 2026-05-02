@@ -1,0 +1,24 @@
+File: shardproto.test
+Build ID: c0c8f5446940d7fbacbaab893d70a68f0337cabe
+Type: cpu
+Time: 2026-05-02 22:50:15 UTC
+Duration: 30.37s, Total samples = 87.21s (287.19%)
+Showing nodes accounting for 29.73s, 34.09% of 87.21s total
+Dropped 384 nodes (cum <= 0.44s)
+Showing top 15 nodes out of 143
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     41.06s 47.08%  gocache/pkg/shardproto.(*Server).Serve.func1
+     0.28s  0.32%  0.32%     41.06s 47.08%  gocache/pkg/shardproto.(*Server).handleConn
+    27.18s 31.17% 31.49%     27.18s 31.17%  internal/runtime/syscall/linux.Syscall6
+         0     0% 31.49%     27.01s 30.97%  internal/poll.ignoringEINTRIO (inline)
+     0.11s  0.13% 31.61%     26.80s 30.73%  syscall.Syscall
+     0.37s  0.42% 32.04%        26s 29.81%  syscall.RawSyscall6
+     0.85s  0.97% 33.01%     23.95s 27.46%  gocache/pkg/resp.(*Reader).Read
+     0.03s 0.034% 33.05%     20.03s 22.97%  gocache/pkg/resp.(*Writer).Flush (inline)
+     0.53s  0.61% 33.65%     20.01s 22.94%  gocache/pkg/shardproto.runMixedPipelined.func1
+         0     0% 33.65%     20.01s 22.94%  testing.(*B).RunParallel.func1
+     0.17s  0.19% 33.85%        20s 22.93%  bufio.(*Writer).Flush
+     0.08s 0.092% 33.94%     19.81s 22.72%  net.(*conn).Write
+     0.04s 0.046% 33.99%     19.73s 22.62%  net.(*netFD).Write
+     0.03s 0.034% 34.02%     19.68s 22.57%  internal/poll.(*FD).Write
+     0.06s 0.069% 34.09%     19.56s 22.43%  syscall.Write (inline)
