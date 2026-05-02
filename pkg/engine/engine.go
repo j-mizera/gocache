@@ -31,6 +31,20 @@ type Command struct {
 	ResChan chan any
 }
 
+// resChanPool recycles the per-call result channel that sendAndWait creates
+// on every command submission. Capacity 1 — a single result. The channel
+// is only returned to the pool when sendAndWait observed the engine's
+// write (successful receive) or when the engine never received the
+// Command at all (cancellation/stop fired before submit).
+//
+// Critical safety rule: do NOT Put on the cancellation/stop branch of the
+// SECOND select, because the engine has already taken ownership of the
+// channel and may write to it before noticing stop. Re-issuing such a
+// channel would deliver a stale value to the next caller.
+var resChanPool = sync.Pool{
+	New: func() any { return make(chan any, 1) },
+}
+
 type Engine struct {
 	cache    *cache.Cache
 	cmdChan  chan Command
@@ -70,21 +84,35 @@ func (e *Engine) Stop() {
 
 // sendAndWait submits fn via the engine's command channel and blocks for its
 // result. Shared implementation behind Dispatch and DispatchWithResult.
+//
+// resChan is drawn from a sync.Pool. The Put rules:
+//   - submit-stage stop/cancel: engine never received the Command, so the
+//     channel is still privately owned by sendAndWait → safe to Put back.
+//   - successful receive: the buffer slot has just been drained → safe to
+//     Put back.
+//   - wait-stage stop/cancel: engine already owns the write end and may
+//     write to it before observing stop → DO NOT Put back. The channel
+//     becomes garbage; sync.Pool just won't see it.
 func (e *Engine) sendAndWait(ctx context.Context, fn func() any) (any, error) {
-	resChan := make(chan any, 1)
+	resChan := resChanPool.Get().(chan any)
 	select {
 	case e.cmdChan <- Command{Execute: fn, ResChan: resChan}:
 	case <-e.stopChan:
+		resChanPool.Put(resChan)
 		return nil, ErrEngineStopped
 	case <-ctx.Done():
+		resChanPool.Put(resChan)
 		return nil, ctx.Err()
 	}
 	select {
 	case res := <-resChan:
+		resChanPool.Put(resChan)
 		return res, nil
 	case <-e.stopChan:
+		// Engine owns the channel — orphan it.
 		return nil, ErrEngineStopped
 	case <-ctx.Done():
+		// Engine owns the channel — orphan it.
 		return nil, ctx.Err()
 	}
 }
