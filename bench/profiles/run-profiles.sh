@@ -15,7 +15,7 @@
 set -euo pipefail
 
 REPO=$(git rev-parse --show-toplevel)
-OUT="$REPO/bench/profiles/${OUT_LABEL:-baseline-command-flow}"
+OUT="$REPO/bench/profiles/${OUT_LABEL:-diagnosis-baseline}"
 DUR="${DUR:-10s}"
 CPU="${CPU:-4}"
 

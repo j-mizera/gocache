@@ -7,7 +7,7 @@
 set -euo pipefail
 
 REPO=$(git rev-parse --show-toplevel)
-OUT="$REPO/bench/profiles/${OUT_LABEL:-baseline-command-flow}"
+OUT="$REPO/bench/profiles/${OUT_LABEL:-diagnosis-baseline}"
 
 cpu_top()   { go tool pprof -top -cum -nodecount=30 "$1" 2>/dev/null; }
 alloc_top() { go tool pprof -top -cum -sample_index="$2" -nodecount=30 "$1" 2>/dev/null; }

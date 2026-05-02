@@ -1,9 +1,9 @@
-# baseline-command-flow
+# diagnosis-baseline
 
-Anchor for the `perf/command-flow-optimization` branch — captures the state of `main` (`1ea8c65`) right after `feat/memory-optimization` merged. Each child plan benchmark compares against this row.
+Anchor for the `fix/issues-23-24` branch — captures the state of `main` (`1ea8c65`) right after `feat/memory-optimization` merged. Each child plan benchmark compares against this row.
 
 **Date:** 2026-05-02
-**Branch:** `perf/command-flow-optimization` (no code changes vs main)
+**Branch:** `fix/issues-23-24` (no code changes vs main)
 **Commit:** `1ea8c65`
 **Harness:** `bench/redis-benchmark/run.sh` — n=100 000, clients=50, keyspace=100 000, pipeline=10, target=cpus 0-3 / client=cpus 4-7, mem_limit=2 GiB
 **Reference:** valkey 8 (`valkey/valkey:8`), same harness same limits
@@ -63,7 +63,7 @@ The slab-allocator arc cut the cache-data portion of memory dramatically (gctrac
 
 ## gctrace at 1M strings (64 B values)
 
-From `bench/redis-benchmark/results/gctrace/baseline-command-flow-strings-1M.{out,err}`:
+From `bench/redis-benchmark/results/gctrace/diagnosis-baseline-strings-1M.{out,err}`:
 
 - HeapAlloc 230.65 MiB (post-load)
 - HeapObjects 1.01 M
@@ -86,11 +86,11 @@ These match the gc-opaque-index milestone — the slab arc held its gains across
 
 ## Files
 
-- `baseline-command-flow-gocache.csv` — standard suite gocache
-- `baseline-command-flow-gocache-pipelined.csv` — pipelined suite gocache
-- `baseline-command-flow-gocache-memory.txt` — RSS metadata gocache
-- `baseline-command-flow-valkey.csv` — standard suite valkey
-- `baseline-command-flow-valkey-pipelined.csv` — pipelined suite valkey
-- `baseline-command-flow-valkey-memory.txt` — RSS metadata valkey
-- `gctrace/baseline-command-flow-strings-1M.{out,err}` — gctrace 1M strings
-- `gctrace/baseline-command-flow-hashes-500k.{out,err}` — gctrace 500k hashes
+- `diagnosis-baseline-gocache.csv` — standard suite gocache
+- `diagnosis-baseline-gocache-pipelined.csv` — pipelined suite gocache
+- `diagnosis-baseline-gocache-memory.txt` — RSS metadata gocache
+- `diagnosis-baseline-valkey.csv` — standard suite valkey
+- `diagnosis-baseline-valkey-pipelined.csv` — pipelined suite valkey
+- `diagnosis-baseline-valkey-memory.txt` — RSS metadata valkey
+- `gctrace/diagnosis-baseline-strings-1M.{out,err}` — gctrace 1M strings
+- `gctrace/diagnosis-baseline-hashes-500k.{out,err}` — gctrace 500k hashes

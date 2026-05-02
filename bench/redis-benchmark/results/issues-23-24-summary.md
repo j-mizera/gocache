@@ -1,11 +1,11 @@
 # Issues #23 + #24 — diagnosis findings and production benchmark deltas
 
 **Date:** 2026-05-02
-**Branch:** `perf/command-flow-optimization`
+**Branch:** `fix/issues-23-24`
 **Commits:** `c391c96` (TCP_NODELAY), `f51309f` (estimateSize O(1) on promoted hashes)
 **Captured against:** `1ea8c65` (main tip; pre-fix baseline)
 
-This summary pairs the diagnosis-pass findings (in `bench/profiles/baseline-command-flow/SUMMARY.md`) with the measured impact of the two fixes that landed before any of the four planned `command-flow-optimization` child plans started.
+This summary pairs the diagnosis-pass findings (in `bench/profiles/diagnosis-baseline/SUMMARY.md`) with the measured impact of the two fixes that landed before any of the four planned `command-flow-optimization` child plans started.
 
 ## What we set out to fix
 
@@ -15,7 +15,7 @@ The diagnosis pass identified two bugs outside the scope of the four planned opt
 
 `pkg/cache/cache.go::estimateSize` walked `map[string]string` per element on every native-encoding mutation. `setInternal` and `chargedSize` both called it, making each HSET on a promoted hash O(N) — hence O(N²) over a workload that grows the hash.
 
-Profile evidence from `bench/profiles/baseline-command-flow/cpu/inproc-hset.prof`:
+Profile evidence from `bench/profiles/diagnosis-baseline/cpu/inproc-hset.prof`:
 
 ```
 $ go tool pprof -top -cum -nodecount=10 cpu/inproc-hset.prof
@@ -172,8 +172,8 @@ pkg/server/bench_test.go  | +522 (new harness)
 
 ## Files captured
 
-- `baseline-command-flow-{gocache,valkey}.csv` + `-pipelined.csv` + `-memory.txt` — pre-fix
+- `diagnosis-baseline-{gocache,valkey}.csv` + `-pipelined.csv` + `-memory.txt` — pre-fix
 - `tcp-nodelay-fix-gocache.csv` + `-pipelined.csv` + `-memory.txt` — TCP_NODELAY only (verification of the failed hypothesis)
 - `estimateSize-fix-gocache.csv` + `-pipelined.csv` + `-memory.txt` — both fixes
-- `bench/profiles/baseline-command-flow/cpu/inproc-hset.prof` + `.top.txt` — the profile that surfaced the bug
-- `bench/profiles/baseline-command-flow/SUMMARY.md` — full diagnosis writeup
+- `bench/profiles/diagnosis-baseline/cpu/inproc-hset.prof` + `.top.txt` — the profile that surfaced the bug
+- `bench/profiles/diagnosis-baseline/SUMMARY.md` — full diagnosis writeup

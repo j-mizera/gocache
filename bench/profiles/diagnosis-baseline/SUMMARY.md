@@ -1,7 +1,7 @@
 # Diagnosis pass — synthesis
 
 **Date:** 2026-05-02
-**Branch:** `perf/command-flow-optimization` (no source changes vs main `1ea8c65`)
+**Branch:** `fix/issues-23-24` (no source changes vs main `1ea8c65`)
 **Harness:** `pkg/server/bench_test.go` — both in-process and TCP-loopback variants, 52 parallel goroutines (`SetParallelism(13)` × `-cpu=4`), 10 s benchtime, profile sampling at `mem=4096 / block=10000ns / mutex=1/10`. Emitter wired (matches production binary).
 
 The deliverable: validate or refute each of the four child plans' premises with profile evidence and surface bottlenecks the plans don't address.
