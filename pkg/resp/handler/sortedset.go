@@ -10,6 +10,12 @@ import (
 	"gocache/pkg/resp"
 )
 
+// zsetMemberOverhead matches pkg/cache/sortedset.go's sortedSetMemberOverhead
+// constant. The value lives there for the EstimateSize() walk; we duplicate
+// it here so the incremental write path stays in lockstep without exposing
+// the internal constant cross-package.
+const zsetMemberOverhead = 24
+
 // Sorted-set commands operate on two encodings:
 //
 //   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a packed.ZSet buffer sorted by
@@ -77,12 +83,16 @@ func zaddPacked(cmdCtx *command.Context, key string, buf []byte, pairs []cache.S
 			if perr != nil {
 				return perr
 			}
+			// Walk once at the boundary; track size incrementally for the
+			// remaining pairs and any subsequent ZADDs.
+			size := z.EstimateSize()
 			for _, rest := range pairs[i+1:] {
 				if z.Add(rest.Member, rest.Score) {
 					added++
+					size += int64(len(rest.Member)) + zsetMemberOverhead
 				}
 			}
-			_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, z, 0)
+			_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, 0)
 			return added
 		}
 	}
@@ -94,12 +104,14 @@ func zaddPacked(cmdCtx *command.Context, key string, buf []byte, pairs []cache.S
 
 func zaddNative(cmdCtx *command.Context, key string, z *cache.SortedSet, pairs []cache.ScoredMember) any {
 	added := 0
+	size := cmdCtx.Cache.NativeSize(key)
 	for _, p := range pairs {
 		if z.Add(p.Member, p.Score) {
 			added++
+			size += int64(len(p.Member)) + zsetMemberOverhead
 		}
 	}
-	_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, z, 0)
+	_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, 0)
 	return added
 }
 
@@ -144,16 +156,18 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 
 		default:
 			zset := entry.Value.(*cache.SortedSet)
+			size := cmdCtx.Cache.NativeSize(key)
 			removed := 0
 			for _, m := range members {
 				if zset.Remove(m) {
 					removed++
+					size -= int64(len(m)) + zsetMemberOverhead
 				}
 			}
 			if zset.Card() == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, zset, 0)
+				_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, zset, size, 0)
 			}
 			return removed
 		}

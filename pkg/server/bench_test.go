@@ -224,6 +224,76 @@ func TestHSET_PromotedHash_O1(t *testing.T) {
 	}
 }
 
+// runPromotedCollectionO1 is the shared body of the
+// TestSADD/LPUSH/RPUSH/ZADD_Promoted*_O1 regression tests for #33. It
+// builds a minimal evaluator rig, fires N mutations against one key, and
+// asserts completion within deadline. The rig setup mirrors
+// TestHSET_PromotedHash_O1 — the existing #23 regression — so any drift in
+// the test scaffolding shows up identically across all four tests.
+func runPromotedCollectionO1(t *testing.T, deadline time.Duration, n int, makeArgs func(i int) []string, op string) {
+	t.Helper()
+	c := cache.NewWithConfig(1024, cache.EvictionLRU)
+	e := engine.New(c)
+	go e.Run()
+	t.Cleanup(func() { e.Stop() })
+
+	br := blocking.NewRegistry()
+	wm := watch.NewManager()
+	c.OnMutate = wm.NotifyMutation
+	ev := evaluator.New(c, e, "", "", br, wm)
+	ev.SetTracker(serverOps.NewTracker())
+	cli := clientctx.New()
+
+	deadlineCh := time.After(deadline)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < n; i++ {
+			res := ev.Evaluate(context.Background(), cli, op, makeArgs(i))
+			if res.Err != nil {
+				t.Errorf("%s #%d failed: %v", op, i, res.Err)
+				return
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-deadlineCh:
+		t.Fatalf("100k %s to promoted collection did not complete in %v — estimateSize regression", op, deadline)
+	}
+}
+
+// TestSADD_PromotedSet_O1 — regression test for #33 (set branch).
+func TestSADD_PromotedSet_O1(t *testing.T) {
+	runPromotedCollectionO1(t, 10*time.Second, 100_000,
+		func(i int) []string { return []string{"myset", "m:" + strconv.Itoa(i)} },
+		"SADD",
+	)
+}
+
+// TestRPUSH_PromotedList_O1 — regression test for #33 (list branch).
+// Threshold is 30 s (vs 10 s for hash/set/zset) because the list slice
+// itself is still O(N²) per-call due to the slice-copy on append; that's
+// a separate concern (would need a different list encoding). Incremental
+// tracking only removes the size-computation walk; with the fix the
+// 100 000 sequential RPUSHes complete in ~3-5 s on typical hardware.
+func TestRPUSH_PromotedList_O1(t *testing.T) {
+	runPromotedCollectionO1(t, 30*time.Second, 100_000,
+		func(i int) []string { return []string{"mylist", "v:" + strconv.Itoa(i)} },
+		"RPUSH",
+	)
+}
+
+// TestZADD_PromotedZSet_O1 — regression test for #33 (sorted-set branch).
+func TestZADD_PromotedZSet_O1(t *testing.T) {
+	runPromotedCollectionO1(t, 10*time.Second, 100_000,
+		func(i int) []string {
+			return []string{"myzset", strconv.Itoa(i), "m:" + strconv.Itoa(i)}
+		},
+		"ZADD",
+	)
+}
+
 // BenchmarkInProc_HSET_Spread — 100k unique hashes, one field each. This
 // pattern never promotes a hash to EncNative, so it exercises the packed
 // encoding hot path and avoids the estimateSize walk that dominates the

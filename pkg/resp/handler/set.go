@@ -7,6 +7,21 @@ import (
 	"gocache/pkg/resp"
 )
 
+// setEntryOverhead matches pkg/cache.estimateSize's per-element constant
+// for map[string]struct{}. Kept in lockstep with the cache size formula.
+const setEntryOverhead = 16
+
+// setMapSize walks a map[string]struct{} once for its estimateSize-equivalent
+// payload size. Used at packed→native promotion; subsequent mutations
+// track size incrementally and never re-walk.
+func setMapSize(set map[string]struct{}) int64 {
+	var size int64
+	for m := range set {
+		size += int64(len(m)) + setEntryOverhead
+	}
+	return size
+}
+
 // Set commands operate on two encodings:
 //
 //   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a sorted, length-prefixed buffer.
@@ -173,13 +188,17 @@ func saddPacked(cmdCtx *command.Context, key string, buf []byte, members []strin
 			if perr != nil {
 				return perr
 			}
+			// Walk once at the packed→native boundary; subsequent SADDs
+			// track size incrementally.
+			size := setMapSize(set)
 			for _, rest := range members[i+1:] {
 				if _, exists := set[rest]; !exists {
 					set[rest] = struct{}{}
 					added++
+					size += int64(len(rest)) + setEntryOverhead
 				}
 			}
-			_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0)
+			_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, size, 0)
 			return added
 		}
 	}
@@ -191,13 +210,15 @@ func saddPacked(cmdCtx *command.Context, key string, buf []byte, members []strin
 
 func saddNative(cmdCtx *command.Context, key string, set map[string]struct{}, members []string) any {
 	added := 0
+	size := cmdCtx.Cache.NativeSize(key)
 	for _, m := range members {
 		if _, exists := set[m]; !exists {
 			set[m] = struct{}{}
 			added++
+			size += int64(len(m)) + setEntryOverhead
 		}
 	}
-	_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0)
+	_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, size, 0)
 	return added
 }
 
@@ -240,17 +261,19 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 			return removed
 		default:
 			set := entry.Value.(map[string]struct{})
+			size := cmdCtx.Cache.NativeSize(key)
 			removed := 0
 			for _, m := range members {
 				if _, exists := set[m]; exists {
 					delete(set, m)
 					removed++
+					size -= int64(len(m)) + setEntryOverhead
 				}
 			}
 			if len(set) == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0)
+				_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, size, 0)
 			}
 			return removed
 		}
@@ -418,7 +441,8 @@ func HandleSpop(cmdCtx *command.Context) command.Result {
 			if len(set) == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, set, 0)
+				newSize := cmdCtx.Cache.NativeSize(key) - int64(len(popped)) - setEntryOverhead
+				_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, newSize, 0)
 			}
 			return popped
 		}
