@@ -17,7 +17,12 @@ fi
 
 LABEL_A="$1"
 LABEL_B="$2"
-DIR="$(dirname "$0")/results"
+# Default results dir matches run.sh: bench/results/<branch>/. Override
+# with RESULTS_DIR=... when comparing across branches.
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+BRANCH_SAFE="${BRANCH//\//-}"
+DIR="${RESULTS_DIR:-$REPO_ROOT/bench/results/$BRANCH_SAFE}"
 
 for L in "$LABEL_A" "$LABEL_B"; do
     for F in "$DIR/$L.csv" "$DIR/$L-pipelined.csv" "$DIR/$L-memory.txt"; do
