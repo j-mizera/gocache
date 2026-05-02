@@ -38,7 +38,8 @@ func TestContext_Reset(t *testing.T) {
 			return Result{}
 		},
 	}
-	ctx.SetContext(context.WithValue(context.Background(), struct{}{}, "x"))
+	type testKey struct{}
+	ctx.SetContext(context.WithValue(context.Background(), testKey{}, "x"))
 
 	ctx.Reset()
 
