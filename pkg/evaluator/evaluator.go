@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gocache/api/events"
@@ -28,6 +29,29 @@ import (
 
 // pluginCommandTimeout is the maximum time to wait for a plugin to respond.
 const pluginCommandTimeout = 10 * time.Second
+
+// cmdCtxPool recycles the per-command *command.Context. Reset zeroes every
+// field on Put so a stale pointer cannot keep a ClientContext or any
+// borrowed engine/cache pointer alive past its owning connection's life.
+//
+// Safety: cmdCtx is request-scoped — handlers run synchronously, blocking
+// list ops (BLPOP/BRPOP) wait on a channel inside the same goroutine, and
+// EXEC re-enters the evaluator (which gets its own fresh cmdCtx for the
+// inner command). No handler captures cmdCtx in a goroutine that outlives
+// the call.
+var cmdCtxPool = sync.Pool{
+	New: func() any { return &command.Context{} },
+}
+
+// putCmdCtx is a free function so `defer putCmdCtx(c)` records a function
+// pointer + one arg rather than allocating a closure on the heap. The
+// per-command alloc count is what this pool exists to drive down — using a
+// closure here would re-introduce one of the allocations we are trying to
+// remove.
+func putCmdCtx(c *command.Context) {
+	c.Reset()
+	cmdCtxPool.Put(c)
+}
 
 // OpHookExecutor is the interface the evaluator uses to dispatch operation hooks.
 // Defined here to avoid an import cycle with pkg/plugin/ophooks.
@@ -214,20 +238,9 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 		b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
 	}
 
-	cmdCtx := &command.Context{
-		Client:           ctx,
-		Op:               op,
-		Args:             args,
-		InBatch:          inBatch,
-		Engine:           b.engine,
-		Cache:            b.cache,
-		Transaction:      b.transactionManager,
-		BlockingRegistry: b.blockingRegistry,
-		WatchManager:     b.watchManager,
-		SnapshotFile:     b.snapshotFile,
-		RequirePass:      b.requirePass,
-		EvalFn:           b.evaluateInternal,
-	}
+	cmdCtx := cmdCtxPool.Get().(*command.Context)
+	defer putCmdCtx(cmdCtx)
+	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch)
 	cmdCtx.SetContext(opCtx)
 
 	// --- Command hooks (pre) ---
@@ -294,20 +307,9 @@ func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.C
 	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
 	opCtx := ops.WithContext(parentCtx, cmdOp)
 
-	cmdCtx := &command.Context{
-		Client:           ctx,
-		Op:               op,
-		Args:             args,
-		InBatch:          inBatch,
-		Engine:           b.engine,
-		Cache:            b.cache,
-		Transaction:      b.transactionManager,
-		BlockingRegistry: b.blockingRegistry,
-		WatchManager:     b.watchManager,
-		SnapshotFile:     b.snapshotFile,
-		RequirePass:      b.requirePass,
-		EvalFn:           b.evaluateInternal,
-	}
+	cmdCtx := cmdCtxPool.Get().(*command.Context)
+	defer putCmdCtx(cmdCtx)
+	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch)
 	cmdCtx.SetContext(opCtx)
 
 	result := handler(cmdCtx)
@@ -316,6 +318,25 @@ func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.C
 		b.tracker.IncrementSkipped()
 	}
 	return result
+}
+
+// fillCmdCtx populates a *command.Context for one command. Centralises the
+// field assignment so the fast path and the slow path share the exact set
+// of dependencies — drift between the two would surface as a nil-pointer
+// crash inside the handler under one path but not the other.
+func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) {
+	c.Client = ctx
+	c.Op = op
+	c.Args = args
+	c.InBatch = inBatch
+	c.Engine = b.engine
+	c.Cache = b.cache
+	c.Transaction = b.transactionManager
+	c.BlockingRegistry = b.blockingRegistry
+	c.WatchManager = b.watchManager
+	c.SnapshotFile = b.snapshotFile
+	c.RequirePass = b.requirePass
+	c.EvalFn = b.evaluateInternal
 }
 
 // routeToPlugin dispatches a command to a plugin via the router. The per-call

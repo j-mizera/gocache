@@ -76,6 +76,26 @@ func (c *Context) SetContext(ctx context.Context) {
 	c.ctx = ctx
 }
 
+// Reset zeroes every field so the *Context can be returned to a sync.Pool
+// without leaking references. Pointer fields explicitly nilled — leaving
+// them set would keep ClientContext / Engine / Cache / etc. alive past the
+// connection lifetime they were borrowed from.
+func (c *Context) Reset() {
+	c.ctx = nil
+	c.Client = nil
+	c.Op = ""
+	c.Args = nil
+	c.InBatch = false
+	c.Engine = nil
+	c.Cache = nil
+	c.Transaction = nil
+	c.BlockingRegistry = nil
+	c.WatchManager = nil
+	c.SnapshotFile = ""
+	c.RequirePass = ""
+	c.EvalFn = nil
+}
+
 // Dispatch runs fn either directly (when InBatch is true, meaning the engine
 // lock is already held) or through the engine dispatcher. It wraps the result
 // into a Result, propagating any error. If the engine is stopped or the
