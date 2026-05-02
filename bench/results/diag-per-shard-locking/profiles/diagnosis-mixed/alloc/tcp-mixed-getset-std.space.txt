@@ -1,0 +1,38 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: alloc_space
+Time: 2026-05-02 22:15:26 UTC
+Showing nodes accounting for 3.04GB, 96.73% of 3.14GB total
+Dropped 233 nodes (cum <= 0.02GB)
+Showing top 30 nodes out of 38
+      flat  flat%   sum%        cum   cum%
+    0.16GB  5.22%  5.22%     2.73GB 86.91%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  5.22%     1.59GB 50.47%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%  5.22%     1.59GB 50.47%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0%  5.22%     1.59GB 50.47%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+    0.64GB 20.50% 25.73%     1.09GB 34.80%  gocache/api/operations.New
+         0     0% 25.73%     1.02GB 32.29%  gocache/pkg/resp.(*Reader).Read
+    0.82GB 25.98% 51.70%     0.96GB 30.66%  gocache/pkg/resp.(*Reader).readArray
+         0     0% 51.70%     0.27GB  8.71%  gocache/pkg/engine.(*Engine).Run
+    0.19GB  6.11% 57.81%     0.26GB  8.16%  gocache/api/operations.nextID
+    0.10GB  3.21% 61.03%     0.22GB  6.91%  gocache/pkg/resp/handler.HandleSet.func1
+    0.19GB  6.13% 67.16%     0.19GB  6.13%  gocache/api/context.NewContext (inline)
+    0.19GB  6.10% 73.26%     0.19GB  6.10%  context.WithValue
+         0     0% 73.26%     0.19GB  6.10%  gocache/api/operations.WithContext (inline)
+    0.18GB  5.67% 78.93%     0.18GB  5.70%  gocache/pkg/resp/handler.HandleSet
+    0.10GB  3.29% 82.22%     0.15GB  4.85%  gocache/pkg/resp.(*Reader).readBulkString
+         0     0% 82.22%     0.12GB  3.70%  gocache/pkg/cache.(*Cache).RawSet
+         0     0% 82.22%     0.12GB  3.70%  gocache/pkg/cache.(*Cache).setInternal
+    0.07GB  2.07% 84.29%     0.12GB  3.70%  gocache/pkg/cache.(*Cache).setPackedInternal
+    0.01GB  0.44% 84.73%     0.09GB  2.77%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Standard.func1
+         0     0% 84.73%     0.09GB  2.77%  testing.(*B).RunParallel.func1
+    0.08GB  2.42% 87.15%     0.08GB  2.42%  bufio.(*Reader).ReadBytes
+         0     0% 87.15%     0.08GB  2.42%  gocache/pkg/resp.(*Reader).ReadLine
+    0.06GB  2.05% 89.20%     0.06GB  2.05%  gocache/pkg/evaluator.(*BaseEvaluator).fillCmdCtx (inline)
+    0.06GB  2.04% 91.25%     0.06GB  2.05%  fmt.Sprintf
+         0     0% 91.25%     0.06GB  1.90%  gocache/pkg/cache/slab.(*slabClass).alloc
+         0     0% 91.25%     0.06GB  1.90%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+    0.06GB  1.90% 93.15%     0.06GB  1.90%  gocache/pkg/cache/slab.newSlab (inline)
+    0.06GB  1.78% 94.93%     0.06GB  1.80%  gocache/pkg/resp/handler.HandleGet
+    0.06GB  1.80% 96.73%     0.06GB  1.80%  gocache/pkg/resp/handler.HandleGet.func1
+         0     0% 96.73%     0.05GB  1.71%  gocache/pkg/resp.(*Reader).readInteger

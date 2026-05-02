@@ -538,6 +538,161 @@ func BenchmarkTCP_GET_Standard(b *testing.B) {
 	})
 }
 
+// ----- mixed-workload benchmarks ----------------------------------------
+//
+// These drive concurrent readers and writers against one server to expose
+// the cross-path interaction cost that single-workload benchmarks miss.
+// Each goroutine takes a deterministic role at startup (reader or writer)
+// based on a global atomic counter; readers and writers run in parallel
+// for the duration of the benchmark.
+//
+// Why these exist: the #28 read-lock-bypass arc proved that single-workload
+// block profiles can attribute cost correctly while still missing the
+// interaction effect when one path's lock primitive changes affect the
+// other path. These mixed benchmarks make that interaction directly
+// measurable for the per-shard locking diagnosis (issue #34).
+
+// BenchmarkTCP_Mixed_GetSet_Pipelined — half goroutines pipeline GET,
+// half pipeline SET. The cross-path workload that matters most for
+// per-shard locking: writers contend on cache.Lock, readers wait for
+// the engine queue, both share the channel-hop scheduler cost.
+func BenchmarkTCP_Mixed_GetSet_Pipelined(b *testing.B) {
+	const pipeline = 10
+	rig := newTCPRig(b)
+	rig.preloadTCPStringKeys(b, 100_000)
+	var seq atomic.Uint64
+	var roleCounter atomic.Int64
+	b.SetParallelism(parallelism)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		isReader := roleCounter.Add(1)%2 == 0
+		conn, err := net.Dial("tcp", rig.addr)
+		if err != nil {
+			b.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		w := resp.NewWriter(conn)
+		rd := resp.NewReader(conn)
+		batch := make([]resp.Value, pipeline)
+		for pb.Next() {
+			for j := 0; j < pipeline; j++ {
+				i := seq.Add(1) % 100_000
+				if isReader {
+					batch[j] = respCmd("GET", "k:"+strconv.FormatUint(i, 10))
+				} else {
+					batch[j] = respCmd("SET", "k:"+strconv.FormatUint(i, 10), "v")
+				}
+			}
+			for j := 0; j < pipeline; j++ {
+				if err := w.Write(batch[j]); err != nil {
+					b.Fatalf("write: %v", err)
+				}
+			}
+			if err := w.Flush(); err != nil {
+				b.Fatalf("flush: %v", err)
+			}
+			for j := 0; j < pipeline; j++ {
+				if _, err := rd.Read(); err != nil {
+					b.Fatalf("read: %v", err)
+				}
+			}
+		}
+	})
+}
+
+// BenchmarkTCP_Mixed_GetHset_Pipelined — readers vs collection writers.
+// HSET on a shared hash key is the worst-case collection-write surface
+// (#28's writer side). Pairing with GET captures the precise interaction
+// per-shard locking aims to reduce: HSET writers no longer block GETs on
+// disjoint keys.
+func BenchmarkTCP_Mixed_GetHset_Pipelined(b *testing.B) {
+	const pipeline = 10
+	const hashKey = "h:bench"
+	rig := newTCPRig(b)
+	rig.preloadTCPStringKeys(b, 100_000)
+	var seq atomic.Uint64
+	var roleCounter atomic.Int64
+	b.SetParallelism(parallelism)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		isReader := roleCounter.Add(1)%2 == 0
+		conn, err := net.Dial("tcp", rig.addr)
+		if err != nil {
+			b.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		w := resp.NewWriter(conn)
+		rd := resp.NewReader(conn)
+		batch := make([]resp.Value, pipeline)
+		for pb.Next() {
+			for j := 0; j < pipeline; j++ {
+				i := seq.Add(1)
+				if isReader {
+					batch[j] = respCmd("GET", "k:"+strconv.FormatUint(i%100_000, 10))
+				} else {
+					batch[j] = respCmd("HSET", hashKey, "f:"+strconv.FormatUint(i, 10), "v")
+				}
+			}
+			for j := 0; j < pipeline; j++ {
+				if err := w.Write(batch[j]); err != nil {
+					b.Fatalf("write: %v", err)
+				}
+			}
+			if err := w.Flush(); err != nil {
+				b.Fatalf("flush: %v", err)
+			}
+			for j := 0; j < pipeline; j++ {
+				if _, err := rd.Read(); err != nil {
+					b.Fatalf("read: %v", err)
+				}
+			}
+		}
+	})
+}
+
+// BenchmarkTCP_Mixed_GetSet_Standard — non-pipelined cross-path baseline.
+// Pairs with the pipelined variant to localize whether the interaction
+// cost is amortized by pipelining or paid per round-trip.
+func BenchmarkTCP_Mixed_GetSet_Standard(b *testing.B) {
+	rig := newTCPRig(b)
+	rig.preloadTCPStringKeys(b, 100_000)
+	var seq atomic.Uint64
+	var roleCounter atomic.Int64
+	b.SetParallelism(parallelism)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		isReader := roleCounter.Add(1)%2 == 0
+		conn, err := net.Dial("tcp", rig.addr)
+		if err != nil {
+			b.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		w := resp.NewWriter(conn)
+		rd := resp.NewReader(conn)
+		for pb.Next() {
+			i := seq.Add(1) % 100_000
+			var cmd resp.Value
+			if isReader {
+				cmd = respCmd("GET", "k:"+strconv.FormatUint(i, 10))
+			} else {
+				cmd = respCmd("SET", "k:"+strconv.FormatUint(i, 10), "v")
+			}
+			if err := w.Write(cmd); err != nil {
+				b.Fatalf("write: %v", err)
+			}
+			if err := w.Flush(); err != nil {
+				b.Fatalf("flush: %v", err)
+			}
+			if _, err := rd.Read(); err != nil {
+				b.Fatalf("read: %v", err)
+			}
+		}
+	})
+}
+
 // BenchmarkTCP_SET_Standard — pairs with BenchmarkInProc_SET.
 func BenchmarkTCP_SET_Standard(b *testing.B) {
 	rig := newTCPRig(b)

@@ -1,0 +1,39 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: cpu
+Time: 2026-05-02 22:14:39 UTC
+Duration: 20.31s, Total samples = 53.48s (263.37%)
+Showing nodes accounting for 17.58s, 32.87% of 53.48s total
+Dropped 378 nodes (cum <= 0.27s)
+Showing top 30 nodes out of 191
+      flat  flat%   sum%        cum   cum%
+     0.54s  1.01%  1.01%     28.38s 53.07%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  1.01%     14.09s 26.35%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+     0.09s  0.17%  1.18%     14.09s 26.35%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+     0.29s  0.54%  1.72%     13.65s 25.52%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+    12.69s 23.73% 25.45%     12.69s 23.73%  internal/runtime/syscall/linux.Syscall6
+         0     0% 25.45%     11.98s 22.40%  internal/poll.ignoringEINTRIO (inline)
+     0.06s  0.11% 25.56%     11.81s 22.08%  syscall.Syscall
+     0.04s 0.075% 25.64%     11.48s 21.47%  syscall.RawSyscall6
+     0.43s   0.8% 26.44%      9.94s 18.59%  gocache/pkg/resp.(*Reader).Read
+     0.04s 0.075% 26.51%      9.28s 17.35%  bufio.(*Writer).Flush
+         0     0% 26.51%      9.28s 17.35%  gocache/pkg/resp.(*Writer).Flush (inline)
+     0.03s 0.056% 26.57%      9.23s 17.26%  net.(*conn).Write
+     0.02s 0.037% 26.61%      9.20s 17.20%  net.(*netFD).Write
+     0.03s 0.056% 26.66%      9.18s 17.17%  internal/poll.(*FD).Write
+     0.12s  0.22% 26.89%      9.10s 17.02%  gocache/pkg/engine.(*Engine).Run
+     0.02s 0.037% 26.93%      9.08s 16.98%  syscall.Write (inline)
+     0.03s 0.056% 26.98%      9.06s 16.94%  syscall.write
+     1.22s  2.28% 29.26%      8.25s 15.43%  runtime.selectgo
+     0.08s  0.15% 29.41%      8.14s 15.22%  runtime.systemstack
+     0.59s  1.10% 30.52%      8.06s 15.07%  runtime.mallocgc
+     0.10s  0.19% 30.70%         7s 13.09%  gocache/pkg/server.BenchmarkTCP_Mixed_GetHset_Pipelined.func1
+         0     0% 30.70%         7s 13.09%  testing.(*B).RunParallel.func1
+     0.11s  0.21% 30.91%      6.74s 12.60%  gocache/pkg/command.Dispatch
+         0     0% 30.91%      6.62s 12.38%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+     0.16s   0.3% 31.21%      6.62s 12.38%  gocache/pkg/engine.(*Engine).sendAndWait
+     0.44s  0.82% 32.03%      5.45s 10.19%  runtime.mallocgcSmallScanNoHeader
+     0.29s  0.54% 32.57%      5.31s  9.93%  gocache/pkg/resp.(*Reader).readArray
+     0.05s 0.093% 32.67%      4.60s  8.60%  gocache/api/operations.New
+     0.06s  0.11% 32.78%      3.88s  7.26%  runtime.mcall
+     0.05s 0.093% 32.87%      3.81s  7.12%  runtime.park_m

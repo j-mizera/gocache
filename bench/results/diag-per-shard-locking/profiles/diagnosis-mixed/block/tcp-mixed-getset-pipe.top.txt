@@ -1,0 +1,37 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: delay
+Time: 2026-05-02 22:14:39 UTC
+Showing nodes accounting for 103.90s, 99.87% of 104.03s total
+Dropped 45 nodes (cum <= 0.52s)
+      flat  flat%   sum%        cum   cum%
+    70.22s 67.50% 67.50%     70.22s 67.50%  runtime.selectgo
+         0     0% 67.50%     61.12s 58.75%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 67.50%     61.12s 58.75%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 67.50%     61.10s 58.74%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 67.50%     61.10s 58.74%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0% 67.50%     61.10s 58.74%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 67.50%     61.08s 58.71%  gocache/pkg/command.Dispatch
+         0     0% 67.50%     61.08s 58.71%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0% 67.50%     61.08s 58.71%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0% 67.50%     33.68s 32.37%  testing.(*B).runN
+         0     0% 67.50%     30.90s 29.70%  gocache/pkg/resp/handler.HandleSet
+         0     0% 67.50%     30.19s 29.02%  gocache/pkg/resp/handler.HandleGet
+         0     0% 67.50%     20.61s 19.81%  main.main
+    20.61s 19.81% 87.31%     20.61s 19.81%  runtime.chanrecv1
+         0     0% 87.31%     20.61s 19.81%  runtime.main
+         0     0% 87.31%     20.61s 19.81%  testing.(*M).Run
+         0     0% 87.31%     20.61s 19.81%  testing.runBenchmarks
+         0     0% 87.31%     20.61s 19.81%  testing.(*B).Run
+         0     0% 87.31%     20.61s 19.81%  testing.runBenchmarks.func1
+         0     0% 87.31%     18.73s 18.00%  testing.(*B).doBench
+         0     0% 87.31%     18.73s 18.00%  testing.(*B).run
+         0     0% 87.31%     18.73s 18.00%  testing.(*benchState).processBench
+    13.07s 12.56% 99.87%     13.07s 12.56%  sync.(*WaitGroup).Wait
+         0     0% 99.87%     13.07s 12.56%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Pipelined
+         0     0% 99.87%     13.07s 12.56%  testing.(*B).RunParallel
+         0     0% 99.87%     13.06s 12.55%  testing.(*B).doBench.gowrap1
+         0     0% 99.87%     13.06s 12.55%  testing.(*B).launch
+         0     0% 99.87%      9.23s  8.88%  gocache/pkg/engine.(*Engine).Run
+         0     0% 99.87%      9.23s  8.88%  gocache/pkg/server.newTCPRig.gowrap1
+         0     0% 99.87%      1.88s  1.80%  testing.(*B).run1

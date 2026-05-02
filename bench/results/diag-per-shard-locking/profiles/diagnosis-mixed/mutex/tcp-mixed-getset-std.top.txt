@@ -1,0 +1,38 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: delay
+Time: 2026-05-02 22:15:26 UTC
+Showing nodes accounting for 96680.18us, 99.36% of 97304.98us total
+Dropped 76 nodes (cum <= 486.52us)
+Showing top 30 nodes out of 54
+      flat  flat%   sum%        cum   cum%
+96680.18us 99.36% 99.36% 96680.18us 99.36%  runtime.unlock (inline)
+         0     0% 99.36% 61270.38us 62.97%  runtime.selectgo
+         0     0% 99.36% 61270.38us 62.97%  runtime.selunlock
+         0     0% 99.36% 49618.47us 50.99%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 99.36% 48235.77us 49.57%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 99.36% 48235.77us 49.57%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0% 99.36% 48235.77us 49.57%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 99.36% 47887.25us 49.21%  gocache/pkg/command.Dispatch
+         0     0% 99.36% 47887.25us 49.21%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0% 99.36% 47887.25us 49.21%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0% 99.36% 31581.65us 32.46%  runtime.mcall
+         0     0% 99.36% 31269.25us 32.14%  runtime.park_m
+         0     0% 99.36% 30986.21us 31.84%  runtime.selparkcommit
+         0     0% 99.36% 25588.35us 26.30%  gocache/pkg/resp/handler.HandleGet
+         0     0% 99.36% 22419.89us 23.04%  gocache/pkg/resp/handler.HandleSet
+         0     0% 99.36% 17356.35us 17.84%  runtime.send
+         0     0% 99.36% 17094.04us 17.57%  runtime.selectgo.func3
+         0     0% 99.36% 14279.36us 14.67%  gocache/pkg/engine.(*Engine).Run
+         0     0% 99.36%  2649.78us  2.72%  runtime.systemstack
+         0     0% 99.36%  1502.23us  1.54%  gocache/pkg/resp.(*Reader).Read
+         0     0% 99.36%  1122.76us  1.15%  internal/poll.ignoringEINTRIO (inline)
+         0     0% 99.36%  1122.76us  1.15%  runtime.entersyscall
+         0     0% 99.36%  1122.76us  1.15%  runtime.reentersyscall
+         0     0% 99.36%  1122.76us  1.15%  syscall.Syscall
+         0     0% 99.36%   998.12us  1.03%  bufio.(*Reader).ReadByte
+         0     0% 99.36%   998.12us  1.03%  bufio.(*Reader).fill
+         0     0% 99.36%   998.12us  1.03%  internal/poll.(*FD).Read
+         0     0% 99.36%   998.12us  1.03%  net.(*conn).Read
+         0     0% 99.36%   998.12us  1.03%  net.(*netFD).Read
+         0     0% 99.36%   998.12us  1.03%  syscall.Read (inline)

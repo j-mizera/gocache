@@ -1,0 +1,34 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: delay
+Time: 2026-05-02 22:15:00 UTC
+Showing nodes accounting for 928.99ms, 99.94% of 929.52ms total
+Dropped 133 nodes (cum <= 4.65ms)
+      flat  flat%   sum%        cum   cum%
+  887.26ms 95.45% 95.45%   887.26ms 95.45%  runtime.unlock (partial-inline)
+         0     0% 95.45%   629.43ms 67.72%  runtime.selectgo
+         0     0% 95.45%   623.76ms 67.11%  runtime.selunlock
+         0     0% 95.45%   499.40ms 53.73%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 95.45%   497.60ms 53.53%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 95.45%   497.60ms 53.53%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0% 95.45%   497.60ms 53.53%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 95.45%   495.06ms 53.26%  gocache/pkg/command.Dispatch
+         0     0% 95.45%   494.98ms 53.25%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0% 95.45%   494.98ms 53.25%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0% 95.45%   254.98ms 27.43%  gocache/pkg/resp/handler.HandleGet
+         0     0% 95.45%   251.43ms 27.05%  runtime.mcall
+         0     0% 95.45%   251.33ms 27.04%  runtime.park_m
+         0     0% 95.45%   250.87ms 26.99%  runtime.selparkcommit
+         0     0% 95.45%   240.66ms 25.89%  gocache/pkg/resp/handler.HandleHset
+         0     0% 95.45%   175.35ms 18.86%  gocache/pkg/engine.(*Engine).Run
+   41.73ms  4.49% 99.94%    41.73ms  4.49%  sync.(*Mutex).Unlock
+         0     0% 99.94%    41.73ms  4.49%  sync.(*Pool).pin
+         0     0% 99.94%    41.73ms  4.49%  sync.(*Pool).pinSlow
+         0     0% 99.94%    41.70ms  4.49%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 99.94%    41.68ms  4.48%  sync.(*Pool).Put
+         0     0% 99.94%    23.84ms  2.56%  runtime.send
+         0     0% 99.94%    23.39ms  2.52%  runtime.selectgo.func3
+         0     0% 99.94%     5.47ms  0.59%  runtime.blockevent
+         0     0% 99.94%     5.47ms  0.59%  runtime.saveBlockEventStack
+         0     0% 99.94%     5.47ms  0.59%  runtime.saveblockevent
+         0     0% 99.94%     5.02ms  0.54%  runtime.systemstack

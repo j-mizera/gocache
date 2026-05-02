@@ -1,0 +1,38 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: alloc_objects
+Time: 2026-05-02 22:15:26 UTC
+Showing nodes accounting for 67900222, 99.60% of 68172314 total
+Dropped 240 nodes (cum <= 340861)
+Showing top 30 nodes out of 31
+      flat  flat%   sum%        cum   cum%
+   4312949  6.33%  6.33%   55957194 82.08%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  6.33%   38768003 56.87%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%  6.33%   38768003 56.87%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0%  6.33%   38768003 56.87%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+   4327292  6.35% 12.67%   25856894 37.93%  gocache/api/operations.New
+  12899911 18.92% 31.60%   17215399 25.25%  gocache/api/operations.nextID
+         0     0% 31.60%   15516354 22.76%  gocache/pkg/resp.(*Reader).Read
+   4289452  6.29% 37.89%   12666929 18.58%  gocache/pkg/resp.(*Reader).readArray
+   4848290  7.11% 45.00%    8127613 11.92%  gocache/pkg/resp.(*Reader).readBulkString
+         0     0% 45.00%    6308928  9.25%  gocache/pkg/engine.(*Engine).Run
+   5103327  7.49% 52.49%    5103327  7.49%  bufio.(*Reader).ReadBytes
+         0     0% 52.49%    5103327  7.49%  gocache/pkg/resp.(*Reader).ReadLine
+    928530  1.36% 53.85%    4889641  7.17%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Standard.func1
+         0     0% 53.85%    4889641  7.17%  testing.(*B).RunParallel.func1
+   4333316  6.36% 60.20%    4333316  6.36%  gocache/pkg/evaluator.(*BaseEvaluator).fillCmdCtx (inline)
+   4315104  6.33% 66.53%    4315488  6.33%  fmt.Sprintf
+   4314203  6.33% 72.86%    4314203  6.33%  gocache/api/context.NewContext (inline)
+   4289225  6.29% 79.15%    4289225  6.29%  context.WithValue
+         0     0% 79.15%    4289225  6.29%  gocache/api/operations.WithContext (inline)
+   4093850  6.01% 85.16%    4099320  6.01%  gocache/pkg/resp/handler.HandleSet.func1
+         0     0% 85.16%    3603059  5.29%  gocache/pkg/resp.(*Reader).readInteger
+   2393940  3.51% 88.67%    2400447  3.52%  gocache/pkg/resp/handler.HandleSet
+   2209429  3.24% 91.91%    2209429  3.24%  gocache/pkg/resp/handler.HandleGet.func1
+   1879964  2.76% 94.67%    1885481  2.77%  gocache/pkg/resp/handler.HandleGet
+   1275061  1.87% 96.54%    1735734  2.55%  gocache/pkg/resp.(*Reader).readSimpleString
+   1578245  2.32% 98.86%    1578245  2.32%  internal/strconv.FormatUint
+         0     0% 98.86%    1578245  2.32%  strconv.FormatUint (inline)
+         0     0% 98.86%    1005388  1.47%  testing.(*B).runN
+         0     0% 98.86%    1005289  1.47%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Standard
+    508134  0.75% 99.60%    1004751  1.47%  gocache/pkg/server.(*tcpRig).preloadTCPStringKeys
