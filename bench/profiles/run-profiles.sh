@@ -10,7 +10,7 @@
 #   mutexprofilefraction = 10 — 1 in 10 contention events
 # The defaults at rate=1 produce 24x slowdown on contended workloads.
 #
-# Output layout under bench/profiles/pre-implementation/.
+# Output layout under bench/results/<branch>/profiles/<label>/.
 
 set -euo pipefail
 

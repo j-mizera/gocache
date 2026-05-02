@@ -36,7 +36,7 @@ gocache image locally from the repo's root `Dockerfile` with `PLUGINS=""`
 ./bench/redis-benchmark/compare.sh gc-opaque-index-gocache gc-opaque-index-valkey
 ```
 
-Output per run lands under `bench/redis-benchmark/results/`:
+Output per run lands under `bench/results/<branch>/` (the script derives `<branch>` from `git rev-parse --abbrev-ref HEAD` with `/` rewritten to `-`; override with `RESULTS_DIR=`):
 
 - `<label>-<target>.csv` — standard suite (no pipelining)
 - `<label>-<target>-pipelined.csv` — same suite with `-P 10`
