@@ -171,7 +171,8 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 
-	if spec, hasSpec := b.specs[op]; hasSpec {
+	spec, hasSpec := b.specs[op]
+	if hasSpec {
 		n := len(args)
 		if n < spec.Min || (spec.Max >= 0 && n > spec.Max) {
 			return command.Result{Value: resp.ErrArgs(strings.ToLower(op))}
@@ -190,6 +191,17 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 			return command.Result{Value: "QUEUED"}
 		}
 	}
+
+	// Note: Spec.ReadOnly is populated for all read-only commands but not
+	// acted on here. An earlier iteration of #28 routed read-only commands
+	// inline under cache.RLock() to skip the engine queue. Profile evidence
+	// (diagnosis Finding 4) showed the engine channel hop was 42% of
+	// pipelined-GET wait time, but the bypass branch introduced
+	// sync.RWMutex mode-switching cost that regressed pipelined writes by
+	// roughly the same amount it gained on reads. The classification stays
+	// documented for future per-shard / lock-free designs that decouple
+	// reader and writer paths properly. See the #28 PR body for the
+	// measurement detail.
 
 	// --- Fast path: no observers attached, skip the entire instrumentation
 	// block. Profile attribution: bus.Emit + tracker.Start + tracker.Complete

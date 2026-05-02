@@ -52,7 +52,7 @@ func (m *Manager) NotifyMutation(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for ctx := range m.watchers[key] {
-		ctx.WatchDirty = true
+		ctx.MarkWatchDirty()
 	}
 }
 
@@ -63,7 +63,7 @@ func (m *Manager) NotifyAll() {
 	defer m.mu.Unlock()
 	for _, clients := range m.watchers {
 		for ctx := range clients {
-			ctx.WatchDirty = true
+			ctx.MarkWatchDirty()
 		}
 	}
 }

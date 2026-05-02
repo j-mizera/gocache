@@ -30,7 +30,7 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 		return command.Result{Err: clientctx.ErrExecWithoutMulti}
 	}
 
-	if cmdCtx.Client.WatchDirty {
+	if cmdCtx.Client.IsWatchDirty() {
 		cmdCtx.Client.ResetTransaction()
 		if cmdCtx.WatchManager != nil {
 			cmdCtx.WatchManager.Unwatch(cmdCtx.Client)

@@ -13,7 +13,7 @@ func TestNew(t *testing.T) {
 	if c.Authenticated {
 		t.Error("expected Authenticated false")
 	}
-	if c.WatchDirty {
+	if c.IsWatchDirty() {
 		t.Error("expected WatchDirty false")
 	}
 	if len(c.WatchedKeys) != 0 {
@@ -51,10 +51,10 @@ func TestClearWatch(t *testing.T) {
 	c := New()
 	c.WatchedKeys["foo"] = struct{}{}
 	c.WatchedKeys["bar"] = struct{}{}
-	c.WatchDirty = true
+	c.MarkWatchDirty()
 
 	c.ClearWatch()
-	if c.WatchDirty {
+	if c.IsWatchDirty() {
 		t.Error("expected WatchDirty false after ClearWatch")
 	}
 	if len(c.WatchedKeys) != 0 {

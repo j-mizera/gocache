@@ -2,6 +2,7 @@ package clientctx
 
 import (
 	"errors"
+	"sync/atomic"
 
 	"gocache/pkg/rex"
 )
@@ -22,12 +23,27 @@ type ClientContext struct {
 	ProtoVersion  int
 	Authenticated bool
 	WatchedKeys   map[string]struct{}
-	WatchDirty    bool
+	// watchDirty is set from another connection's mutation goroutine via
+	// watch.Manager.NotifyMutation while held by the engine's cache lock,
+	// and read by HandleExec on this connection's goroutine without that
+	// lock. Atomic access bridges the cross-goroutine boundary.
+	watchDirty    atomic.Bool
 	RexVersion    int               // 0 = disabled, 1 = META lines enabled
 	RexMeta       *rex.Store        // nil until first REX.META SET/MSET
 	CmdMeta       map[string]string // transient per-command META, set by server, cleared after eval
 	OperationID   string            // parent operation ID (connection operation), set by server
 }
+
+// IsWatchDirty reports whether a mutation has invalidated this client's
+// watched keys. Safe to call from any goroutine.
+func (c *ClientContext) IsWatchDirty() bool { return c.watchDirty.Load() }
+
+// MarkWatchDirty flips the dirty flag. Idempotent; multiple concurrent
+// callers settle on true.
+func (c *ClientContext) MarkWatchDirty() { c.watchDirty.Store(true) }
+
+// ClearWatchDirty resets the dirty flag (called from EXEC/DISCARD).
+func (c *ClientContext) ClearWatchDirty() { c.watchDirty.Store(false) }
 
 func New() *ClientContext {
 	return &ClientContext{
@@ -54,5 +70,5 @@ func (c *ClientContext) EnqueueCommand(parts []string) {
 // ClearWatch resets all watch state on this client.
 func (c *ClientContext) ClearWatch() {
 	c.WatchedKeys = make(map[string]struct{})
-	c.WatchDirty = false
+	c.watchDirty.Store(false)
 }
