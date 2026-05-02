@@ -1,0 +1,36 @@
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/shardproto
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkTCPShard_Mixed_GetSet_Pipelined/N=1-4         	  398608	     12777 ns/op	    5166 B/op	     164 allocs/op
+BenchmarkTCPShard_Mixed_GetSet_Pipelined/N=4-4         	  625569	      8855 ns/op	    5187 B/op	     164 allocs/op
+BenchmarkTCPShard_Mixed_GetSet_Pipelined/N=8-4         	  636874	      8561 ns/op	    5198 B/op	     165 allocs/op
+BenchmarkTCPShard_Mixed_GetSet_Pipelined/N=16-4        	  692647	      8327 ns/op	    5206 B/op	     165 allocs/op
+BenchmarkTCPShard_Mixed_GetSet_Pipelined/N=32-4        	  651699	      8526 ns/op	    5216 B/op	     165 allocs/op
+BenchmarkTCPShard_Mixed_GetHset_Pipelined/N=1-4        	  461764	     11857 ns/op	    6638 B/op	     169 allocs/op
+BenchmarkTCPShard_Mixed_GetHset_Pipelined/N=4-4        	  588559	      9646 ns/op	    6081 B/op	     164 allocs/op
+BenchmarkTCPShard_Mixed_GetHset_Pipelined/N=8-4        	  656914	      9032 ns/op	    6018 B/op	     164 allocs/op
+BenchmarkTCPShard_Mixed_GetHset_Pipelined/N=16-4       	  564656	      9231 ns/op	    6101 B/op	     164 allocs/op
+BenchmarkTCPShard_Mixed_GetHset_Pipelined/N=32-4       	  638379	      9010 ns/op	    6049 B/op	     165 allocs/op
+BenchmarkTCPShard_GET_Pipelined/N=1-4                  	  568476	     10290 ns/op	    4151 B/op	     150 allocs/op
+BenchmarkTCPShard_GET_Pipelined/N=4-4                  	  657981	      8622 ns/op	    4154 B/op	     150 allocs/op
+BenchmarkTCPShard_GET_Pipelined/N=8-4                  	  654901	      8526 ns/op	    4155 B/op	     150 allocs/op
+BenchmarkTCPShard_GET_Pipelined/N=16-4                 	  771038	      7880 ns/op	    4157 B/op	     150 allocs/op
+BenchmarkTCPShard_GET_Pipelined/N=32-4                 	  738164	      7837 ns/op	    4164 B/op	     150 allocs/op
+BenchmarkTCPShard_SET_Pipelined/N=1-4                  	  489319	     10966 ns/op	    6249 B/op	     180 allocs/op
+BenchmarkTCPShard_SET_Pipelined/N=4-4                  	  699717	      9019 ns/op	    6253 B/op	     180 allocs/op
+BenchmarkTCPShard_SET_Pipelined/N=8-4                  	  660440	      8731 ns/op	    6255 B/op	     180 allocs/op
+BenchmarkTCPShard_SET_Pipelined/N=16-4                 	  655328	      8770 ns/op	    6261 B/op	     180 allocs/op
+BenchmarkTCPShard_SET_Pipelined/N=32-4                 	  644703	      8847 ns/op	    6271 B/op	     180 allocs/op
+BenchmarkTCPShard_GET_Standard/N=1-4                   	 1687059	      3558 ns/op	     415 B/op	      15 allocs/op
+BenchmarkTCPShard_GET_Standard/N=4-4                   	 1705410	      3629 ns/op	     415 B/op	      15 allocs/op
+BenchmarkTCPShard_GET_Standard/N=8-4                   	 1673172	      3810 ns/op	     415 B/op	      15 allocs/op
+BenchmarkTCPShard_GET_Standard/N=16-4                  	 1602188	      3713 ns/op	     416 B/op	      15 allocs/op
+BenchmarkTCPShard_GET_Standard/N=32-4                  	 1595551	      3663 ns/op	     416 B/op	      15 allocs/op
+BenchmarkTCPShard_SET_Standard/N=1-4                   	 1578862	      3875 ns/op	     621 B/op	      18 allocs/op
+BenchmarkTCPShard_SET_Standard/N=4-4                   	 1597521	      3849 ns/op	     621 B/op	      18 allocs/op
+BenchmarkTCPShard_SET_Standard/N=8-4                   	 1582405	      3710 ns/op	     621 B/op	      18 allocs/op
+BenchmarkTCPShard_SET_Standard/N=16-4                  	 1494410	      3971 ns/op	     622 B/op	      18 allocs/op
+BenchmarkTCPShard_SET_Standard/N=32-4                  	 1532234	      3941 ns/op	     623 B/op	      18 allocs/op
+PASS
+ok  	gocache/pkg/shardproto	430.861s
