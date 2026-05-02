@@ -1,0 +1,62 @@
+gc 1 @0.005s 0%: 0.011+0.18+0.003 ms clock, 0.044+0/0.098/0.14+0.015 ms cpu, 2->2->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+gc 2 @0.005s 0%: 0.016+0.12+0.002 ms clock, 0.065+0/0.055/0.20+0.008 ms cpu, 1->1->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine dispatch loop started"}
+gc 3 @0.006s 0%: 0.022+0.22+0.018 ms clock, 0.090+0.17/0.18/0+0.073 ms cpu, 3->4->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine stop signal received"}
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/server
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkTCP_HSET_Standard-4   	gc 4 @0.007s 0%: 0.024+0.19+0.002 ms clock, 0.097+0/0.18/0.12+0.008 ms cpu, 5->5->3 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine dispatch loop started"}
+gc 5 @0.009s 1%: 0.032+0.21+0.018 ms clock, 0.12+0.37/0.18/0+0.074 ms cpu, 7->7->5 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.027s 1%: 0.034+0.30+0.013 ms clock, 0.13+0.54/0.28/0+0.052 ms cpu, 10->11->10 MB, 10 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine stop signal received"}
+gc 7 @0.028s 1%: 0.070+0.16+0.002 ms clock, 0.28+0/0.14/0.28+0.011 ms cpu, 11->11->9 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine dispatch loop started"}
+gc 8 @0.029s 1%: 0.028+0.23+0.016 ms clock, 0.11+0.40/0.20/0+0.064 ms cpu, 18->18->10 MB, 19 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 9 @0.042s 1%: 0.056+0.86+0.008 ms clock, 0.22+0.030/0.80/0.48+0.034 ms cpu, 19->19->15 MB, 20 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 10 @0.248s 0%: 0.027+0.97+0.012 ms clock, 0.11+0.14/0.89/1.5+0.050 ms cpu, 29->29->17 MB, 31 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine stop signal received"}
+gc 11 @0.685s 0%: 0.061+1.1+0.003 ms clock, 0.24+0/1.1/1.6+0.012 ms cpu, 31->31->16 MB, 36 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine dispatch loop started"}
+gc 12 @0.689s 0%: 0.046+0.35+0.013 ms clock, 0.18+0.57/0.33/0+0.054 ms cpu, 28->28->13 MB, 32 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 13 @0.768s 0%: 0.038+1.6+0.023 ms clock, 0.15+0.040/1.6/0.95+0.094 ms cpu, 25->25->17 MB, 26 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 14 @1.187s 0%: 0.031+1.4+0.013 ms clock, 0.12+0.13/1.2/2.1+0.053 ms cpu, 34->34->18 MB, 36 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 15 @1.986s 0%: 0.027+1.5+0.010 ms clock, 0.11+0.20/1.3/1.6+0.040 ms cpu, 35->35->18 MB, 37 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 16 @3.354s 0%: 0.030+1.7+0.012 ms clock, 0.12+0.20/1.7/2.2+0.051 ms cpu, 36->36->19 MB, 37 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 17 @5.222s 0%: 0.027+1.2+0.012 ms clock, 0.10+0.20/1.1/1.9+0.050 ms cpu, 37->37->19 MB, 38 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 18 @7.390s 0%: 0.029+1.7+0.012 ms clock, 0.11+0.33/1.6/1.9+0.050 ms cpu, 38->38->20 MB, 38 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 19 @10.864s 0%: 0.026+1.8+0.010 ms clock, 0.10+0.21/1.6/2.4+0.041 ms cpu, 40->40->20 MB, 41 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 20 @14.724s 0%: 0.039+1.7+0.009 ms clock, 0.15+0.041/1.6/2.2+0.037 ms cpu, 40->40->20 MB, 41 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 21 @18.771s 0%: 0.030+1.8+0.009 ms clock, 0.12+0.020/1.3/2.9+0.037 ms cpu, 41->41->20 MB, 42 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 22 @22.543s 0%: 0.057+1.8+0.009 ms clock, 0.23+0.017/1.7/3.4+0.036 ms cpu, 41->41->22 MB, 42 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 23 @28.761s 0%: 0.026+2.5+0.010 ms clock, 0.10+0.20/1.8/3.2+0.040 ms cpu, 44->44->23 MB, 45 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 24 @36.623s 0%: 0.040+1.8+0.009 ms clock, 0.16+0.048/1.7/3.3+0.038 ms cpu, 46->46->23 MB, 47 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 25 @44.812s 0%: 0.033+2.0+0.008 ms clock, 0.13+0.025/1.9/3.4+0.034 ms cpu, 46->46->23 MB, 47 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 26 @53.546s 0%: 0.027+1.5+0.008 ms clock, 0.11+0.034/1.4/3.8+0.034 ms cpu, 47->47->24 MB, 48 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 27 @62.516s 0%: 0.027+2.0+0.010 ms clock, 0.11+0.23/1.9/3.5+0.040 ms cpu, 47->47->24 MB, 48 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 28 @71.816s 0%: 0.038+1.7+0.008 ms clock, 0.15+0.20/1.5/4.2+0.035 ms cpu, 47->47->24 MB, 48 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 29 @81.033s 0%: 0.027+2.4+0.011 ms clock, 0.11+0.21/2.1/4.1+0.044 ms cpu, 47->47->24 MB, 48 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 30 @89.756s 0%: 0.027+2.1+0.009 ms clock, 0.11+0.022/2.0/4.1+0.038 ms cpu, 48->48->27 MB, 50 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 31 @104.327s 0%: 0.034+2.7+0.008 ms clock, 0.13+0.26/2.7/4.2+0.033 ms cpu, 54->54->29 MB, 56 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 32 @123.350s 0%: 0.035+2.8+0.011 ms clock, 0.14+0.34/2.8/5.0+0.044 ms cpu, 58->58->29 MB, 59 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 33 @143.221s 0%: 0.034+2.5+0.010 ms clock, 0.13+0.26/2.4/6.9+0.043 ms cpu, 58->58->29 MB, 59 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 34 @163.747s 0%: 0.039+2.8+0.009 ms clock, 0.15+0.027/2.8/5.3+0.039 ms cpu, 58->58->30 MB, 60 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 35 @185.141s 0%: 0.027+3.3+0.011 ms clock, 0.11+0.27/2.8/5.0+0.046 ms cpu, 59->59->30 MB, 60 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 36 @207.104s 0%: 0.030+2.9+0.007 ms clock, 0.12+0.34/2.8/5.3+0.031 ms cpu, 59->59->30 MB, 60 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 37 @229.916s 0%: 0.035+2.6+0.007 ms clock, 0.14+0.040/2.5/5.0+0.031 ms cpu, 59->59->30 MB, 61 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T15:05:01Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:05:01Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:05:01Z","message":"engine stop signal received"}
+  182864	   1260346 ns/op	    3149 B/op	      49 allocs/op
+PASS
+gc 38 @231.162s 0%: 0.023+0.16+0.002 ms clock, 0.092+0/0.14/0.41+0.010 ms cpu, 34->34->0 MB, 61 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+gc 39 @231.165s 0%: 0.019+0.28+0.032 ms clock, 0.079+0.062/0.20/0.17+0.12 ms cpu, 4->4->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+ok  	gocache/pkg/server	231.172s

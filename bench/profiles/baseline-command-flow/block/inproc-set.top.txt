@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:06:01 UTC
+Showing nodes accounting for 132.30s, 88.72% of 149.12s total
+Dropped 17 nodes (cum <= 0.75s)
+Showing top 20 nodes out of 32
+      flat  flat%   sum%        cum   cum%
+   117.97s 79.12% 79.12%    117.97s 79.12%  runtime.selectgo
+         0     0% 79.12%    117.43s 78.75%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 79.12%    117.43s 78.75%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 79.12%    117.43s 78.75%  gocache/pkg/server.BenchmarkInProc_SET.func1
+         0     0% 79.12%    117.43s 78.75%  testing.(*B).RunParallel.func1
+         0     0% 79.12%    114.90s 77.05%  gocache/pkg/command.Dispatch
+         0     0% 79.12%    114.90s 77.05%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0% 79.12%    114.90s 77.05%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0% 79.12%    114.90s 77.05%  gocache/pkg/resp/handler.HandleSet
+         0     0% 79.12%     28.61s 19.18%  testing.(*B).runN
+         0     0% 79.12%     14.33s  9.61%  main.main
+    14.33s  9.61% 88.72%     14.33s  9.61%  runtime.chanrecv1
+         0     0% 88.72%     14.33s  9.61%  runtime.main
+         0     0% 88.72%     14.33s  9.61%  testing.(*M).Run
+         0     0% 88.72%     14.32s  9.60%  testing.(*B).Run
+         0     0% 88.72%     14.32s  9.60%  testing.runBenchmarks
+         0     0% 88.72%     14.32s  9.60%  testing.runBenchmarks.func1
+         0     0% 88.72%     14.32s  9.60%  testing.(*B).doBench
+         0     0% 88.72%     14.32s  9.60%  testing.(*B).run
+         0     0% 88.72%     14.32s  9.60%  testing.(*benchState).processBench

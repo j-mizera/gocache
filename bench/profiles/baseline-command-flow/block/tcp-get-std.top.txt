@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:05:47 UTC
+Showing nodes accounting for 76.36s, 99.45% of 76.78s total
+Dropped 45 nodes (cum <= 0.38s)
+Showing top 20 nodes out of 31
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     46.33s 60.34%  testing.(*B).runN
+    30.02s 39.10% 39.10%     30.02s 39.10%  runtime.selectgo
+         0     0% 39.10%     28.63s 37.29%  main.main
+    28.63s 37.29% 76.39%     28.63s 37.29%  runtime.chanrecv1
+         0     0% 76.39%     28.63s 37.29%  runtime.main
+         0     0% 76.39%     28.63s 37.29%  testing.(*M).Run
+         0     0% 76.39%     28.62s 37.28%  testing.runBenchmarks
+         0     0% 76.39%     28.62s 37.28%  testing.(*B).Run
+         0     0% 76.39%     28.62s 37.28%  testing.runBenchmarks.func1
+         0     0% 76.39%     26.45s 34.44%  testing.(*B).doBench
+         0     0% 76.39%     26.45s 34.44%  testing.(*B).run
+         0     0% 76.39%     26.45s 34.44%  testing.(*benchState).processBench
+         0     0% 76.39%     23.48s 30.58%  gocache/pkg/engine.(*Engine).Run
+         0     0% 76.39%     23.48s 30.58%  gocache/pkg/server.newTCPRig.gowrap1
+    17.71s 23.06% 99.45%     17.71s 23.06%  sync.(*WaitGroup).Wait
+         0     0% 99.45%     17.71s 23.06%  gocache/pkg/server.BenchmarkTCP_GET_Standard
+         0     0% 99.45%     17.71s 23.06%  testing.(*B).RunParallel
+         0     0% 99.45%     17.70s 23.06%  testing.(*B).doBench.gowrap1
+         0     0% 99.45%     17.70s 23.06%  testing.(*B).launch
+         0     0% 99.45%      6.96s  9.07%  gocache/pkg/server.(*Server).acceptConnections.gowrap1

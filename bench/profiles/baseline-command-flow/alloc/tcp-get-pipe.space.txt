@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: alloc_space
+Time: 2026-05-02 15:06:41 UTC
+Showing nodes accounting for 13776147.23kB, 82.91% of 16615207.21kB total
+Dropped 237 nodes (cum <= 83076.04kB)
+Showing top 20 nodes out of 41
+      flat  flat%   sum%        cum   cum%
+160605.87kB  0.97%  0.97% 14924428.53kB 89.82%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  0.97% 13496362.75kB 81.23%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+854824.79kB  5.14%  6.11% 13496362.75kB 81.23%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+3270072.65kB 19.68% 25.79% 3270072.65kB 19.68%  gocache/api/operations.(*Operation).ContextSnapshot
+1868162.49kB 11.24% 37.04% 1868162.49kB 11.24%  gocache/api/events.newEventProto
+1402088.93kB  8.44% 45.47% 1402088.93kB  8.44%  gocache/api/operations.(*Operation).Enrich
+1364626.28kB  8.21% 53.69% 1365503.08kB  8.22%  fmt.Sprintf
+   48.58kB 0.00029% 53.69% 1321998.48kB  7.96%  gocache/pkg/operations.(*Tracker).Start
+778390.91kB  4.68% 58.37% 1321933.68kB  7.96%  gocache/api/operations.New
+         0     0% 58.37% 1305320.70kB  7.86%  gocache/pkg/resp.(*Reader).Read
+         0     0% 58.37% 1288110.72kB  7.75%  gocache/pkg/evaluator.resultToHookStrings
+662409.73kB  3.99% 62.36% 1128869.60kB  6.79%  gocache/api/events.NewOperationComplete
+662922.64kB  3.99% 66.35% 1128289.80kB  6.79%  gocache/api/events.NewCommandPost
+    8.03kB 4.8e-05% 66.35% 1115234.91kB  6.71%  testing.(*B).RunParallel.func1
+68862.32kB  0.41% 66.76% 1115226.88kB  6.71%  gocache/pkg/server.BenchmarkTCP_GET_Pipelined.func1
+809959.56kB  4.87% 71.64% 977310.88kB  5.88%  gocache/pkg/resp.(*Reader).readArray
+506438.34kB  3.05% 74.69% 975055.29kB  5.87%  gocache/api/events.NewCommandPre
+504713.51kB  3.04% 77.72% 972375.36kB  5.85%  gocache/api/events.NewOperationStart
+717798.73kB  4.32% 82.04% 717798.73kB  4.32%  gocache/pkg/server.respCmd (inline)
+144213.87kB  0.87% 82.91% 716641.83kB  4.31%  gocache/pkg/resp/handler.HandleGet

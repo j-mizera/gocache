@@ -1,0 +1,29 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: cpu
+Time: 2026-05-02 15:05:01 UTC
+Duration: 17.20s, Total samples = 60.48s (351.60%)
+Showing nodes accounting for 4.97s, 8.22% of 60.48s total
+Dropped 380 nodes (cum <= 0.30s)
+Showing top 20 nodes out of 186
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     44.91s 74.26%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+     0.54s  0.89%  0.89%     44.91s 74.26%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+     0.03s  0.05%  0.94%     43.52s 71.96%  gocache/pkg/server.BenchmarkInProc_GET.func1
+         0     0%  0.94%     43.52s 71.96%  testing.(*B).RunParallel.func1
+     0.85s  1.41%  2.35%     17.05s 28.19%  runtime.mallocgc
+     0.11s  0.18%  2.53%     15.88s 26.26%  runtime.systemstack
+     1.26s  2.08%  4.61%     13.06s 21.59%  runtime.mallocgcSmallScanNoHeader
+     0.17s  0.28%  4.89%      9.51s 15.72%  runtime.newobject
+     0.04s 0.066%  4.96%      8.77s 14.50%  fmt.Sprintf
+     1.27s  2.10%  7.06%      8.07s 13.34%  runtime.selectgo
+     0.03s  0.05%  7.11%      7.83s 12.95%  gocache/pkg/evaluator.resultToHookStrings
+     0.01s 0.017%  7.13%      7.72s 12.76%  runtime.profilealloc
+     0.08s  0.13%  7.26%      7.60s 12.57%  runtime.mProf_Malloc
+     0.14s  0.23%  7.49%      7.09s 11.72%  gocache/pkg/command.Dispatch
+     0.05s 0.083%  7.57%      6.98s 11.54%  gocache/pkg/resp/handler.HandleGet
+         0     0%  7.57%      6.95s 11.49%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+     0.19s  0.31%  7.89%      6.95s 11.49%  gocache/pkg/engine.(*Engine).sendAndWait
+     0.12s   0.2%  8.09%      6.93s 11.46%  gocache/pkg/engine.(*Engine).Run
+     0.01s 0.017%  8.10%      6.81s 11.26%  runtime.callers
+     0.07s  0.12%  8.22%      6.78s 11.21%  runtime.callers.func1

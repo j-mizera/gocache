@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:05:47 UTC
+Showing nodes accounting for 696.13ms, 100% of 696.14ms total
+Dropped 134 nodes (cum <= 3.48ms)
+Showing top 20 nodes out of 29
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%   663.07ms 95.25%  gocache/pkg/server.(*Server).handleConnection
+         0     0%     0%   656.23ms 94.27%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%     0%   656.23ms 94.27%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+  643.26ms 92.40% 92.40%   643.33ms 92.41%  sync.(*Mutex).Unlock (partial-inline)
+         0     0% 92.40%   643.05ms 92.37%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 92.40%   636.69ms 91.46%  sync.(*RWMutex).Unlock
+         0     0% 92.40%   384.12ms 55.18%  gocache/pkg/operations.(*Tracker).Complete (inline)
+         0     0% 92.40%   384.12ms 55.18%  gocache/pkg/operations.(*Tracker).finish
+         0     0% 92.40%   127.32ms 18.29%  gocache/pkg/operations.(*Tracker).Start
+         0     0% 92.40%   125.48ms 18.03%  gocache/pkg/events.(*Bus).Emit
+   52.87ms  7.60%   100%    52.87ms  7.60%  runtime.unlock (inline)
+         0     0%   100%    25.23ms  3.62%  runtime.selectgo
+         0     0%   100%    25.05ms  3.60%  runtime.selunlock
+         0     0%   100%    20.93ms  3.01%  runtime.mcall
+         0     0%   100%    19.99ms  2.87%  runtime.park_m
+         0     0%   100%    19.18ms  2.76%  runtime.selparkcommit
+         0     0%   100%    17.63ms  2.53%  gocache/pkg/command.Dispatch
+         0     0%   100%    17.63ms  2.53%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0%   100%    17.63ms  2.53%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0%   100%    17.63ms  2.53%  gocache/pkg/resp/handler.HandleGet

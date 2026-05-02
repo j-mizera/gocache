@@ -1,0 +1,29 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: cpu
+Time: 2026-05-02 15:01:10 UTC
+Duration: 231.16s, Total samples = 236.74s (102.41%)
+Showing nodes accounting for 225.31s, 95.17% of 236.74s total
+Dropped 349 nodes (cum <= 1.18s)
+Showing top 20 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+     0.01s 0.0042% 0.0042%    229.29s 96.85%  gocache/pkg/engine.(*Engine).Run
+     0.03s 0.013% 0.017%    228.88s 96.68%  gocache/pkg/resp/handler.HandleHset.func1
+         0     0% 0.017%    228.80s 96.65%  gocache/pkg/resp/handler.hsetNative (inline)
+     0.04s 0.017% 0.034%    228.79s 96.64%  gocache/pkg/resp/handler.finishHsetNative
+         0     0% 0.034%    228.71s 96.61%  gocache/pkg/cache.(*Cache).RawSet
+     0.01s 0.0042% 0.038%    228.71s 96.61%  gocache/pkg/cache.(*Cache).setInternal
+    26.40s 11.15% 11.19%    228.59s 96.56%  gocache/pkg/cache.estimateSize
+    15.37s  6.49% 17.68%    202.15s 85.39%  runtime.mapIterNext
+   142.69s 60.27% 77.95%    186.79s 78.90%  internal/runtime/maps.(*Iter).Next
+     0.01s 0.0042% 77.96%    113.99s 48.15%  gocache/pkg/cache.(*Cache).keySize
+         0     0% 77.96%    113.97s 48.14%  gocache/pkg/cache.(*Cache).chargedSize
+    23.50s  9.93% 87.89%     23.50s  9.93%  internal/runtime/maps.ctrlGroup.matchFull (inline)
+     9.66s  4.08% 91.97%      9.66s  4.08%  internal/runtime/maps.(*groupReference).key (inline)
+     0.02s 0.0084% 91.97%      4.58s  1.93%  gocache/pkg/server.(*Server).handleConnection
+     4.30s  1.82% 93.79%      4.30s  1.82%  internal/runtime/syscall/linux.Syscall6
+     0.01s 0.0042% 93.79%      4.15s  1.75%  internal/poll.ignoringEINTRIO (inline)
+     0.03s 0.013% 93.81%      4.13s  1.74%  syscall.Syscall
+     0.02s 0.0084% 93.82%      4.06s  1.71%  syscall.RawSyscall6
+     3.21s  1.36% 95.17%      3.21s  1.36%  internal/abi.(*MapType).IndirectKey (inline)
+         0     0% 95.17%      3.15s  1.33%  bufio.(*Writer).Flush

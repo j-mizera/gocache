@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:01:10 UTC
+Showing nodes accounting for 485.72us, 100% of 485.72us total
+Dropped 6 nodes (cum <= 2.43us)
+Showing top 20 nodes out of 42
+      flat  flat%   sum%        cum   cum%
+  335.84us 69.14% 69.14%   335.84us 69.14%  runtime.unlock (inline)
+         0     0% 69.14%   221.82us 45.67%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 69.14%   221.82us 45.67%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 69.14%   221.82us 45.67%  gocache/pkg/server.BenchmarkInProc_HSET.func1
+         0     0% 69.14%   221.82us 45.67%  testing.(*B).RunParallel.func1
+         0     0% 69.14%   219.12us 45.11%  runtime.findRunnable
+         0     0% 69.14%   219.12us 45.11%  runtime.schedule
+         0     0% 69.14%   185.55us 38.20%  runtime.mcall
+         0     0% 69.14%   185.55us 38.20%  runtime.park_m
+  149.89us 30.86%   100%   149.89us 30.86%  sync.(*Mutex).Unlock (inline)
+         0     0%   100%   149.89us 30.86%  sync.(*RWMutex).Unlock
+         0     0%   100%   143.57us 29.56%  gocache/pkg/operations.(*Tracker).Complete (inline)
+         0     0%   100%   143.57us 29.56%  gocache/pkg/operations.(*Tracker).finish
+         0     0%   100%   101.39us 20.87%  runtime.newstack
+         0     0%   100%    84.46us 17.39%  runtime.stopm
+         0     0%   100%    81.25us 16.73%  runtime.runSafePointFn
+         0     0%   100%    71.14us 14.65%  gocache/api/operations.New
+         0     0%   100%    71.14us 14.65%  gocache/api/operations.nextID
+         0     0%   100%    71.14us 14.65%  gocache/pkg/operations.(*Tracker).Start
+         0     0%   100%    60.41us 12.44%  runtime.copystack

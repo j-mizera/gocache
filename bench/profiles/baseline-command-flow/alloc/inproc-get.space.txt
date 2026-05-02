@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: alloc_space
+Time: 2026-05-02 15:05:18 UTC
+Showing nodes accounting for 19312786.61kB, 85.57% of 22568258.48kB total
+Dropped 163 nodes (cum <= 112841.29kB)
+Showing top 20 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+         0     0%     0% 21468939.14kB 95.13%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+1363339.19kB  6.04%  6.04% 21468939.14kB 95.13%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+145411.64kB  0.64%  6.69% 20453380.13kB 90.63%  gocache/pkg/server.BenchmarkInProc_GET.func1
+         0     0%  6.69% 20453380.13kB 90.63%  testing.(*B).RunParallel.func1
+5190722.71kB 23.00% 29.69% 5190722.71kB 23.00%  gocache/api/operations.(*Operation).ContextSnapshot
+2965332.08kB 13.14% 42.82% 2965332.08kB 13.14%  gocache/api/events.newEventProto
+2224354.93kB  9.86% 52.68% 2224354.93kB  9.86%  gocache/api/operations.(*Operation).Enrich
+2200709.53kB  9.75% 62.43% 2203397.92kB  9.76%  fmt.Sprintf
+    9.39kB 4.2e-05% 62.43% 2102508.64kB  9.32%  gocache/pkg/operations.(*Tracker).Start
+1237567.56kB  5.48% 67.92% 2102499.25kB  9.32%  gocache/api/operations.New
+         0     0% 67.92% 2078958.05kB  9.21%  gocache/pkg/evaluator.resultToHookStrings
+1052592.20kB  4.66% 72.58% 1792511.79kB  7.94%  gocache/api/events.NewCommandPost
+1048813.08kB  4.65% 77.23% 1790068.19kB  7.93%  gocache/api/events.NewOperationComplete
+804040.35kB  3.56% 80.79% 1545210.48kB  6.85%  gocache/api/events.NewOperationStart
+801800.53kB  3.55% 84.34% 1544787.79kB  6.84%  gocache/api/events.NewCommandPre
+         0     0% 84.34% 1308620.07kB  5.80%  testing.(*B).runN
+         0     0% 84.34% 1308607.35kB  5.80%  gocache/pkg/server.BenchmarkInProc_GET
+47378.52kB  0.21% 84.55% 1299074.49kB  5.76%  gocache/pkg/server.(*inProcRig).preloadStringKeys
+230714.89kB  1.02% 85.57% 1156070.97kB  5.12%  gocache/pkg/resp/handler.HandleGet
+         0     0% 85.57% 1046827.62kB  4.64%  testing.(*B).launch

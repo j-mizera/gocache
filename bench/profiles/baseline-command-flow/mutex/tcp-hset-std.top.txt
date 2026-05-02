@@ -1,0 +1,22 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:05:01 UTC
+Showing nodes accounting for 93.81ms, 100% of 93.81ms total
+Dropped 26 nodes (cum <= 0.47ms)
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%    92.37ms 98.46%  gocache/pkg/server.(*Server).handleConnection
+         0     0%     0%    92.37ms 98.46%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+   92.37ms 98.46% 98.46%    92.37ms 98.46%  sync.(*Mutex).Unlock (inline)
+         0     0% 98.46%    92.37ms 98.46%  sync.(*RWMutex).Unlock
+         0     0% 98.46%    87.04ms 92.78%  gocache/pkg/operations.(*Tracker).Start
+         0     0% 98.46%     5.33ms  5.68%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 98.46%     5.33ms  5.68%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 98.46%     5.33ms  5.68%  gocache/pkg/operations.(*Tracker).Complete (inline)
+         0     0% 98.46%     5.33ms  5.68%  gocache/pkg/operations.(*Tracker).finish
+    1.45ms  1.54%   100%     1.45ms  1.54%  runtime.unlock (inline)
+         0     0%   100%     0.89ms  0.95%  runtime.mcall
+         0     0%   100%     0.89ms  0.95%  runtime.park_m
+         0     0%   100%     0.72ms  0.77%  runtime.findRunnable
+         0     0%   100%     0.72ms  0.77%  runtime.schedule
+         0     0%   100%     0.60ms  0.64%  runtime.selparkcommit

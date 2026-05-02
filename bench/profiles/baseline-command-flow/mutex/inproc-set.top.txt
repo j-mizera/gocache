@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:06:01 UTC
+Showing nodes accounting for 3108.54ms, 100% of 3109.10ms total
+Dropped 128 nodes (cum <= 15.55ms)
+Showing top 20 nodes out of 43
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%  2823.90ms 90.83%  gocache/pkg/server.BenchmarkInProc_SET.func1
+         0     0%     0%  2823.90ms 90.83%  testing.(*B).RunParallel.func1
+         0     0%     0%  2823.28ms 90.81%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%     0%  2823.28ms 90.81%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+ 2534.32ms 81.51% 81.51%  2535.16ms 81.54%  sync.(*Mutex).Unlock (partial-inline)
+         0     0% 81.51%  2496.56ms 80.30%  sync.(*RWMutex).Unlock
+         0     0% 81.51%  1263.15ms 40.63%  gocache/pkg/events.(*Bus).Emit
+         0     0% 81.51%   760.08ms 24.45%  gocache/pkg/operations.(*Tracker).Complete (inline)
+         0     0% 81.51%   760.08ms 24.45%  gocache/pkg/operations.(*Tracker).finish
+  574.22ms 18.47%   100%   574.22ms 18.47%  runtime.unlock (partial-inline)
+         0     0%   100%   475.42ms 15.29%  gocache/pkg/operations.(*Tracker).Start
+         0     0%   100%   409.72ms 13.18%  runtime.selectgo
+         0     0%   100%   356.71ms 11.47%  runtime.selunlock
+         0     0%   100%   261.35ms  8.41%  gocache/pkg/resp/handler.HandleSet
+         0     0%   100%   260.69ms  8.38%  gocache/pkg/command.Dispatch
+         0     0%   100%   260.69ms  8.38%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0%   100%   260.69ms  8.38%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0%   100%   150.55ms  4.84%  gocache/pkg/engine.(*Engine).Run
+         0     0%   100%   128.78ms  4.14%  runtime.mcall
+         0     0%   100%   128.78ms  4.14%  runtime.park_m

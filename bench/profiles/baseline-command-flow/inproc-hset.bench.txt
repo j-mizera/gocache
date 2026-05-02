@@ -1,0 +1,52 @@
+gc 1 @0.005s 0%: 0.009+0.18+0.003 ms clock, 0.037+0/0.075/0.15+0.013 ms cpu, 2->2->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+gc 2 @0.005s 0%: 0.008+0.11+0.001 ms clock, 0.035+0/0.11/0.075+0.006 ms cpu, 1->1->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine stop signal received"}
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/server
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkInProc_HSET-4   	gc 3 @0.006s 0%: 0.009+0.077+0.001 ms clock, 0.036+0/0.052/0.14+0.005 ms cpu, 3->3->3 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine dispatch loop started"}
+gc 4 @0.006s 0%: 0.022+0.22+0.005 ms clock, 0.090+0.24/0.15/0+0.022 ms cpu, 7->7->5 MB, 7 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine stop signal received"}
+gc 5 @0.007s 0%: 0.035+0.26+0.001 ms clock, 0.14+0.045/0.18/0.11+0.004 ms cpu, 10->9->9 MB, 10 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 6 @0.008s 0%: 0.014+0.12+0.001 ms clock, 0.056+0/0.11/0.072+0.004 ms cpu, 9->9->9 MB, 19 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine dispatch loop started"}
+gc 7 @0.009s 1%: 0.020+0.18+0.001 ms clock, 0.080+0.29/0.13/0.033+0.006 ms cpu, 18->18->10 MB, 18 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 8 @0.059s 0%: 0.16+0.91+0.008 ms clock, 0.66+0.064/0.82/0.94+0.032 ms cpu, 21->21->15 MB, 21 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 9 @0.438s 0%: 0.031+1.1+0.013 ms clock, 0.12+0.13/1.0/1.1+0.053 ms cpu, 30->30->16 MB, 31 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine stop signal received"}
+gc 10 @0.677s 0%: 0.073+0.34+0.002 ms clock, 0.29+0/0.33/0.32+0.009 ms cpu, 20->20->12 MB, 32 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+{"level":"info","source":"server","time":"2026-05-02T14:57:29Z","message":"engine dispatch loop started"}
+gc 11 @0.680s 0%: 0.037+0.29+0.011 ms clock, 0.15+0.38/0.26/0+0.047 ms cpu, 23->23->12 MB, 24 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 12 @0.779s 0%: 0.065+1.0+0.008 ms clock, 0.26+0.086/1.0/0.79+0.033 ms cpu, 23->23->15 MB, 24 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 13 @1.255s 0%: 0.035+1.3+0.012 ms clock, 0.14+0.15/1.1/1.3+0.050 ms cpu, 29->29->16 MB, 31 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 14 @1.978s 0%: 0.054+1.5+0.010 ms clock, 0.21+0.15/1.2/1.6+0.043 ms cpu, 29->29->16 MB, 32 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 15 @3.188s 0%: 0.041+1.6+0.016 ms clock, 0.16+0.026/1.5/1.9+0.065 ms cpu, 30->30->16 MB, 33 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 16 @4.729s 0%: 0.030+1.5+0.011 ms clock, 0.12+0.15/1.2/1.4+0.046 ms cpu, 31->31->16 MB, 34 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 17 @6.291s 0%: 0.078+1.8+0.015 ms clock, 0.31+0/1.4/2.5+0.062 ms cpu, 31->31->18 MB, 34 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 18 @9.068s 0%: 0.058+1.8+0.015 ms clock, 0.23+0.044/1.6/3.3+0.063 ms cpu, 33->33->18 MB, 36 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 19 @12.934s 0%: 0.030+1.9+0.009 ms clock, 0.12+0.24/1.7/3.1+0.036 ms cpu, 36->36->18 MB, 37 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 20 @17.020s 0%: 0.027+1.3+0.010 ms clock, 0.11+0.015/1.2/3.6+0.040 ms cpu, 36->36->18 MB, 37 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 21 @21.168s 0%: 0.028+1.7+0.008 ms clock, 0.11+0.014/1.6/2.5+0.035 ms cpu, 36->36->18 MB, 37 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 22 @25.728s 0%: 0.026+1.5+0.013 ms clock, 0.10+0.18/1.2/2.4+0.052 ms cpu, 37->37->21 MB, 38 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 23 @33.433s 0%: 0.027+1.6+0.009 ms clock, 0.11+0.16/1.6/2.9+0.036 ms cpu, 41->41->21 MB, 42 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 24 @41.880s 0%: 0.032+2.6+0.014 ms clock, 0.13+0.022/2.6/5.8+0.056 ms cpu, 42->42->21 MB, 43 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 25 @50.749s 0%: 0.032+2.1+0.012 ms clock, 0.13+0.22/1.9/2.8+0.048 ms cpu, 42->42->21 MB, 43 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 26 @60.019s 0%: 0.026+2.0+0.011 ms clock, 0.10+0.19/1.9/2.7+0.045 ms cpu, 42->42->21 MB, 43 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 27 @69.538s 0%: 0.027+1.5+0.011 ms clock, 0.10+0.018/1.5/4.2+0.044 ms cpu, 42->42->21 MB, 43 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 28 @78.854s 0%: 0.035+3.9+0.010 ms clock, 0.14+0.014/3.8/6.2+0.043 ms cpu, 43->43->22 MB, 44 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 29 @87.613s 0%: 0.082+2.0+0.011 ms clock, 0.33+0.16/1.9/3.5+0.045 ms cpu, 43->44->24 MB, 45 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 30 @100.979s 0%: 0.030+2.3+0.008 ms clock, 0.12+0.20/2.1/4.0+0.035 ms cpu, 49->49->27 MB, 50 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 31 @120.302s 0%: 0.026+2.3+0.008 ms clock, 0.10+0.22/2.2/4.1+0.035 ms cpu, 53->53->27 MB, 54 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 32 @140.804s 0%: 0.035+2.9+0.015 ms clock, 0.14+0.21/2.8/4.6+0.063 ms cpu, 53->53->27 MB, 55 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 33 @163.160s 0%: 0.031+2.6+0.009 ms clock, 0.12+0.021/2.4/4.8+0.037 ms cpu, 54->54->27 MB, 55 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 34 @185.692s 0%: 0.049+2.5+0.009 ms clock, 0.19+0.30/2.4/4.3+0.037 ms cpu, 54->54->27 MB, 55 MB goal, 0 MB stacks, 0 MB globals, 4 P
+gc 35 @208.884s 0%: 0.032+2.4+0.008 ms clock, 0.12+0.019/2.3/4.6+0.034 ms cpu, 54->54->28 MB, 56 MB goal, 0 MB stacks, 0 MB globals, 4 P
+{"level":"info","source":"server","time":"2026-05-02T15:01:10Z","message":"engine stop signal received"}
+  179347	   1228964 ns/op	    2751 B/op	      35 allocs/op
+PASS
+gc 36 @221.092s 0%: 0.017+0.21+0.003 ms clock, 0.071+0/0.20/0.46+0.012 ms cpu, 44->44->0 MB, 56 MB goal, 0 MB stacks, 0 MB globals, 4 P (forced)
+gc 37 @221.096s 0%: 0.013+0.36+0.14 ms clock, 0.053+0.049/0.11/0.11+0.57 ms cpu, 3->4->1 MB, 4 MB goal, 0 MB stacks, 0 MB globals, 4 P
+ok  	gocache/pkg/server	221.102s

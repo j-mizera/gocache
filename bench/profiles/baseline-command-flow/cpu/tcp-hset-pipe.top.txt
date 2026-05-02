@@ -1,0 +1,29 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: cpu
+Time: 2026-05-02 15:06:41 UTC
+Duration: 68.63s, Total samples = 70.11s (102.15%)
+Showing nodes accounting for 67.06s, 95.65% of 70.11s total
+Dropped 249 nodes (cum <= 0.35s)
+Showing top 20 nodes out of 32
+      flat  flat%   sum%        cum   cum%
+     0.01s 0.014% 0.014%     67.98s 96.96%  gocache/pkg/engine.(*Engine).Run
+         0     0% 0.014%     67.83s 96.75%  gocache/pkg/resp/handler.HandleHset.func1
+         0     0% 0.014%     67.82s 96.73%  gocache/pkg/resp/handler.finishHsetNative
+         0     0% 0.014%     67.82s 96.73%  gocache/pkg/resp/handler.hsetNative (inline)
+         0     0% 0.014%     67.80s 96.71%  gocache/pkg/cache.(*Cache).RawSet
+     0.01s 0.014% 0.029%     67.80s 96.71%  gocache/pkg/cache.(*Cache).setInternal
+     7.39s 10.54% 10.57%     67.76s 96.65%  gocache/pkg/cache.estimateSize
+     4.99s  7.12% 17.69%     60.37s 86.11%  runtime.mapIterNext
+    42.74s 60.96% 78.65%     55.38s 78.99%  internal/runtime/maps.(*Iter).Next
+         0     0% 78.65%     34.02s 48.52%  gocache/pkg/cache.(*Cache).chargedSize
+         0     0% 78.65%     34.02s 48.52%  gocache/pkg/cache.(*Cache).keySize
+     6.78s  9.67% 88.32%      6.78s  9.67%  internal/runtime/maps.ctrlGroup.matchFull (inline)
+     2.73s  3.89% 92.21%      2.73s  3.89%  internal/runtime/maps.(*groupReference).key (inline)
+         0     0% 92.21%      1.26s  1.80%  gocache/pkg/server.(*Server).handleConnection
+     0.95s  1.36% 93.57%      0.95s  1.36%  internal/abi.(*MapType).IndirectElem (inline)
+     0.86s  1.23% 94.79%      0.86s  1.23%  internal/abi.(*MapType).IndirectKey (inline)
+     0.01s 0.014% 94.81%      0.85s  1.21%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 94.81%      0.84s  1.20%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+     0.59s  0.84% 95.65%      0.59s  0.84%  internal/runtime/maps.(*groupReference).elem (inline)
+         0     0% 95.65%      0.56s   0.8%  runtime.mallocgc

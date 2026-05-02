@@ -1,0 +1,17 @@
+label=estimateSize-fix
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=c391c967512da2c38f62620e9fce051ecd6b9390
+gocache_branch=perf/command-flow-optimization
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=7971274
+post_standard_rss_bytes=249665945
+final_rss_bytes=339948339
+delta_rss_bytes=331977065
