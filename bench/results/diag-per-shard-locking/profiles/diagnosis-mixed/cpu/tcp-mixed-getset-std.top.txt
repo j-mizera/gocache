@@ -1,0 +1,39 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: cpu
+Time: 2026-05-02 22:15:00 UTC
+Duration: 26.11s, Total samples = 61.45s (235.39%)
+Showing nodes accounting for 42.42s, 69.03% of 61.45s total
+Dropped 370 nodes (cum <= 0.31s)
+Showing top 30 nodes out of 129
+      flat  flat%   sum%        cum   cum%
+    38.76s 63.08% 63.08%     38.76s 63.08%  internal/runtime/syscall/linux.Syscall6
+         0     0% 63.08%     37.78s 61.48%  internal/poll.ignoringEINTRIO (inline)
+     0.18s  0.29% 63.37%     37.40s 60.86%  syscall.Syscall
+     0.31s   0.5% 63.87%     36.70s 59.72%  syscall.RawSyscall6
+     0.29s  0.47% 64.34%     30.31s 49.32%  gocache/pkg/server.(*Server).handleConnection
+     0.02s 0.033% 64.38%     28.82s 46.90%  gocache/pkg/resp.(*Writer).Flush (inline)
+     0.21s  0.34% 64.72%     28.80s 46.87%  bufio.(*Writer).Flush
+     0.06s 0.098% 64.82%     28.59s 46.53%  net.(*conn).Write
+     0.05s 0.081% 64.90%     28.53s 46.43%  net.(*netFD).Write
+     0.04s 0.065% 64.96%     28.41s 46.23%  internal/poll.(*FD).Write
+     0.08s  0.13% 65.09%     28.25s 45.97%  syscall.Write (inline)
+     0.01s 0.016% 65.11%     28.17s 45.84%  syscall.write
+     0.25s  0.41% 65.52%     18.87s 30.71%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Standard.func1
+         0     0% 65.52%     18.87s 30.71%  testing.(*B).RunParallel.func1
+     0.36s  0.59% 66.10%     14.66s 23.86%  gocache/pkg/resp.(*Reader).Read
+     0.16s  0.26% 66.36%     11.14s 18.13%  bufio.(*Reader).ReadByte
+     0.30s  0.49% 66.85%     10.98s 17.87%  bufio.(*Reader).fill
+     0.11s  0.18% 67.03%     10.67s 17.36%  net.(*conn).Read
+     0.03s 0.049% 67.08%     10.56s 17.18%  net.(*netFD).Read
+     0.31s   0.5% 67.58%     10.52s 17.12%  internal/poll.(*FD).Read
+     0.18s  0.29% 67.88%      9.48s 15.43%  syscall.Read (inline)
+     0.06s 0.098% 67.97%      9.30s 15.13%  syscall.read
+         0     0% 67.97%      6.36s 10.35%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+     0.06s 0.098% 68.07%      6.36s 10.35%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+     0.22s  0.36% 68.43%      6.12s  9.96%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+     0.12s   0.2% 68.62%      5.01s  8.15%  runtime.mcall
+     0.05s 0.081% 68.71%      4.87s  7.93%  runtime.park_m
+     0.06s 0.098% 68.80%      4.38s  7.13%  runtime.schedule
+     0.03s 0.049% 68.85%      4.15s  6.75%  gocache/pkg/engine.(*Engine).Run
+     0.11s  0.18% 69.03%         4s  6.51%  runtime.findRunnable

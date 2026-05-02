@@ -1,0 +1,32 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: delay
+Time: 2026-05-02 22:14:39 UTC
+Showing nodes accounting for 1405.54ms, 100% of 1405.81ms total
+Dropped 119 nodes (cum <= 7.03ms)
+      flat  flat%   sum%        cum   cum%
+ 1234.77ms 87.83% 87.83%  1234.77ms 87.83%  runtime.unlock (inline)
+         0     0% 87.83%      872ms 62.03%  runtime.selectgo
+         0     0% 87.83%   871.70ms 62.01%  runtime.selunlock
+         0     0% 87.83%   800.57ms 56.95%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 87.83%   794.51ms 56.52%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 87.83%   794.51ms 56.52%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0% 87.83%   794.51ms 56.52%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 87.83%   785.31ms 55.86%  gocache/pkg/command.Dispatch
+         0     0% 87.83%   785.31ms 55.86%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0% 87.83%   785.31ms 55.86%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0% 87.83%   397.35ms 28.27%  gocache/pkg/resp/handler.HandleGet
+         0     0% 87.83%   388.06ms 27.60%  gocache/pkg/resp/handler.HandleSet
+         0     0% 87.83%   355.42ms 25.28%  runtime.mcall
+         0     0% 87.83%   355.08ms 25.26%  runtime.park_m
+         0     0% 87.83%   352.61ms 25.08%  runtime.selparkcommit
+         0     0% 87.83%   243.02ms 17.29%  gocache/pkg/engine.(*Engine).Run
+  170.77ms 12.15%   100%   170.79ms 12.15%  sync.(*Mutex).Unlock
+         0     0%   100%   170.79ms 12.15%  sync.(*Pool).pin
+         0     0%   100%   170.79ms 12.15%  sync.(*Pool).pinSlow
+         0     0%   100%   168.59ms 11.99%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0%   100%   165.02ms 11.74%  sync.(*Pool).Put
+         0     0%   100%    31.45ms  2.24%  runtime.send
+         0     0%   100%    30.12ms  2.14%  runtime.selectgo.func3
+         0     0%   100%     7.94ms  0.56%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast.deferwrap1
+         0     0%   100%     7.94ms  0.56%  gocache/pkg/evaluator.putCmdCtx

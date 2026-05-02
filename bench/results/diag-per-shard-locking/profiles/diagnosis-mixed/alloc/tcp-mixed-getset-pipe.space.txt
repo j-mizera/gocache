@@ -1,0 +1,38 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: alloc_space
+Time: 2026-05-02 22:14:39 UTC
+Showing nodes accounting for 8270505.33kB, 98.54% of 8393298.43kB total
+Dropped 236 nodes (cum <= 41966.49kB)
+Showing top 30 nodes out of 32
+      flat  flat%   sum%        cum   cum%
+363466.12kB  4.33%  4.33% 6020357.83kB 71.73%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  4.33% 3550939.54kB 42.31%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%  4.33% 3550939.54kB 42.31%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0%  4.33% 3550939.54kB 42.31%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+1448669.48kB 17.26% 21.59% 2462300.65kB 29.34%  gocache/api/operations.New
+         0     0% 21.59% 2168633.05kB 25.84%  gocache/pkg/resp.(*Reader).Read
+1813071.16kB 21.60% 43.19% 2091232.30kB 24.92%  gocache/pkg/resp.(*Reader).readArray
+    4.02kB 4.8e-05% 43.19% 1929498.49kB 22.99%  testing.(*B).RunParallel.func1
+134939.21kB  1.61% 44.80% 1929494.48kB 22.99%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Pipelined.func1
+1716797.73kB 20.45% 65.25% 1716797.73kB 20.45%  gocache/pkg/server.respCmd (inline)
+435934.32kB  5.19% 70.45% 579453.07kB  6.90%  gocache/api/operations.nextID
+434178.10kB  5.17% 75.62% 434178.10kB  5.17%  gocache/api/context.NewContext (inline)
+433216.49kB  5.16% 80.78% 433216.49kB  5.16%  context.WithValue
+         0     0% 80.78% 433216.49kB  5.16%  gocache/api/operations.WithContext (inline)
+         0     0% 80.78% 398371.02kB  4.75%  gocache/pkg/engine.(*Engine).Run
+362836.37kB  4.32% 85.10% 364156.12kB  4.34%  gocache/pkg/resp/handler.HandleSet
+172722.07kB  2.06% 87.16% 303568.48kB  3.62%  gocache/pkg/resp.(*Reader).readBulkString
+170421.51kB  2.03% 89.19% 268071.62kB  3.19%  gocache/pkg/resp/handler.HandleSet.func1
+167057.86kB  1.99% 91.18% 167057.86kB  1.99%  bufio.(*Reader).ReadBytes
+         0     0% 91.18% 167057.86kB  1.99%  gocache/pkg/resp.(*Reader).ReadLine
+145668.14kB  1.74% 92.92% 145668.14kB  1.74%  gocache/pkg/evaluator.(*BaseEvaluator).fillCmdCtx (inline)
+143294.29kB  1.71% 94.63% 144679.36kB  1.72%  gocache/pkg/resp/handler.HandleGet
+143299.52kB  1.71% 96.33% 143518.74kB  1.71%  fmt.Sprintf
+130290.89kB  1.55% 97.89% 130290.89kB  1.55%  gocache/pkg/resp/handler.HandleGet.func1
+         0     0% 97.89% 111657.80kB  1.33%  gocache/pkg/resp.(*Reader).readInteger
+         0     0% 97.89% 97650.11kB  1.16%  gocache/pkg/cache.(*Cache).RawSet
+         0     0% 97.89% 97650.11kB  1.16%  gocache/pkg/cache.(*Cache).setInternal
+54634.03kB  0.65% 98.54% 97650.11kB  1.16%  gocache/pkg/cache.(*Cache).setPackedInternal
+         0     0% 98.54% 50184.09kB   0.6%  gocache/pkg/cache/slab.(*slabClass).alloc
+    4.03kB 4.8e-05% 98.54% 50184.09kB   0.6%  gocache/pkg/cache/slab.(*slabClass).growOneSlab

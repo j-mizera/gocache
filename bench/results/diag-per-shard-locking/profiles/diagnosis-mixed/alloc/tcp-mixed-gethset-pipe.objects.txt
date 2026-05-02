@@ -1,0 +1,38 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: alloc_objects
+Time: 2026-05-02 22:15:00 UTC
+Showing nodes accounting for 135926559, 99.09% of 137178714 total
+Dropped 244 nodes (cum <= 685893)
+Showing top 30 nodes out of 33
+      flat  flat%   sum%        cum   cum%
+   7766578  5.66%  5.66%  106959958 77.97%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  5.66%   69627592 50.76%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%  5.66%   69627592 50.76%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0%  5.66%   69627592 50.76%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+   7746740  5.65% 11.31%   46331289 33.77%  gocache/api/operations.New
+         0     0% 11.31%   32517832 23.70%  gocache/pkg/resp.(*Reader).Read
+  23126066 16.86% 28.17%   30856887 22.49%  gocache/api/operations.nextID
+   7758044  5.66% 33.82%   25761682 18.78%  gocache/pkg/resp.(*Reader).readArray
+  14378539 10.48% 44.30%   23203860 16.92%  gocache/pkg/resp.(*Reader).readBulkString
+   5207981  3.80% 48.10%   21004120 15.31%  gocache/pkg/server.BenchmarkTCP_Mixed_GetHset_Pipelined.func1
+         0     0% 48.10%   21004120 15.31%  testing.(*B).RunParallel.func1
+  10025567  7.31% 55.41%   10025567  7.31%  bufio.(*Reader).ReadBytes
+         0     0% 55.41%   10025567  7.31%  gocache/pkg/resp.(*Reader).ReadLine
+         0     0% 55.41%    8396910  6.12%  gocache/pkg/engine.(*Engine).Run
+   7777346  5.67% 61.08%    7777346  5.67%  gocache/pkg/evaluator.(*BaseEvaluator).fillCmdCtx (inline)
+   7763111  5.66% 66.74%    7763111  5.66%  context.WithValue
+         0     0% 66.74%    7763111  5.66%  gocache/api/operations.WithContext (inline)
+   7730663  5.64% 72.37%    7730822  5.64%  fmt.Sprintf
+   7727662  5.63% 78.01%    7727662  5.63%  gocache/api/context.NewContext (inline)
+   7567236  5.52% 83.52%    7567236  5.52%  gocache/pkg/resp/handler.HandleGet.func1
+   7340352  5.35% 88.87%    7340352  5.35%  gocache/pkg/server.respCmd (inline)
+         0     0% 88.87%    6341198  4.62%  gocache/pkg/resp.(*Reader).readInteger
+   3807217  2.78% 91.65%    3809695  2.78%  gocache/pkg/resp/handler.HandleGet
+         0     0% 91.65%    3799255  2.77%  gocache/pkg/server.(*Server).mapToResp
+   3799255  2.77% 94.42%    3799255  2.77%  gocache/pkg/server.(*Server).mapValueToResp
+   3536594  2.58% 97.00%    3540330  2.58%  gocache/pkg/resp/handler.HandleHset
+   2062774  1.50% 98.50%    2062774  1.50%  internal/strconv.FormatUint
+         0     0% 98.50%    2062774  1.50%  strconv.FormatUint (inline)
+    804834  0.59% 99.09%     809355  0.59%  gocache/pkg/resp/handler.HandleSet.func1
+         0     0% 99.09%     802783  0.59%  testing.(*B).runN

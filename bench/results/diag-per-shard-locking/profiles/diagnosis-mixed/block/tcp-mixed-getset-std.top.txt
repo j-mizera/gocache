@@ -1,0 +1,37 @@
+File: server.test
+Build ID: a20f644ca080ce6fa0b3b7f7efad6cda6cafc070
+Type: delay
+Time: 2026-05-02 22:15:26 UTC
+Showing nodes accounting for 69.33s, 100% of 69.34s total
+Dropped 33 nodes (cum <= 0.35s)
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     42.46s 61.24%  testing.(*B).runN
+    26.86s 38.75% 38.75%     26.86s 38.75%  runtime.selectgo
+         0     0% 38.75%     26.11s 37.65%  main.main
+    26.11s 37.65% 76.40%     26.11s 37.65%  runtime.chanrecv1
+         0     0% 76.40%     26.11s 37.65%  runtime.main
+         0     0% 76.40%     26.11s 37.65%  testing.(*M).Run
+         0     0% 76.40%     26.10s 37.64%  testing.(*B).Run
+         0     0% 76.40%     26.10s 37.64%  testing.runBenchmarks
+         0     0% 76.40%     26.10s 37.64%  testing.runBenchmarks.func1
+         0     0% 76.40%     24.17s 34.86%  testing.(*B).doBench
+         0     0% 76.40%     24.17s 34.86%  testing.(*B).run
+         0     0% 76.40%     24.17s 34.86%  testing.(*benchState).processBench
+         0     0% 76.40%     20.22s 29.16%  gocache/pkg/engine.(*Engine).Run
+         0     0% 76.40%     20.22s 29.16%  gocache/pkg/server.newTCPRig.gowrap1
+    16.36s 23.60%   100%     16.36s 23.60%  sync.(*WaitGroup).Wait
+         0     0%   100%     16.36s 23.60%  gocache/pkg/server.BenchmarkTCP_Mixed_GetSet_Standard
+         0     0%   100%     16.36s 23.60%  testing.(*B).RunParallel
+         0     0%   100%     16.36s 23.60%  testing.(*B).doBench.gowrap1
+         0     0%   100%     16.36s 23.60%  testing.(*B).launch
+         0     0%   100%      6.65s  9.59%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0%   100%      6.65s  9.59%  gocache/pkg/server.(*Server).handleConnection
+         0     0%   100%      6.65s  9.59%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0%   100%      6.65s  9.59%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateFast
+         0     0%   100%      6.65s  9.59%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0%   100%      6.65s  9.59%  gocache/pkg/command.Dispatch
+         0     0%   100%      6.65s  9.59%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0%   100%      6.65s  9.59%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0%   100%      3.85s  5.56%  gocache/pkg/resp/handler.HandleSet
+         0     0%   100%      2.80s  4.03%  gocache/pkg/resp/handler.HandleGet
+         0     0%   100%      1.93s  2.78%  testing.(*B).run1
