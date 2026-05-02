@@ -1,0 +1,17 @@
+label=baseline
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=2d548e6969a9ceab587ba79996a670cc3414d653
+gocache_branch=perf/engine-pooling
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=9285140
+post_standard_rss_bytes=24106762
+final_rss_bytes=27776778
+delta_rss_bytes=18491638
