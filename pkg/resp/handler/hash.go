@@ -50,6 +50,12 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
+// hashEntryOverhead is the per-entry constant used by estimateSize for
+// map[string]string. Kept in lockstep with pkg/cache.estimateSize so the
+// incremental size tracking matches what chargedSize would have computed
+// if it walked the map. Closes #23.
+const hashEntryOverhead = 32
+
 // hsetStartPacked seeds a new hash from a Packed buffer. Same promotion
 // logic as hsetPacked so a single field larger than maxValue skips Packed
 // entirely.
@@ -72,7 +78,7 @@ func hsetStartPacked(cmdCtx *command.Context, key string, kvs []string) any {
 			if perr != nil {
 				return perr
 			}
-			added += finishHsetNative(cmdCtx, key, m, kvs[i+2:])
+			added += finishHsetNative(cmdCtx, key, m, hashMapSize(m), kvs[i+2:])
 			return added
 		}
 	}
@@ -102,7 +108,7 @@ func hsetPacked(cmdCtx *command.Context, key string, buf []byte, kvs []string) a
 			if perr != nil {
 				return perr
 			}
-			added += finishHsetNative(cmdCtx, key, m, kvs[i+2:])
+			added += finishHsetNative(cmdCtx, key, m, hashMapSize(m), kvs[i+2:])
 			return added
 		}
 	}
@@ -112,24 +118,44 @@ func hsetPacked(cmdCtx *command.Context, key string, buf []byte, kvs []string) a
 	return added
 }
 
-// hsetNative mutates an existing Native hash (or a freshly-promoted one).
+// hsetNative mutates an existing Native hash. Reads the cached NativeSize
+// and tracks deltas as fields are added or replaced — never walks the map.
 func hsetNative(cmdCtx *command.Context, key string, hash map[string]string, kvs []string) any {
-	added := finishHsetNative(cmdCtx, key, hash, kvs)
+	return finishHsetNative(cmdCtx, key, hash, cmdCtx.Cache.NativeSize(key), kvs)
+}
+
+// finishHsetNative applies kvs to hash and persists with the resulting
+// payload byte size. priorSize is the byte cost of the existing map
+// (excluding key + per-entry overhead). Returns the number of newly-added
+// fields (HSET return semantics).
+func finishHsetNative(cmdCtx *command.Context, key string, hash map[string]string, priorSize int64, kvs []string) int {
+	added := 0
+	size := priorSize
+	for i := 0; i < len(kvs); i += 2 {
+		field, value := kvs[i], kvs[i+1]
+		if oldVal, exists := hash[field]; exists {
+			size += int64(len(value)) - int64(len(oldVal))
+		} else {
+			added++
+			size += int64(len(field)) + int64(len(value)) + hashEntryOverhead
+		}
+		hash[field] = value
+	}
+	_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, hash, size, 0)
 	return added
 }
 
-// finishHsetNative applies kvs to hash and persists. Returns the number of
-// newly-added fields (HSET return semantics).
-func finishHsetNative(cmdCtx *command.Context, key string, hash map[string]string, kvs []string) int {
-	added := 0
-	for i := 0; i < len(kvs); i += 2 {
-		if _, exists := hash[kvs[i]]; !exists {
-			added++
-		}
-		hash[kvs[i]] = kvs[i+1]
+// hashMapSize returns the estimateSize byte cost for a map[string]string,
+// excluding the per-entry overhead and key length (those live elsewhere
+// in the chargedSize formula). Walks the map exactly once — used at the
+// packed→native promotion boundary so we never re-walk on subsequent
+// HSET calls.
+func hashMapSize(hash map[string]string) int64 {
+	var size int64
+	for k, v := range hash {
+		size += int64(len(k)) + int64(len(v)) + hashEntryOverhead
 	}
-	_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, hash, 0)
-	return added
+	return size
 }
 
 // HandleHget implements HGET key field
@@ -209,9 +235,11 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 			return deleted
 		default:
 			hash := entry.Value.(map[string]string)
+			size := cmdCtx.Cache.NativeSize(key)
 			deleted := 0
 			for _, field := range fields {
-				if _, exists := hash[field]; exists {
+				if oldVal, exists := hash[field]; exists {
+					size -= int64(len(field)) + int64(len(oldVal)) + hashEntryOverhead
 					delete(hash, field)
 					deleted++
 				}
@@ -219,7 +247,7 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 			if len(hash) == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, hash, 0)
+				_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, hash, size, 0)
 			}
 			return deleted
 		}

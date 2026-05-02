@@ -370,6 +370,47 @@ func (c *Cache) RawLoad(key string, value any, expiration int64) {
 	c.setInternal(key, value, expiration, true)
 }
 
+// RawSetNativeWithSize stores a Go-native collection value at key without
+// walking it to compute size. byteSize is the payload byte cost (the same
+// number estimateSize would return minus per-entry overhead and len(key));
+// callers track it incrementally as they mutate the underlying
+// map/slice. This is the O(1) write path used by HSET/LPUSH/SADD/ZADD on
+// promoted entries. Closes #23.
+//
+// Must be called while holding the cache write lock.
+func (c *Cache) RawSetNativeWithSize(ctx context.Context, key string, value any, byteSize int64, expiration int64) error {
+	if c.maxBytes > 0 {
+		newSize := int64(entryOverhead) + int64(len(key)) + byteSize
+		oldSize := c.keySize(key)
+		delta := newSize - oldSize
+		if delta > 0 && c.usedBytes+delta > c.maxBytes {
+			switch c.evictionPolicy {
+			case EvictionLRU:
+				c.evictLRU(ctx, delta)
+			case EvictionNone:
+				logger.Warn(ctx).Str("key", key).Int64("usedBytes", c.usedBytes).Int64("maxBytes", c.maxBytes).Msg("write rejected, out of memory")
+				return ErrOutOfMemory
+			}
+		}
+	}
+	c.setNativeInternal(key, value, valueTypeOf(value), byteSize, expiration, false)
+	return nil
+}
+
+// NativeSize returns the cached byte-size of an EncNative entry. Returns 0
+// for absent keys or EncPacked entries (the packed size lives in the slab
+// allocator's class capacity). Handlers use this as the seed value for
+// incremental delta tracking — see hsetNative + finishHsetNative.
+//
+// Must be called while holding the cache read or write lock.
+func (c *Cache) NativeSize(key string) int64 {
+	ptr, ok := c.items[key]
+	if !ok || ptr.IsNil() {
+		return 0
+	}
+	return int64(c.slabs.Meta(ptr).NativeSize)
+}
+
 // RawSetPacked stores a packed byte-encoded value for the given ValueType.
 // The buffer layout must match pkg/cache/packed for that type. Enforces
 // the memory limit (evicting or returning ErrOutOfMemory as configured).
@@ -505,6 +546,9 @@ func estimateBytesSize(key string, buf []byte) int64 {
 // tracking. Values of []byte / string route to the slab-backed packed path.
 // Native container shapes are stored in the nativeValues sidecar keyed by
 // their slab slot; the slot's data region is unused but hosts the LRU meta.
+//
+// estimateSize walks the value (O(N) for collections); callers that already
+// know the size should use setNativeInternalWithSize to skip the walk.
 func (c *Cache) setInternal(key string, value any, expiration int64, suppressMutate bool) {
 	switch v := value.(type) {
 	case []byte:
@@ -514,13 +558,18 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 		c.setPackedInternal(key, ObjTypeBytes, []byte(v), expiration, suppressMutate)
 		return
 	}
+	c.setNativeInternal(key, value, valueTypeOf(value), nativePayloadSize(key, value), expiration, suppressMutate)
+}
 
-	newSize := estimateSize(key, value)
+// setNativeInternal stores a Go-native value at key. byteSize is the
+// caller-provided payload size (bytes the entry costs minus per-entry
+// overhead and the key length). It's recorded in the slot's SlotMeta so
+// chargedSize / keySize never walk the value to compute it again.
+func (c *Cache) setNativeInternal(key string, value any, vt ValueType, byteSize int64, expiration int64, suppressMutate bool) {
+	newSize := int64(entryOverhead) + int64(len(key)) + byteSize
 	oldSize := c.keySize(key)
 	c.usedBytes += newSize - oldSize
 
-	// Free the old slot (if any) regardless of previous encoding, then
-	// allocate a new minimum-class slot for the native entry.
 	if prevPtr, had := c.items[key]; had && !prevPtr.IsNil() {
 		c.lruRemove(prevPtr)
 		delete(c.keysBySlot, prevPtr)
@@ -531,21 +580,10 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	c.keysBySlot[ptr] = key
 	c.lruPushFront(ptr)
 
-	valueType := ObjTypeBytes
-	switch value.(type) {
-	case []string:
-		valueType = ObjTypeList
-	case map[string]string:
-		valueType = ObjTypeHash
-	case map[string]struct{}:
-		valueType = ObjTypeSet
-	case *SortedSet:
-		valueType = ObjTypeSortedSet
-	}
-
 	meta := c.slabs.Meta(ptr)
-	meta.ValueType = uint8(valueType)
+	meta.ValueType = uint8(vt)
 	meta.Encoding = uint8(EncNative)
+	meta.NativeSize = uint32(byteSize)
 	if expiration > 0 {
 		meta.ExpirationNs = expiration
 	} else {
@@ -557,6 +595,31 @@ func (c *Cache) setInternal(key string, value any, expiration int64, suppressMut
 	if !suppressMutate && c.OnMutate != nil {
 		c.OnMutate(key)
 	}
+}
+
+// valueTypeOf maps a Go-native value to its ObjType.
+func valueTypeOf(value any) ValueType {
+	switch value.(type) {
+	case []string:
+		return ObjTypeList
+	case map[string]string:
+		return ObjTypeHash
+	case map[string]struct{}:
+		return ObjTypeSet
+	case *SortedSet:
+		return ObjTypeSortedSet
+	}
+	return ObjTypeBytes
+}
+
+// nativePayloadSize returns just the value-shape byte cost (no key, no
+// per-entry overhead). It walks the value once — used only when the
+// caller does not provide an explicit size (snapshot loading, generic
+// RawSet). On the hot path, handlers track size incrementally and call
+// RawSetNativeWithSize instead.
+func nativePayloadSize(key string, value any) int64 {
+	full := estimateSize(key, value)
+	return full - int64(entryOverhead) - int64(len(key))
 }
 
 // evictLRU removes least recently used entries until delta bytes can be
@@ -654,16 +717,16 @@ func (c *Cache) keySize(key string) int64 {
 
 // chargedSize returns the byte cost to subtract from usedBytes when freeing
 // the slot identified by ptr (which maps to key). Packed entries use the
-// slab-held value length; native entries re-estimate from the sidecar.
+// slab-held value length; native entries read the cached SlotMeta.NativeSize
+// (set when the value was written) so we never walk the map/slice on the hot
+// path. See setInternal for where NativeSize is populated.
 func (c *Cache) chargedSize(key string, ptr slab.SlabPointer) int64 {
-	enc := Encoding(c.slabs.Meta(ptr).Encoding)
+	meta := c.slabs.Meta(ptr)
+	enc := Encoding(meta.Encoding)
 	if enc == EncPacked {
 		return int64(entryOverhead) + int64(len(key)) + int64(c.slabs.Size(ptr))
 	}
-	if v, ok := c.nativeValues[ptr]; ok {
-		return estimateSize(key, v)
-	}
-	return int64(entryOverhead) + int64(len(key))
+	return int64(entryOverhead) + int64(len(key)) + int64(meta.NativeSize)
 }
 
 // Range iterates over all cache entries. The callback receives a value-type
