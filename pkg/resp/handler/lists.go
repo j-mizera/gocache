@@ -17,6 +17,31 @@ import (
 // is not a valid non-negative float.
 var ErrInvalidTimeout = errors.New("timeout is not a float or out of range")
 
+// listEntryOverhead matches pkg/cache.estimateSize's per-element constant
+// for []string. Kept in lockstep so incremental tracking matches what
+// chargedSize would compute if it walked the slice.
+const listEntryOverhead = 16
+
+// listSliceSize walks a []string once to compute its estimateSize-equivalent
+// payload size. Used at the packed→native promotion boundary; subsequent
+// mutations track size incrementally and never re-walk.
+func listSliceSize(list []string) int64 {
+	var size int64
+	for _, s := range list {
+		size += int64(len(s)) + listEntryOverhead
+	}
+	return size
+}
+
+// listAppendSize returns the byte cost added by appending values to a list.
+func listAppendSize(values []string) int64 {
+	var size int64
+	for _, v := range values {
+		size += int64(len(v)) + listEntryOverhead
+	}
+	return size
+}
+
 // List commands operate on two encodings:
 //
 //   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a packed.List buffer, bounded by
@@ -63,7 +88,7 @@ func lpushStartPacked(cmdCtx *command.Context, key string, values []string) any 
 		if derr != nil {
 			return derr
 		}
-		_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, items, 0)
+		_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), 0)
 		return len(items)
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, 0); err != nil {
@@ -83,7 +108,7 @@ func lpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 		if derr != nil {
 			return derr
 		}
-		_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, items, 0)
+		_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), 0)
 		return len(items)
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, newBuf, 0); err != nil {
@@ -99,9 +124,8 @@ func lpushNative(cmdCtx *command.Context, key string, list []string, values []st
 		reversed[len(values)-1-i] = v
 	}
 	list = append(reversed, list...)
-	if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
-		return err
-	}
+	newSize := cmdCtx.Cache.NativeSize(key) + listAppendSize(values)
+	_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, list, newSize, 0)
 	return len(list)
 }
 
@@ -140,7 +164,7 @@ func rpushStartPacked(cmdCtx *command.Context, key string, values []string) any 
 		if derr != nil {
 			return derr
 		}
-		_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, items, 0)
+		_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), 0)
 		return len(items)
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, 0); err != nil {
@@ -160,7 +184,7 @@ func rpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 		if derr != nil {
 			return derr
 		}
-		_ = cmdCtx.Cache.RawSet(cmdCtx.Context(), key, items, 0)
+		_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), 0)
 		return len(items)
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, newBuf, 0); err != nil {
@@ -172,9 +196,8 @@ func rpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 
 func rpushNative(cmdCtx *command.Context, key string, list []string, values []string) any {
 	list = append(list, values...)
-	if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, 0); err != nil {
-		return err
-	}
+	newSize := cmdCtx.Cache.NativeSize(key) + listAppendSize(values)
+	_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, list, newSize, 0)
 	return len(list)
 }
 
@@ -264,9 +287,8 @@ func popList(cmdCtx *command.Context, key string, entry cache.Entry, fromLeft bo
 		if len(list) == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if werr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, list, ttl); werr != nil {
-				logger.Error(cmdCtx.Context()).Err(werr).Str("key", key).Msg("unexpected error on pop write-back")
-			}
+			newSize := cmdCtx.Cache.NativeSize(key) - int64(len(val)) - listEntryOverhead
+			_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, list, newSize, ttl)
 		}
 		return val, nil
 	}
