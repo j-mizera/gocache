@@ -7,6 +7,7 @@ import (
 	"gocache/pkg/cache/slab"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -183,11 +184,14 @@ func (c *Cache) entryFromSlot(ptr slab.SlabPointer) Entry {
 // LastAccess returns the wall-clock time of the last access to this entry,
 // sourced from the slab meta's LastAccessNs. Zero time means "unknown"
 // (never accessed or slot freed).
+//
+// Read with atomic.LoadInt64 because RawGet (potentially under RLock-only)
+// updates this field via atomic.StoreInt64.
 func (c *Cache) LastAccess(e Entry) time.Time {
 	if e.Ptr.IsNil() {
 		return time.Time{}
 	}
-	ns := c.slabs.Meta(e.Ptr).LastAccessNs
+	ns := atomic.LoadInt64(&c.slabs.Meta(e.Ptr).LastAccessNs)
 	if ns == 0 {
 		return time.Time{}
 	}
@@ -457,7 +461,9 @@ func (c *Cache) lruPushFront(ptr slab.SlabPointer) {
 	if c.lruTail.IsNil() {
 		c.lruTail = ptr
 	}
-	meta.LastAccessNs = time.Now().UnixNano()
+	// Atomic store so RLock-only readers (RawGet) can race-safely store the
+	// same field via atomic.StoreInt64.
+	atomic.StoreInt64(&meta.LastAccessNs, time.Now().UnixNano())
 }
 
 func (c *Cache) lruRemove(ptr slab.SlabPointer) {
@@ -480,7 +486,7 @@ func (c *Cache) lruRemove(ptr slab.SlabPointer) {
 
 func (c *Cache) lruMoveToFront(ptr slab.SlabPointer) {
 	if c.lruHead == ptr {
-		c.slabs.Meta(ptr).LastAccessNs = time.Now().UnixNano()
+		atomic.StoreInt64(&c.slabs.Meta(ptr).LastAccessNs, time.Now().UnixNano())
 		return
 	}
 	c.lruRemove(ptr)
@@ -622,16 +628,43 @@ func nativePayloadSize(key string, value any) int64 {
 	return full - int64(entryOverhead) - int64(len(key))
 }
 
-// evictLRU removes least recently used entries until delta bytes can be
-// accommodated within the memory limit.
+// evictSampleSize is how many tail-end entries to sample per eviction
+// pass. Mirrors Redis's maxmemory-samples default. Larger = closer to
+// strict LRU but more CPU per eviction; smaller = approximate LRU but
+// faster. 8 is the published Redis sweet spot and preserves the
+// test-pinned semantic that "a key read recently survives eviction".
+const evictSampleSize = 8
+
+// evictLRU removes the entry with the oldest LastAccessNs from the tail
+// region of the LRU list, repeating until delta bytes can be accommodated.
+//
+// Redis-style sampled approximate LRU: the linked list orders entries by
+// last WRITE position (writes call lruPushFront / lruMoveToFront under
+// the cache write lock). Reads via RawGet update LastAccessNs atomically
+// but do NOT touch the list — the list mutation is unsafe under RLock.
+// Eviction therefore samples up to evictSampleSize entries from the tail
+// end of the list (oldest writes) and picks the one with the smallest
+// LastAccessNs (oldest read). This preserves LRU correctness against
+// read-heavy workloads even though the list itself is write-ordered.
 func (c *Cache) evictLRU(ctx context.Context, delta int64) {
 	for c.maxBytes > 0 && c.usedBytes+delta > c.maxBytes {
 		if c.lruTail.IsNil() {
 			break
 		}
-		evictKey, ok := c.keysBySlot[c.lruTail]
+		victim := c.lruTail
+		victimAccess := atomic.LoadInt64(&c.slabs.Meta(victim).LastAccessNs)
+		node := c.slabs.Meta(victim).LRUPrev
+		for i := 1; i < evictSampleSize && !node.IsNil(); i++ {
+			access := atomic.LoadInt64(&c.slabs.Meta(node).LastAccessNs)
+			if access < victimAccess {
+				victim = node
+				victimAccess = access
+			}
+			node = c.slabs.Meta(node).LRUPrev
+		}
+		evictKey, ok := c.keysBySlot[victim]
 		if !ok {
-			logger.Warn(ctx).Msg("evictLRU: keysBySlot has no entry for lruTail; bailing")
+			logger.Warn(ctx).Msg("evictLRU: keysBySlot has no entry for victim; bailing")
 			break
 		}
 		logger.Debug(ctx).Str("key", evictKey).Msg("lru eviction")
@@ -639,16 +672,28 @@ func (c *Cache) evictLRU(ctx context.Context, delta int64) {
 	}
 }
 
-// RawGet returns the entry for key, updating its LRU position. The returned
-// Entry is a value-type snapshot assembled from the slab slot's metadata
-// and the native-value sidecar (if applicable).
-// Must be called while holding the cache lock.
+// RawGet returns the entry for key. The returned Entry is a value-type
+// snapshot assembled from the slab slot's metadata and the native-value
+// sidecar (if applicable).
+//
+// RawGet is safe under either the cache write lock OR the cache read lock.
+// It does NOT move the entry in the LRU linked list (that requires
+// exclusive access to the list head and neighbour pointers, which RLock
+// cannot provide). It does update LastAccessNs via atomic.StoreInt64 so
+// OBJECT IDLETIME and timestamp-based diagnostics stay accurate even on
+// the read-lock-bypass path.
+//
+// Eviction uses lruTail (write order). Read-heavy access patterns no
+// longer refresh the entry's LRU position; under memory pressure with
+// long-lived hot reads the eviction may pick an entry that is still
+// being read. This is the documented trade-off for the read-lock-bypass
+// throughput gain — see projects/gocache/plans/command-flow/read-lock-bypass.
 func (c *Cache) RawGet(key string) (Entry, bool) {
 	ptr, found := c.items[key]
 	if !found {
 		return Entry{}, false
 	}
-	c.lruMoveToFront(ptr)
+	atomic.StoreInt64(&c.slabs.Meta(ptr).LastAccessNs, time.Now().UnixNano())
 	return c.entryFromSlot(ptr), true
 }
 

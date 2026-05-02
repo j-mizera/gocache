@@ -29,7 +29,7 @@ func TestUnwatch(t *testing.T) {
 	if len(ctx.WatchedKeys) != 0 {
 		t.Error("expected empty WatchedKeys after Unwatch")
 	}
-	if ctx.WatchDirty {
+	if ctx.IsWatchDirty() {
 		t.Error("expected WatchDirty false after Unwatch")
 	}
 }
@@ -41,7 +41,7 @@ func TestNotifyMutation(t *testing.T) {
 	m.Watch(ctx, []string{"mykey"})
 	m.NotifyMutation("mykey")
 
-	if !ctx.WatchDirty {
+	if !ctx.IsWatchDirty() {
 		t.Error("expected WatchDirty true after NotifyMutation")
 	}
 }
@@ -53,7 +53,7 @@ func TestNotifyMutation_UnrelatedKey(t *testing.T) {
 	m.Watch(ctx, []string{"mykey"})
 	m.NotifyMutation("otherkey")
 
-	if ctx.WatchDirty {
+	if ctx.IsWatchDirty() {
 		t.Error("expected WatchDirty false for unrelated key mutation")
 	}
 }
@@ -68,10 +68,10 @@ func TestNotifyAll(t *testing.T) {
 
 	m.NotifyAll()
 
-	if !ctx1.WatchDirty {
+	if !ctx1.IsWatchDirty() {
 		t.Error("expected ctx1 dirty after NotifyAll")
 	}
-	if !ctx2.WatchDirty {
+	if !ctx2.IsWatchDirty() {
 		t.Error("expected ctx2 dirty after NotifyAll")
 	}
 }
@@ -86,10 +86,10 @@ func TestMultipleWatchersOnSameKey(t *testing.T) {
 
 	m.NotifyMutation("shared")
 
-	if !ctx1.WatchDirty {
+	if !ctx1.IsWatchDirty() {
 		t.Error("expected ctx1 dirty")
 	}
-	if !ctx2.WatchDirty {
+	if !ctx2.IsWatchDirty() {
 		t.Error("expected ctx2 dirty")
 	}
 }
@@ -103,7 +103,7 @@ func TestUnwatch_CleansUpWatcherMap(t *testing.T) {
 
 	// After unwatch, mutations should not affect ctx.
 	m.NotifyMutation("k1")
-	if ctx.WatchDirty {
+	if ctx.IsWatchDirty() {
 		t.Error("expected no notification after Unwatch")
 	}
 }
