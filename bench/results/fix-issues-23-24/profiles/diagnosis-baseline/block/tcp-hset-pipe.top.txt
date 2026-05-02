@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: delay
+Time: 2026-05-02 15:07:50 UTC
+Showing nodes accounting for 3691.45s, 100% of 3691.45s total
+Dropped 37 nodes (cum <= 18.46s)
+Showing top 20 nodes out of 25
+      flat  flat%   sum%        cum   cum%
+  3554.19s 96.28% 96.28%   3554.19s 96.28%  runtime.selectgo
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/command.Dispatch
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/engine.(*Engine).sendAndWait
+         0     0% 96.28%   3554.17s 96.28%  gocache/pkg/resp/handler.HandleHset
+         0     0% 96.28%    137.26s  3.72%  testing.(*B).runN
+         0     0% 96.28%     68.63s  1.86%  main.main
+    68.63s  1.86% 98.14%     68.63s  1.86%  runtime.chanrecv1
+         0     0% 98.14%     68.63s  1.86%  runtime.main
+         0     0% 98.14%     68.63s  1.86%  testing.(*M).Run
+         0     0% 98.14%     68.63s  1.86%  testing.(*B).Run
+         0     0% 98.14%     68.63s  1.86%  testing.runBenchmarks
+         0     0% 98.14%     68.63s  1.86%  testing.runBenchmarks.func1
+    68.63s  1.86%   100%     68.63s  1.86%  sync.(*WaitGroup).Wait
+         0     0%   100%     68.63s  1.86%  gocache/pkg/server.BenchmarkTCP_HSET_Pipelined
+         0     0%   100%     68.63s  1.86%  testing.(*B).RunParallel

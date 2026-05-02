@@ -78,4 +78,4 @@ To keep the thesis claim defensible, after gc-opaque-index:
 - Memory delta should drop from 12.9× to **≤3×** valkey's RSS growth.
 - Simple commands must not regress below the current 93% parity (they're already close).
 
-Full baselines preserved under `bench/redis-benchmark/results/resp-pool-*`. After gc-opaque-index lands, re-run both `--target gocache` and `--target valkey` with the same label convention (`gc-opaque-index-*`) and cross-compare.
+Full baselines preserved under `bench/results/feat-memory-optimization/resp-pool-*`. After gc-opaque-index lands, re-run both `--target gocache` and `--target valkey` with the same label convention (`gc-opaque-index-*`) and cross-compare.

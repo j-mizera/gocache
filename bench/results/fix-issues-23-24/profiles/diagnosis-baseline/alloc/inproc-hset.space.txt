@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: alloc_space
+Time: 2026-05-02 15:01:10 UTC
+Showing nodes accounting for 446591.95kB, 83.06% of 537669.68kB total
+Dropped 151 nodes (cum <= 2688.35kB)
+Showing top 20 nodes out of 45
+      flat  flat%   sum%        cum   cum%
+    8.03kB 0.0015% 0.0015% 479153.03kB 89.12%  testing.(*B).RunParallel.func1
+10482.56kB  1.95%  1.95%   479145kB 89.12%  gocache/pkg/server.BenchmarkInProc_HSET.func1
+         0     0%  1.95% 467543.99kB 86.96%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+32198.77kB  5.99%  7.94% 467543.99kB 86.96%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+124454.42kB 23.15% 31.09% 124454.42kB 23.15%  gocache/api/operations.(*Operation).ContextSnapshot
+71382.01kB 13.28% 44.36% 71382.01kB 13.28%  gocache/api/events.newEventProto
+53137.08kB  9.88% 54.25% 53137.08kB  9.88%  gocache/api/operations.(*Operation).Enrich
+   17.26kB 0.0032% 54.25% 50380.55kB  9.37%  gocache/pkg/operations.(*Tracker).Start
+29353.93kB  5.46% 59.71% 50363.29kB  9.37%  gocache/api/operations.New
+         0     0% 59.71% 47466.10kB  8.83%  gocache/pkg/engine.(*Engine).Run
+         0     0% 59.71% 47453.58kB  8.83%  gocache/pkg/resp/handler.HandleHset.func1
+25584.01kB  4.76% 64.47% 43241.32kB  8.04%  gocache/api/events.NewOperationComplete
+25306.21kB  4.71% 69.17% 43222.53kB  8.04%  gocache/api/events.NewCommandPost
+19916.92kB  3.70% 72.88% 37760.39kB  7.02%  gocache/api/events.NewOperationStart
+19741.86kB  3.67% 76.55% 37706.75kB  7.01%  gocache/api/events.NewCommandPre
+ 6103.78kB  1.14% 77.68% 30498.40kB  5.67%  gocache/pkg/resp/handler.HandleHset
+         0     0% 77.68% 28905.13kB  5.38%  gocache/pkg/cache/slab.(*slabClass).alloc
+         0     0% 77.68% 28905.13kB  5.38%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+28905.13kB  5.38% 83.06% 28905.13kB  5.38%  gocache/pkg/cache/slab.newSlab (inline)
+         0     0% 83.06% 25828.42kB  4.80%  gocache/pkg/resp/handler.hsetPacked

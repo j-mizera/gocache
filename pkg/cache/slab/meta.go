@@ -4,17 +4,21 @@ package slab
 // ignores these slots during mark-phase scanning. All mutations happen under
 // the cache's write lock.
 //
-// Size: 40 bytes, 8-byte aligned (32 B of fields + 6 B of natural trailing
+// Size: 40 bytes, 8-byte aligned (36 B of fields + 4 B of natural trailing
 // pad). Prev+next pointers + a nanosecond timestamp make each entry an LRU
 // list node. ValueType and Encoding live here so the forward key index can
 // be a bare `map[string]SlabPointer` — no `*Entry` indirection.
-// ExpirationNs replaces the Cache.ttl map — zero means "no TTL set". The
-// cache package maps its own enums onto these bytes.
+// ExpirationNs replaces the Cache.ttl map — zero means "no TTL set".
+// NativeSize caches the byte cost of an EncNative entry so chargedSize
+// doesn't walk the underlying map/slice on every keySize lookup. Unused
+// for EncPacked (size derives from the slab class). The cache package
+// maps its own enums onto these bytes.
 type SlotMeta struct {
 	LRUPrev      SlabPointer // zero = LRU head (no predecessor)
 	LRUNext      SlabPointer // zero = LRU tail (no successor)
 	LastAccessNs int64       // Unix nanos; ordering source for LRU eviction
 	ExpirationNs int64       // Unix nanos; zero = no TTL
+	NativeSize   uint32      // cached byte cost for EncNative entries; zero for EncPacked
 	ValueType    uint8       // cache.ValueType (ObjTypeBytes/List/Hash/Set/SortedSet)
 	Encoding     uint8       // cache.Encoding (EncNative / EncPacked)
 }

@@ -1,0 +1,23 @@
+{"level":"info","source":"server","time":"2026-05-02T15:07:50Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:52Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:52Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:52Z","message":"engine stop signal received"}
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/server
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkTCP_GET_Pipelined-4   	{"level":"info","source":"server","time":"2026-05-02T15:07:52Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:54Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:54Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:54Z","message":"engine stop signal received"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:54Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:57Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:57Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:57Z","message":"engine stop signal received"}
+{"level":"info","source":"server","time":"2026-05-02T15:07:57Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-02T15:08:11Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-02T15:08:11Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-02T15:08:11Z","message":"engine stop signal received"}
+  501162	     24526 ns/op	   34167 B/op	     510 allocs/op
+PASS
+ok  	gocache/pkg/server	21.410s

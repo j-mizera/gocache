@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: alloc_space
+Time: 2026-05-02 15:05:47 UTC
+Showing nodes accounting for 9918.71MB, 85.10% of 11655.35MB total
+Dropped 239 nodes (cum <= 58.28MB)
+Showing top 20 nodes out of 44
+      flat  flat%   sum%        cum   cum%
+  121.98MB  1.05%  1.05% 10892.75MB 93.46%  gocache/pkg/server.(*Server).handleConnection
+         0     0%  1.05%  9830.79MB 84.35%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+  624.84MB  5.36%  6.41%  9830.79MB 84.35%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+ 2397.16MB 20.57% 26.97%  2397.16MB 20.57%  gocache/api/operations.(*Operation).ContextSnapshot
+ 1365.95MB 11.72% 38.69%  1365.95MB 11.72%  gocache/api/events.newEventProto
+ 1027.61MB  8.82% 47.51%  1027.61MB  8.82%  gocache/api/operations.(*Operation).Enrich
+         0     0% 47.51%   982.23MB  8.43%  gocache/pkg/resp.(*Reader).Read
+    0.03MB 0.00027% 47.51%   966.65MB  8.29%  gocache/pkg/operations.(*Tracker).Start
+  568.28MB  4.88% 52.39%   966.61MB  8.29%  gocache/api/operations.New
+  944.08MB  8.10% 60.49%   944.56MB  8.10%  fmt.Sprintf
+         0     0% 60.49%   888.02MB  7.62%  gocache/pkg/evaluator.resultToHookStrings
+  484.05MB  4.15% 64.64%   825.76MB  7.08%  gocache/api/events.NewOperationComplete
+  482.84MB  4.14% 68.78%   823.28MB  7.06%  gocache/api/events.NewCommandPost
+  607.98MB  5.22% 74.00%   739.07MB  6.34%  gocache/pkg/resp.(*Reader).readArray
+  369.61MB  3.17% 77.17%   711.30MB  6.10%  gocache/api/events.NewOperationStart
+  367.68MB  3.15% 80.32%   709.72MB  6.09%  gocache/api/events.NewCommandPre
+   98.16MB  0.84% 81.17%   494.99MB  4.25%  gocache/pkg/resp/handler.HandleGet
+         0     0% 81.17%   458.46MB  3.93%  gocache/pkg/command.Dispatch
+         0     0% 81.17%   458.46MB  3.93%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+  458.46MB  3.93% 85.10%   458.46MB  3.93%  gocache/pkg/engine.(*Engine).sendAndWait

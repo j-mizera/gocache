@@ -1,0 +1,29 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: cpu
+Time: 2026-05-02 14:57:29 UTC
+Duration: 221.09s, Total samples = 222.62s (100.69%)
+Showing nodes accounting for 216.28s, 97.15% of 222.62s total
+Dropped 257 nodes (cum <= 1.11s)
+Showing top 20 nodes out of 22
+      flat  flat%   sum%        cum   cum%
+     0.03s 0.013% 0.013%    219.67s 98.67%  gocache/pkg/engine.(*Engine).Run
+     0.04s 0.018% 0.031%    219.29s 98.50%  gocache/pkg/resp/handler.HandleHset.func1
+         0     0% 0.031%    219.24s 98.48%  gocache/pkg/resp/handler.hsetNative (inline)
+     0.04s 0.018% 0.049%    219.23s 98.48%  gocache/pkg/resp/handler.finishHsetNative
+         0     0% 0.049%    219.16s 98.45%  gocache/pkg/cache.(*Cache).RawSet
+     0.04s 0.018% 0.067%    219.16s 98.45%  gocache/pkg/cache.(*Cache).setInternal
+    25.05s 11.25% 11.32%    219.08s 98.41%  gocache/pkg/cache.estimateSize
+    14.73s  6.62% 17.94%       194s 87.14%  runtime.mapIterNext
+   135.74s 60.97% 78.91%    179.29s 80.54%  internal/runtime/maps.(*Iter).Next
+         0     0% 78.91%    109.73s 49.29%  gocache/pkg/cache.(*Cache).chargedSize
+         0     0% 78.91%    109.73s 49.29%  gocache/pkg/cache.(*Cache).keySize
+    23.61s 10.61% 89.52%     23.61s 10.61%  internal/runtime/maps.ctrlGroup.matchFull (inline)
+     9.19s  4.13% 93.64%      9.19s  4.13%  internal/runtime/maps.(*groupReference).key (inline)
+     3.16s  1.42% 95.06%      3.16s  1.42%  internal/abi.(*MapType).IndirectKey (inline)
+     2.70s  1.21% 96.28%      2.70s  1.21%  internal/abi.(*MapType).IndirectElem (inline)
+         0     0% 96.28%      1.99s  0.89%  testing.(*B).RunParallel.func1
+     0.02s 0.009% 96.29%      1.98s  0.89%  gocache/pkg/server.BenchmarkInProc_HSET.func1
+     1.90s  0.85% 97.14%      1.90s  0.85%  internal/runtime/maps.(*groupReference).elem (inline)
+         0     0% 97.14%      1.87s  0.84%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+     0.03s 0.013% 97.15%      1.87s  0.84%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal

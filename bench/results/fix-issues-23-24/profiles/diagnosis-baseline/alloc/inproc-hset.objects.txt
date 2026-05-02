@@ -1,0 +1,28 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: alloc_objects
+Time: 2026-05-02 15:01:10 UTC
+Showing nodes accounting for 5458157, 87.82% of 6215268 total
+Dropped 170 nodes (cum <= 31076)
+Showing top 20 nodes out of 26
+      flat  flat%   sum%        cum   cum%
+       257 0.0041% 0.0041%    6206927 99.87%  testing.(*B).RunParallel.func1
+    296302  4.77%  4.77%    6206670 99.86%  gocache/pkg/server.BenchmarkInProc_HSET.func1
+         0     0%  4.77%    5840244 93.97%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+    372284  5.99% 10.76%    5840244 93.97%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+       160 0.0026% 10.76%    1142907 18.39%  gocache/pkg/operations.(*Tracker).Start
+    187865  3.02% 13.79%    1142747 18.39%  gocache/api/operations.New
+    761406 12.25% 26.04%     761406 12.25%  gocache/api/events.newEventProto
+    573533  9.23% 35.26%     760554 12.24%  gocache/api/operations.nextID
+    759374 12.22% 47.48%     759374 12.22%  gocache/api/operations.(*Operation).ContextSnapshot
+    400222  6.44% 53.92%     588566  9.47%  gocache/api/events.NewOperationComplete
+    195320  3.14% 57.06%     588086  9.46%  gocache/pkg/resp/handler.HandleHset
+    383463  6.17% 63.23%     575088  9.25%  gocache/api/events.NewCommandPre
+    377340  6.07% 69.31%     568447  9.15%  gocache/api/events.NewCommandPost
+    374055  6.02% 75.32%     564385  9.08%  gocache/api/events.NewOperationStart
+         0     0% 75.32%     392766  6.32%  gocache/pkg/command.Dispatch
+         0     0% 75.32%     392766  6.32%  gocache/pkg/engine.(*Engine).DispatchWithResult (inline)
+    392766  6.32% 81.64%     392766  6.32%  gocache/pkg/engine.(*Engine).sendAndWait
+    194328  3.13% 84.77%     194328  3.13%  gocache/api/context.NewContext (inline)
+    189482  3.05% 87.82%     189482  3.05%  internal/strconv.FormatInt
+         0     0% 87.82%     189482  3.05%  strconv.FormatInt (inline)

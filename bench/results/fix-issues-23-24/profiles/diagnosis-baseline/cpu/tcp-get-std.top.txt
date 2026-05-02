@@ -1,0 +1,29 @@
+File: server.test
+Build ID: a25934cacbb8c5a0a09dfe8289c0a8794815069b
+Type: cpu
+Time: 2026-05-02 15:05:18 UTC
+Duration: 28.63s, Total samples = 70.78s (247.26%)
+Showing nodes accounting for 36.30s, 51.29% of 70.78s total
+Dropped 451 nodes (cum <= 0.35s)
+Showing top 20 nodes out of 174
+      flat  flat%   sum%        cum   cum%
+     0.30s  0.42%  0.42%     40.66s 57.45%  gocache/pkg/server.(*Server).handleConnection
+    34.06s 48.12% 48.54%     34.06s 48.12%  internal/runtime/syscall/linux.Syscall6
+         0     0% 48.54%     33.58s 47.44%  internal/poll.ignoringEINTRIO (inline)
+     0.14s   0.2% 48.74%     33.27s 47.00%  syscall.Syscall
+     0.26s  0.37% 49.11%     32.49s 45.90%  syscall.RawSyscall6
+     0.10s  0.14% 49.25%     25.05s 35.39%  bufio.(*Writer).Flush
+         0     0% 49.25%     25.05s 35.39%  gocache/pkg/resp.(*Writer).Flush (inline)
+     0.08s  0.11% 49.36%     24.94s 35.24%  net.(*conn).Write
+     0.01s 0.014% 49.38%     24.86s 35.12%  net.(*netFD).Write
+     0.06s 0.085% 49.46%     24.82s 35.07%  internal/poll.(*FD).Write
+     0.09s  0.13% 49.59%     24.64s 34.81%  syscall.Write (inline)
+     0.02s 0.028% 49.62%     24.55s 34.68%  syscall.write
+         0     0% 49.62%     19.12s 27.01%  gocache/pkg/evaluator.(*BaseEvaluator).Evaluate (inline)
+     0.25s  0.35% 49.97%     19.12s 27.01%  gocache/pkg/evaluator.(*BaseEvaluator).evaluateInternal
+     0.03s 0.042% 50.01%     17.42s 24.61%  gocache/pkg/server.BenchmarkTCP_GET_Standard.func1
+         0     0% 50.01%     17.42s 24.61%  testing.(*B).RunParallel.func1
+     0.23s  0.32% 50.34%     14.43s 20.39%  gocache/pkg/resp.(*Reader).Read
+     0.13s  0.18% 50.52%     10.31s 14.57%  bufio.(*Reader).ReadByte
+     0.26s  0.37% 50.89%     10.26s 14.50%  runtime.mallocgc
+     0.28s   0.4% 51.29%     10.18s 14.38%  bufio.(*Reader).fill
