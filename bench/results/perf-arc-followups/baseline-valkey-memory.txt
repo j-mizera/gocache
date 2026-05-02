@@ -1,0 +1,17 @@
+label=baseline
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=be7730abca2c25687d260a146fbd9f2f45a82d59
+gocache_branch=perf/arc-followups
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=9396289
+post_standard_rss_bytes=23865589
+final_rss_bytes=28814868
+delta_rss_bytes=19418579
