@@ -1,0 +1,17 @@
+label=read-lock-bypass-rerun
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=ffbd6fdcbe364bb1f2045ffaf284fc52322454ab
+gocache_branch=perf/read-lock-bypass
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=8265924
+post_standard_rss_bytes=205835468
+final_rss_bytes=258893414
+delta_rss_bytes=250627490
