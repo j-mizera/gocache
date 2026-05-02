@@ -7,7 +7,9 @@
 set -euo pipefail
 
 REPO=$(git rev-parse --show-toplevel)
-OUT="$REPO/bench/profiles/${OUT_LABEL:-diagnosis-baseline}"
+BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+BRANCH_SAFE="${BRANCH//\//-}"
+OUT="${OUT:-$REPO/bench/results/$BRANCH_SAFE/profiles/${OUT_LABEL:-diagnosis-baseline}}"
 
 cpu_top()   { go tool pprof -top -cum -nodecount=30 "$1" 2>/dev/null; }
 alloc_top() { go tool pprof -top -cum -sample_index="$2" -nodecount=30 "$1" 2>/dev/null; }

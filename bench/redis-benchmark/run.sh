@@ -55,7 +55,11 @@ GOCACHE_IMAGE="${GOCACHE_IMAGE:-gocache-bench:local}"
 
 # ---- Setup -------------------------------------------------------------
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-RESULTS_DIR="$REPO_ROOT/bench/redis-benchmark/results"
+# Results land in bench/results/<branch>/ so each branch's outputs are
+# segregated. Override with RESULTS_DIR=... if you need a custom path.
+BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+BRANCH_SAFE="${BRANCH//\//-}"
+RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/bench/results/$BRANCH_SAFE}"
 NET="gocache-bench-net"
 TARGET_NAME="gocache-bench-target"
 mkdir -p "$RESULTS_DIR"

@@ -63,7 +63,7 @@ The slab-allocator arc cut the cache-data portion of memory dramatically (gctrac
 
 ## gctrace at 1M strings (64 B values)
 
-From `bench/redis-benchmark/results/gctrace/diagnosis-baseline-strings-1M.{out,err}`:
+From `bench/results/fix-issues-23-24/gctrace/diagnosis-baseline-strings-1M.{out,err}`:
 
 - HeapAlloc 230.65 MiB (post-load)
 - HeapObjects 1.01 M

@@ -15,9 +15,15 @@
 set -euo pipefail
 
 REPO=$(git rev-parse --show-toplevel)
-OUT="$REPO/bench/profiles/${OUT_LABEL:-diagnosis-baseline}"
+# Output lands in bench/results/<branch>/profiles/<label>/ so each branch's
+# captures are segregated. Override OUT=... or OUT_LABEL=... if you need
+# a custom path or label.
+BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+BRANCH_SAFE="${BRANCH//\//-}"
+OUT="${OUT:-$REPO/bench/results/$BRANCH_SAFE/profiles/${OUT_LABEL:-diagnosis-baseline}}"
 DUR="${DUR:-10s}"
 CPU="${CPU:-4}"
+mkdir -p "$OUT"/{cpu,alloc,block,mutex,gctrace,trace}
 
 run_one() {
     local label=$1 bench=$2

@@ -17,10 +17,8 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -324,44 +322,6 @@ func BenchmarkInProc_SET(b *testing.B) {
 
 // ----- TCP benchmarks ---------------------------------------------------
 
-// pipelinedConn drives one TCP connection sending pipelineDepth commands per
-// round trip. Each iteration of pb.Next sends a batch of pipelineDepth and
-// reads pipelineDepth replies. Returns the per-iteration command count so the
-// caller can normalise b.N if needed (we leave that to the framework — each
-// pb.Next() call counts as one "operation" by convention here).
-func pipelinedConn(b *testing.B, addr string, pipelineDepth int, build func(seq uint64) resp.Value) {
-	b.Helper()
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		b.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-	w := resp.NewWriter(conn)
-	rd := resp.NewReader(conn)
-	var seq uint64
-	batch := make([]resp.Value, pipelineDepth)
-	for {
-		// Cooperative loop: caller decides termination via b.N
-		for j := 0; j < pipelineDepth; j++ {
-			seq++
-			batch[j] = build(seq)
-		}
-		for j := 0; j < pipelineDepth; j++ {
-			if err := w.Write(batch[j]); err != nil {
-				b.Fatalf("write: %v", err)
-			}
-		}
-		if err := w.Flush(); err != nil {
-			b.Fatalf("flush: %v", err)
-		}
-		for j := 0; j < pipelineDepth; j++ {
-			if _, err := rd.Read(); err != nil {
-				b.Fatalf("read: %v", err)
-			}
-		}
-	}
-}
-
 // BenchmarkTCP_GET_Pipelined — TCP loopback, P=10, many parallel connections.
 // The read-lock-bypass workload: each command pays the engine channel hop.
 func BenchmarkTCP_GET_Pipelined(b *testing.B) {
@@ -538,6 +498,3 @@ func BenchmarkTCP_SET_Standard(b *testing.B) {
 	})
 }
 
-// silence unused-import noise when only a subset of helpers is referenced
-var _ = sync.Mutex{}
-var _ = fmt.Sprintf
