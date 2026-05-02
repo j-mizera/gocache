@@ -223,11 +223,18 @@ func NewOperationComplete(id, opType string, elapsedNs uint64, status, failReaso
 }
 
 // Emitter is the interface server components use to emit events.
+//
+// HasSubscribers returns true if at least one subscriber is currently
+// attached. Implementations must make this check ~zero-cost — typically
+// an atomic load — because the evaluator hot path calls it on every
+// command to gate the instrumentation block.
 type Emitter interface {
 	Emit(Event)
+	HasSubscribers() bool
 }
 
 // NoopEmitter discards all events. Used when plugins are disabled.
 type NoopEmitter struct{}
 
-func (NoopEmitter) Emit(Event) {}
+func (NoopEmitter) Emit(Event)            {}
+func (NoopEmitter) HasSubscribers() bool  { return false }

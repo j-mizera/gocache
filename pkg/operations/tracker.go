@@ -6,15 +6,22 @@ package operations
 
 import (
 	"sync"
+	"sync/atomic"
 
 	ops "gocache/api/operations"
 )
 
 // Tracker maintains the registry of active operations.
 // Thread-safe for concurrent access from multiple goroutines.
+//
+// skipped counts commands that bypassed the tracker via the evaluator's
+// sink-aware fast path. Such commands never appear in active, so
+// ActiveCount alone underreports throughput once the fast path is hot.
+// SkippedCount surfaces the gap to operability tooling.
 type Tracker struct {
-	mu     sync.RWMutex
-	active map[string]*ops.Operation
+	mu      sync.RWMutex
+	active  map[string]*ops.Operation
+	skipped atomic.Uint64
 }
 
 // NewTracker creates a new operation tracker.
@@ -73,8 +80,24 @@ func (t *Tracker) Active() []*ops.Operation {
 }
 
 // ActiveCount returns the number of active operations.
+//
+// Note: when the evaluator's sink-aware fast path is active, commands that
+// run with no subscribers attached do not register here. Pair this with
+// SkippedCount when reasoning about total command throughput.
 func (t *Tracker) ActiveCount() int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return len(t.active)
+}
+
+// IncrementSkipped records that one command bypassed the tracker via the
+// sink-aware fast path. Atomic, lock-free — safe to call from the hot path.
+func (t *Tracker) IncrementSkipped() {
+	t.skipped.Add(1)
+}
+
+// SkippedCount returns the cumulative number of commands that bypassed the
+// tracker via the sink-aware fast path since process start.
+func (t *Tracker) SkippedCount() uint64 {
+	return t.skipped.Load()
 }

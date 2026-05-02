@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ops "gocache/api/operations"
@@ -31,9 +32,14 @@ type HookEntry struct {
 type RegisterCallback func(pluginName string, regTime time.Time)
 
 // Registry manages operation hook registrations.
+//
+// total mirrors len(hooks) for the lock-free HasAny check on the evaluator
+// hot path. Updated under mu; read with atomic.Load so the per-command
+// guard does not pay RLock cost.
 type Registry struct {
 	mu           sync.RWMutex
 	hooks        []*HookEntry // sorted by priority
+	total        atomic.Int32
 	onRegister   RegisterCallback
 	onRegisterMu sync.RWMutex // separate so callbacks can't deadlock with dispatch
 }
@@ -58,6 +64,7 @@ func (r *Registry) SetOnRegister(fn RegisterCallback) {
 // consult other locks (tracker, executor) without risking deadlock.
 func (r *Registry) Register(pluginName string, priority int, conn *router.PluginConn, patterns []string) {
 	r.mu.Lock()
+	added := 0
 	for _, p := range patterns {
 		r.hooks = append(r.hooks, &HookEntry{
 			PluginName: pluginName,
@@ -65,6 +72,10 @@ func (r *Registry) Register(pluginName string, priority int, conn *router.Plugin
 			Priority:   priority,
 			Conn:       conn,
 		})
+		added++
+	}
+	if added > 0 {
+		r.total.Add(int32(added))
 	}
 	// Stable so equal priorities keep registration order — matches cmdhooks.
 	sort.SliceStable(r.hooks, func(i, j int) bool {
@@ -114,6 +125,7 @@ func (r *Registry) ConnFor(pluginName string) *router.PluginConn {
 func (r *Registry) Unregister(pluginName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	before := len(r.hooks)
 	filtered := r.hooks[:0]
 	for _, h := range r.hooks {
 		if h.PluginName != pluginName {
@@ -121,6 +133,9 @@ func (r *Registry) Unregister(pluginName string) {
 		}
 	}
 	r.hooks = filtered
+	if removed := before - len(r.hooks); removed > 0 {
+		r.total.Add(int32(-removed))
+	}
 }
 
 // Match returns all hooks that match an operation type, in priority order.
@@ -137,9 +152,9 @@ func (r *Registry) Match(opType ops.Type) []*HookEntry {
 	return result
 }
 
-// HasAny returns true if any hooks are registered.
+// HasAny returns true if any hooks are registered. Implemented as an atomic
+// load — the evaluator calls this on every command, so RLock cost would
+// dominate the path it gates.
 func (r *Registry) HasAny() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.hooks) > 0
+	return r.total.Load() > 0
 }

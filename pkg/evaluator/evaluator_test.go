@@ -70,7 +70,9 @@ func (m *mockOpHookExecutor) RunCompleteHooks(op *ops.Operation) {
 	m.lastOp.Store(op)
 }
 
-// mockEmitter collects emitted events.
+// mockEmitter collects emitted events. Reports as having subscribers so the
+// evaluator takes the slow (instrumented) path — that is the path these
+// tests exercise.
 type mockEmitter struct {
 	events []apiEvents.Event
 }
@@ -78,6 +80,8 @@ type mockEmitter struct {
 func (m *mockEmitter) Emit(evt apiEvents.Event) {
 	m.events = append(m.events, evt)
 }
+
+func (m *mockEmitter) HasSubscribers() bool { return true }
 
 // --- Tests ---
 

@@ -1,0 +1,17 @@
+label=sink-aware-fast-path
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=a443b333e9cecd14ecc0e9f9e6aa651a73556c28
+gocache_branch=perf/sink-aware-fast-path
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=11733565
+post_standard_rss_bytes=26885488
+final_rss_bytes=29611786
+delta_rss_bytes=17878221
