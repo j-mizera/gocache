@@ -167,6 +167,19 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 		}
 	}
 
+	// --- Fast path: no observers attached, skip the entire instrumentation
+	// block. Profile attribution: bus.Emit + tracker.Start + tracker.Complete
+	// account for ~80% of mutex-contention time on simple writes, plus 4×
+	// ContextSnapshot allocations and 7× Enrich calls per command. None of
+	// this work has a consumer when no plugin is wired, so we bypass it.
+	//
+	// The handler still receives a real *ops.Operation in opCtx so logger
+	// correlation works; the operation is simply never registered, enriched,
+	// emitted, or hook-fired.
+	if !b.hasAnySink() {
+		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler)
+	}
+
 	// --- Create command operation ---
 	cmdOp := b.tracker.Start(ops.TypeCommand, ctx.OperationID)
 	startNs := cmdOp.StartTime.UnixNano()
@@ -271,6 +284,37 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 	}
 
 	b.tracker.Complete(cmdOp.ID)
+	return result
+}
+
+// evaluateFast runs the handler with a bare *ops.Operation and no
+// instrumentation. Hot path when no sinks are attached. See hasAnySink for
+// the documented invariant on late-subscriber visibility.
+func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler) command.Result {
+	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
+	opCtx := ops.WithContext(parentCtx, cmdOp)
+
+	cmdCtx := &command.Context{
+		Client:           ctx,
+		Op:               op,
+		Args:             args,
+		InBatch:          inBatch,
+		Engine:           b.engine,
+		Cache:            b.cache,
+		Transaction:      b.transactionManager,
+		BlockingRegistry: b.blockingRegistry,
+		WatchManager:     b.watchManager,
+		SnapshotFile:     b.snapshotFile,
+		RequirePass:      b.requirePass,
+		EvalFn:           b.evaluateInternal,
+	}
+	cmdCtx.SetContext(opCtx)
+
+	result := handler(cmdCtx)
+
+	if b.tracker != nil {
+		b.tracker.IncrementSkipped()
+	}
 	return result
 }
 

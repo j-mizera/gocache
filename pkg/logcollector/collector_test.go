@@ -22,6 +22,8 @@ func (m *mockEmitter) Emit(evt apiEvents.Event) {
 	m.mu.Unlock()
 }
 
+func (m *mockEmitter) HasSubscribers() bool { return true }
+
 func (m *mockEmitter) count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

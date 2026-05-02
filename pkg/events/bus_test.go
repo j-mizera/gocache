@@ -100,6 +100,45 @@ func TestBus_HasSubscribers(t *testing.T) {
 	}
 }
 
+// TestBus_HasSubscribers_AtomicCounterInvariants pins down the atomic
+// counter semantics that the evaluator's sink-aware fast path relies on:
+// double-subscribe must not double-count, and unknown-name Unsubscribe must
+// not drive the counter negative.
+func TestBus_HasSubscribers_AtomicCounterInvariants(t *testing.T) {
+	bus := NewBus()
+	noop := func(apiEvents.Event) {}
+
+	bus.Subscribe("a", []apiEvents.Type{apiEvents.LogEntry}, noop)
+	bus.Subscribe("a", []apiEvents.Type{apiEvents.LogEntry}, noop) // re-subscribe same name
+	if got := bus.subCount.Load(); got != 1 {
+		t.Errorf("after re-subscribe: want 1, got %d", got)
+	}
+
+	bus.Subscribe("b", []apiEvents.Type{apiEvents.LogEntry}, noop)
+	if got := bus.subCount.Load(); got != 2 {
+		t.Errorf("after second subscribe: want 2, got %d", got)
+	}
+
+	bus.Unsubscribe("missing") // unknown name — must not decrement
+	if got := bus.subCount.Load(); got != 2 {
+		t.Errorf("after no-op unsubscribe: want 2, got %d", got)
+	}
+
+	bus.Unsubscribe("a")
+	bus.Unsubscribe("a") // double unsubscribe — must not decrement again
+	if got := bus.subCount.Load(); got != 1 {
+		t.Errorf("after double unsubscribe of same name: want 1, got %d", got)
+	}
+
+	bus.Unsubscribe("b")
+	if bus.HasSubscribers() {
+		t.Error("expected no subscribers after final unsubscribe")
+	}
+	if got := bus.subCount.Load(); got != 0 {
+		t.Errorf("final counter: want 0, got %d", got)
+	}
+}
+
 func TestBus_PanicRecovery(t *testing.T) {
 	bus := NewBus()
 

@@ -17,6 +17,41 @@ func testPipe() (*transport.Conn, *transport.Conn) {
 	return transport.NewConn(server), transport.NewConn(client)
 }
 
+// TestRegistry_HasAny_AtomicCounterInvariants pins down the atomic counter
+// semantics the evaluator fast path depends on: register accumulates the
+// declared patterns, unregister of an unknown plugin is a no-op, and
+// re-registering then unregistering returns the counter to zero.
+func TestRegistry_HasAny_AtomicCounterInvariants(t *testing.T) {
+	reg := NewRegistry()
+	if reg.HasAny() {
+		t.Fatal("empty registry: HasAny must be false")
+	}
+
+	s, c := testPipe()
+	defer c.Close()
+	defer s.Close()
+	pc := router.NewPluginConn("p1", s)
+	defer pc.Close()
+
+	reg.Register("p1", 1, pc, []string{"*", "command"})
+	if got := reg.total.Load(); got != 2 {
+		t.Errorf("after register: want 2, got %d", got)
+	}
+
+	reg.Unregister("does-not-exist") // no-op, must not decrement
+	if got := reg.total.Load(); got != 2 {
+		t.Errorf("after unknown unregister: want 2, got %d", got)
+	}
+
+	reg.Unregister("p1")
+	if reg.HasAny() {
+		t.Error("after unregister: HasAny must be false")
+	}
+	if got := reg.total.Load(); got != 0 {
+		t.Errorf("final counter: want 0, got %d", got)
+	}
+}
+
 func TestRegistry_RegisterAndMatch(t *testing.T) {
 	reg := NewRegistry()
 	s, c := testPipe()

@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	gcpc "gocache/api/gcpc/v1"
 	"gocache/pkg/plugin/router"
@@ -36,10 +37,15 @@ func (h *HookEntry) matches(command string) bool {
 }
 
 // Registry stores all registered hooks, indexed for fast lookup.
+//
+// total mirrors len(pre)+len(post) for the lock-free HasAny check on the
+// evaluator hot path. Updated under mu; read with atomic.Load so the per-
+// command guard does not pay RLock cost.
 type Registry struct {
-	mu   sync.RWMutex
-	pre  []*HookEntry // sorted by priority (lower first)
-	post []*HookEntry // sorted by priority
+	mu    sync.RWMutex
+	pre   []*HookEntry // sorted by priority (lower first)
+	post  []*HookEntry // sorted by priority
+	total atomic.Int32
 }
 
 // NewRegistry creates an empty hook registry.
@@ -52,6 +58,7 @@ func (r *Registry) Register(pluginName string, priority int, critical bool, conn
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	added := 0
 	for _, d := range decls {
 		entry := &HookEntry{
 			PluginName: pluginName,
@@ -64,9 +71,15 @@ func (r *Registry) Register(pluginName string, priority int, critical bool, conn
 		switch entry.Phase {
 		case PhasePre:
 			r.pre = append(r.pre, entry)
+			added++
 		case PhasePost:
 			r.post = append(r.post, entry)
+			added++
 		}
+	}
+
+	if added > 0 {
+		r.total.Add(int32(added))
 	}
 
 	// Re-sort by priority after adding.
@@ -79,8 +92,13 @@ func (r *Registry) Unregister(pluginName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	before := len(r.pre) + len(r.post)
 	r.pre = filterOut(r.pre, pluginName)
 	r.post = filterOut(r.post, pluginName)
+	removed := before - len(r.pre) - len(r.post)
+	if removed > 0 {
+		r.total.Add(int32(-removed))
+	}
 }
 
 // MatchPre returns matching pre-hooks for the given command, priority-sorted.
@@ -95,12 +113,11 @@ func (r *Registry) MatchPost(command string) []*HookEntry {
 	return r.match(command, false)
 }
 
-// HasAny returns true if any hooks are registered at all.
-// Used as a zero-cost guard in the evaluator hot path.
+// HasAny returns true if any hooks are registered at all. Implemented as an
+// atomic load — the evaluator calls this on every command, so RLock cost
+// would dominate the path it gates.
 func (r *Registry) HasAny() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.pre) > 0 || len(r.post) > 0
+	return r.total.Load() > 0
 }
 
 func (r *Registry) match(command string, pre bool) []*HookEntry {

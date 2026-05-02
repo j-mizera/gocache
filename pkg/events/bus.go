@@ -11,6 +11,7 @@ package events
 
 import (
 	"sync"
+	"sync/atomic"
 
 	apiEvents "gocache/api/events"
 	"gocache/api/logger"
@@ -36,6 +37,13 @@ type Bus struct {
 	mu          sync.RWMutex
 	subscribers map[string]*Subscription
 	ring        *ring
+
+	// subCount mirrors len(subscribers) for the lock-free HasSubscribers
+	// check on the evaluator hot path. Updated under mu so it stays in
+	// sync with the map; read with atomic.Load so callers don't pay the
+	// lock cost on every command. The eventual-consistency window is
+	// ≤ a single Subscribe/Unsubscribe call.
+	subCount atomic.Int32
 }
 
 // NewBus creates a server-wide event bus with the default replay capacity.
@@ -75,6 +83,9 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 		Types:   typeSet,
 		Handler: handler,
 	}
+	if !existed {
+		b.subCount.Add(1)
+	}
 	// Snapshot under the same lock that gates Emit — any concurrent Emit
 	// either committed to the ring before us (and is in the snapshot) or
 	// runs after Subscribe returns (and is delivered live). No dup, no gap.
@@ -112,8 +123,11 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 // Unsubscribe removes a subscriber.
 func (b *Bus) Unsubscribe(name string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.subscribers, name)
+	if _, ok := b.subscribers[name]; ok {
+		delete(b.subscribers, name)
+		b.subCount.Add(-1)
+	}
+	b.mu.Unlock()
 }
 
 // Emit sends an event to all interested subscribers and records it in the
@@ -169,9 +183,11 @@ func (b *Bus) HasSubscriber(name string) bool {
 	return ok
 }
 
-// HasSubscribers returns true if any subscribers are registered. Zero-cost guard.
+// HasSubscribers returns true if any subscribers are registered. Implemented
+// as an atomic load so the evaluator hot path can call it on every command
+// without paying RLock acquisition cost. Stays consistent with
+// len(subscribers) because the counter is mutated under the same write lock
+// that mutates the map.
 func (b *Bus) HasSubscribers() bool {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return len(b.subscribers) > 0
+	return b.subCount.Load() > 0
 }
