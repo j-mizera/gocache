@@ -56,6 +56,7 @@ func HandleType(cmdCtx *command.Context) command.Result {
 func HandleRename(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards([]string{src, dst})
 	executeFn := func() any {
 		if _, found := cmdCtx.Cache.RawGet(src); !found {
 			return resp.MarshalError("ERR no such key")
@@ -76,6 +77,7 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards([]string{src, dst})
 	executeFn := func() any {
 		if _, found := cmdCtx.Cache.RawGet(src); !found {
 			return resp.MarshalError("ERR no such key")

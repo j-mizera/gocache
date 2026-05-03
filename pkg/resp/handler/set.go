@@ -68,6 +68,7 @@ func getSetAsMap(c *cache.Cache, key string) (map[string]struct{}, error) {
 // HandleSinter implements SINTER key [key ...]
 func HandleSinter(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	executeFn := func() any {
 		intersection, err := getSetAsMap(cmdCtx.Cache, keys[0])
 		if err != nil {
@@ -96,6 +97,7 @@ func HandleSinter(cmdCtx *command.Context) command.Result {
 // HandleSunion implements SUNION key [key ...]
 func HandleSunion(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	executeFn := func() any {
 		union := make(map[string]struct{})
 		for _, key := range keys {
@@ -119,6 +121,7 @@ func HandleSunion(cmdCtx *command.Context) command.Result {
 // HandleSdiff implements SDIFF key [key ...]
 func HandleSdiff(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	executeFn := func() any {
 		diff, err := getSetAsMap(cmdCtx.Cache, keys[0])
 		if err != nil {

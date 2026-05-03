@@ -197,6 +197,30 @@ func (e *Engine) DispatchToShard(ctx context.Context, shard int, fn func() any) 
 	return e.sendAndWait(ctx, shard, fn)
 }
 
+// DispatchToShards acquires the listed shards' write locks in
+// ascending order, runs fn under the umbrella, and releases them.
+// Used by multi-key handlers that touch a known subset of shards
+// (MGET, MSET, RENAME, etc.). For multi-key handlers that touch
+// every shard (FLUSHDB, EXEC, snapshot save/load, KEYS, SCAN), use
+// DispatchWithResult which acquires the bulk lock instead.
+//
+// shardIDs must be sorted unique indices in [0, ShardCount). Obtain
+// a correctly-shaped slice from Cache.TouchedShards.
+func (e *Engine) DispatchToShards(ctx context.Context, shardIDs []int, fn func() any) (any, error) {
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	release := e.cache.LockShards(shardIDs, true)
+	defer release()
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	return fn(), nil
+}
+
 // ShardCount exposes the underlying cache's shard count for callers that
 // need to mirror the routing (the evaluator does this when computing
 // the destination shard from a command's key).

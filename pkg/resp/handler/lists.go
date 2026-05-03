@@ -388,6 +388,7 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 		return command.Result{Err: ErrInvalidTimeout}
 	}
 	keys := cmdCtx.Args[:len(cmdCtx.Args)-1]
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 
 	// Phase 1: attempt an immediate non-blocking pop.
 	result := command.Dispatch(cmdCtx, func() any {
