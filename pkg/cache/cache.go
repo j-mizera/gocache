@@ -141,10 +141,13 @@ type Cache struct {
 }
 
 // DefaultShards is the per-shard count used by constructors that don't
-// take an explicit shardCount. 16 is the optimum measured by the
-// prototype N-sweep in #39. Must be a positive power of two so the
-// per-key fast path can mask instead of mod.
-const DefaultShards = 16
+// take an explicit shardCount. 8 is the chosen production default —
+// the prototype N-sweep in #39 showed N=8 within ~3% of N=16's
+// throughput optimum on mixed pipelined GetSet, while halving the
+// per-shard memory overhead (slab arenas, maps, channel pools, slab
+// metadata) per #49. Must be a positive power of two so the per-key
+// fast path can mask instead of mod.
+const DefaultShards = 8
 
 // New constructs a Cache with the default shard count, no memory limit,
 // and LRU eviction.
