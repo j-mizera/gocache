@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 	"gocache/pkg/cache"
 )
 
-// Coordinator orchestrates the persistence Source and Sinks. On boot, it
+// Coordinator orchestrates the persistence Source and Sinks. On boot it
 // asks the registered Source for recovery state and applies it to the
-// cache; during runtime, it will (in feat/persistence-mutation-feed)
-// allocate LSNs and group-commit mutations to Sinks.
+// cache; during runtime it allocates LSNs and group-commit dispatches
+// mutations to Sinks via per-sink flush loops.
 //
-// This PR (feat/persistence-contract) wires the boot path only — Sink
-// dispatch is intentionally stubbed so the type-shape change ships
-// independently of the engine hot-path change. See the persistence-as-
-// plugin plan for the staging.
+// Lifecycle:
+//  1. New(source, sinks...) — register the contract participants.
+//  2. BootInto(ctx, cache)  — recover state from Source.
+//  3. Start(ctx)            — spawn the per-sink flush loops.
+//  4. Emit / AllocateAndEmit — runtime mutation feed.
+//  5. Stop(ctx)             — drain inflight, Close each Sink, exit.
 type Coordinator struct {
 	source apipersistence.Source
 	sinks  []apipersistence.Sink
@@ -29,17 +32,88 @@ type Coordinator struct {
 	// lsn is the most recently allocated LSN. AllocateLSN increments it;
 	// boot reads it from the snapshot and seeds the runtime allocator.
 	lsn atomic.Uint64
+
+	// activeSinks counts healthy Sinks. Read by HasSinks (atomic load)
+	// on the cache write hot path; written on Start (per-sink increment)
+	// and on quarantine (decrement). Initial value zero — HasSinks is
+	// false until Start runs.
+	activeSinks atomic.Int32
+
+	// feed holds one sinkChannel per registered Sink. Populated in Start.
+	feed []*sinkChannel
+
+	// stop is closed by Stop to signal every per-sink flush loop to exit.
+	stop      chan struct{}
+	stopOnce  sync.Once
+	startOnce sync.Once
+	started   atomic.Bool
 }
 
 // New returns a coordinator. source may be nil — in that case Boot returns
 // BootModeInitial without error and the coordinator runs in pass-through
-// mode (no recovery, LSN starts at zero). Sinks may be empty; they will
-// be honoured once the mutation feed is wired in the follow-up PR.
+// mode (no recovery, LSN starts at zero). Sinks may be empty; HasSinks
+// returns false and the dispatcher's emission fast-path skips entirely.
 func New(source apipersistence.Source, sinks ...apipersistence.Sink) *Coordinator {
 	return &Coordinator{
 		source: source,
 		sinks:  sinks,
+		stop:   make(chan struct{}),
 	}
+}
+
+// Start spawns one flush goroutine per registered Sink and arms HasSinks
+// so the cache write path begins emitting mutations. Idempotent — a
+// second Start call is a no-op. Must be called after BootInto so the
+// runtime resumes from the recovered LSN cursor.
+//
+// The provided ctx is used as the parent for all Sink Apply / Close
+// invocations; it should outlive the coordinator (typically a request-
+// scoped server-lifetime context). Stop signals shutdown via the
+// coordinator's internal channel — ctx cancellation is observed by
+// Apply / Close calls but does not by itself stop the flush loops.
+func (c *Coordinator) Start(ctx context.Context) {
+	c.startOnce.Do(func() {
+		c.feed = make([]*sinkChannel, 0, len(c.sinks))
+		for _, s := range c.sinks {
+			// onQuarantine decrements activeSinks so HasSinks reports the
+			// post-quarantine state; producer-side fast-path then skips
+			// emission to dead sinks. Producers reaching the channel
+			// before activeSinks settles are absorbed by the consume()
+			// quarantine check inside the run loop.
+			sc := newSinkChannel(s, defaultBufferSize, func() {
+				c.activeSinks.Add(-1)
+			})
+			c.feed = append(c.feed, sc)
+			c.recordSinkActive()
+			sc.startSinkLoop(ctx, c.stop)
+			logger.Info(ctx).
+				Str("sink", s.Name()).
+				Str("fsync", s.FsyncPolicy().String()).
+				Int("buffer", sc.bufferSize).
+				Msg("persistence: sink started")
+		}
+		c.started.Store(true)
+	})
+}
+
+// Stop signals every per-sink flush loop to drain its inflight buffer,
+// call Sink.Apply on whatever's left, then call Sink.Close. Returns
+// once all flush goroutines have exited. Idempotent — a second Stop
+// call returns immediately.
+//
+// Stop blocks the caller until drain completes. Callers with a deadline
+// concern should wrap with their own timeout; the coordinator does not
+// impose one because durable shutdown ("flush everything") is the more
+// important property than bounded shutdown latency.
+func (c *Coordinator) Stop(_ context.Context) {
+	c.stopOnce.Do(func() {
+		close(c.stop)
+		for _, sc := range c.feed {
+			sc.wg.Wait()
+		}
+		c.started.Store(false)
+		c.activeSinks.Store(0)
+	})
 }
 
 // AllocateLSN returns the next LSN. Monotonically increasing across all

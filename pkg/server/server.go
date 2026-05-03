@@ -103,6 +103,13 @@ func (srv *Server) SetOpHookExecutor(e evaluator.OpHookExecutor) {
 	srv.evaluator.SetOpHookExecutor(e)
 }
 
+// SetPersistenceFeed wires the persistence coordinator's mutation-feed
+// hook into the evaluator so command.Dispatch can emit mutations to
+// registered Sinks. Pass nil to disable the feed (the default).
+func (srv *Server) SetPersistenceFeed(f command.MutationEmitter) {
+	srv.evaluator.SetPersistenceFeed(f)
+}
+
 // EmitEvent emits an event through the server's emitter.
 func (srv *Server) EmitEvent(evt events.Event) {
 	srv.emitter.Emit(evt)
