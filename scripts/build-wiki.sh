@@ -79,12 +79,13 @@ TMPRENDER=$(mktemp -d)
 trap 'rm -rf "$TMPRENDER"' EXIT
 
 echo "==> Rendering .puml to .svg"
-puml_count=0
+puml_total=0
 while IFS= read -r -d '' puml; do
   # Mirror the source path under TMPRENDER so includes (theme.iuml) resolve.
   reldir=$(dirname "${puml#$DOCSROOT/}")
   mkdir -p "$TMPRENDER/$reldir"
   cp "$puml" "$TMPRENDER/$reldir/"
+  puml_total=$((puml_total + 1))
 done < <(find "$DOCSROOT" -name '*.puml' -print0)
 
 # Copy the shared theme so !include ../../../design/theme.iuml resolves.
@@ -93,14 +94,21 @@ if [[ -f "$DOCSROOT/design/theme.iuml" ]]; then
   cp "$DOCSROOT/design/theme.iuml" "$TMPRENDER/design/theme.iuml"
 fi
 
-# Run plantuml on the entire mirror tree at once — much faster than per-file.
-plantuml -tsvg -o . "$TMPRENDER/**.puml" >/dev/null 2>&1 || \
-  plantuml -tsvg -r "$TMPRENDER" >/dev/null
+# Render via find + xargs — version-agnostic across plantuml releases.
+# Older plantuml builds (e.g. Ubuntu 1.2020.x via apt) reject -r and don't
+# expand bash globstar; passing each absolute path explicitly works on every
+# version we've encountered. xargs amortizes the JVM startup across the batch.
+# `|| true` lets us count SVGs even if a single diagram errors — we'd rather
+# emit a warning and proceed than halt with no telemetry.
+if [[ $puml_total -gt 0 ]]; then
+  find "$TMPRENDER" -name '*.puml' -print0 | xargs -0 plantuml -tsvg || true
+fi
 
-while IFS= read -r -d '' svg; do
-  puml_count=$((puml_count + 1))
-done < <(find "$TMPRENDER" -name '*.svg' -print0)
-echo "    rendered $puml_count diagram(s)"
+svg_count=$(find "$TMPRENDER" -name '*.svg' | wc -l | tr -d '[:space:]')
+echo "    rendered $svg_count of $puml_total diagram(s)"
+if [[ $svg_count -lt $puml_total ]]; then
+  echo "::warning::$(($puml_total - $svg_count)) diagram(s) failed to render — see plantuml output above"
+fi
 
 # 5. Generate one index page per design subdir, embedding SVGs in source order
 #    (alphabetical by filename within the dir — predictable, matches docs/).
