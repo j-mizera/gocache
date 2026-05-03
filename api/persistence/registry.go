@@ -1,0 +1,92 @@
+package persistence
+
+import (
+	"fmt"
+	"sync"
+)
+
+// SnapshotProvider is the registration handle for an embedded snapshot
+// plugin (ADR-0007). Each plugin's init() calls RegisterSnapshotProvider
+// with a value of this type; cmd/server/main.go resolves the registered
+// provider via SnapshotProviderRegistered.
+//
+// Selection is done at compile time via blank imports of the desired
+// plugin package — there is no config string. Adding a new snapshot
+// backend is a new package + a new blank import, with no change to the
+// core surface.
+//
+// AOF and replication will get parallel registration interfaces
+// (RegisterAOFProvider, RegisterReplicationSink) when those plugins
+// land — same pattern, different capability.
+type SnapshotProvider interface {
+	// Name identifies the provider for logs and diagnostics. Should
+	// be a stable plugin identifier (e.g. "v1-snapshot"), not a
+	// format string.
+	Name() string
+
+	// Build constructs the Source / Snapshotter pair targeting filename
+	// and returns a setFilename closure for hot-reload. Build is called
+	// exactly once per server lifetime; the returned trio is owned by
+	// the coordinator afterwards.
+	//
+	// The setFilename closure is plugin-defined — typical plugins
+	// route the new path to both Source.SetFilename and
+	// Snapshotter.SetFilename. Plugins whose backends don't care
+	// about the filename (e.g. a network-streaming sink) return a
+	// no-op closure.
+	Build(filename string) (Source, Snapshotter, func(filename string))
+}
+
+var (
+	snapshotProviderMu sync.RWMutex
+	snapshotProvider   SnapshotProvider
+)
+
+// RegisterSnapshotProvider installs the embedded snapshot plugin.
+// Called from the plugin's init(). Exactly one provider may register
+// per binary — a second call panics with the conflicting plugin
+// names so the build misconfiguration surfaces at startup, not
+// silently as one plugin overwriting another.
+//
+// The build-time choice of which plugin to import determines which
+// provider runs. Multi-tenant binaries (two snapshot plugins coexisting)
+// would need a different registration model; this design assumes a
+// single canonical provider per binary, matching the "exactly one
+// snapshot strategy" reality of every production deployment.
+func RegisterSnapshotProvider(p SnapshotProvider) {
+	if p == nil {
+		panic("api/persistence: RegisterSnapshotProvider called with nil")
+	}
+	snapshotProviderMu.Lock()
+	defer snapshotProviderMu.Unlock()
+	if snapshotProvider != nil {
+		panic(fmt.Sprintf(
+			"api/persistence: snapshot provider already registered (%q); cannot register %q — exactly one provider per binary",
+			snapshotProvider.Name(), p.Name(),
+		))
+	}
+	snapshotProvider = p
+}
+
+// SnapshotProviderRegistered returns the registered provider, or nil if
+// no plugin was imported. Callers (cmd/server/main.go) treat nil as
+// "no snapshot persistence" and run the cache in ephemeral mode.
+//
+// The lookup is mutex-protected because tests may reset the registry
+// (see ResetSnapshotProviderForTest) — production-time access happens
+// once at startup, well after every plugin's init() has completed.
+func SnapshotProviderRegistered() SnapshotProvider {
+	snapshotProviderMu.RLock()
+	defer snapshotProviderMu.RUnlock()
+	return snapshotProvider
+}
+
+// ResetSnapshotProviderForTest clears the registered provider. Test-only
+// helper exposed so per-package tests that exercise registration can
+// run independently. Production code paths must not call this — the
+// global is intended to be set exactly once per process lifetime.
+func ResetSnapshotProviderForTest() {
+	snapshotProviderMu.Lock()
+	defer snapshotProviderMu.Unlock()
+	snapshotProvider = nil
+}

@@ -80,7 +80,6 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v.SetDefault("persistence.snapshot_file", apiconfig.DefaultSnapshotFile)
 	v.SetDefault("persistence.snapshot_interval", apiconfig.DefaultSnapshotInterval)
 	v.SetDefault("persistence.load_on_startup", apiconfig.DefaultLoadOnStartup)
-	v.SetDefault("persistence.snapshot_format", apiconfig.DefaultSnapshotFormat)
 	v.SetDefault("memory.max_memory_mb", apiconfig.DefaultMaxMemoryMB)
 	v.SetDefault("memory.eviction_policy", apiconfig.DefaultEvictionPolicy)
 	v.SetDefault("memory.cache_shards", apiconfig.DefaultCacheShards)

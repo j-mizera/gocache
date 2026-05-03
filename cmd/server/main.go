@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"gocache/api/command"
-	apiconfig "gocache/api/config"
 	"gocache/api/crashdump"
 	"gocache/api/embedded"
 	"gocache/api/events"
@@ -28,7 +27,6 @@ import (
 	"gocache/pkg/logcollector"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
-	"gocache/pkg/persistence/v1snap"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/plugin/ophooks"
@@ -36,6 +34,12 @@ import (
 	"gocache/pkg/version"
 	"gocache/pkg/watch"
 	"gocache/pkg/workers"
+
+	// Embedded persistence plugin — registers itself via init() per
+	// ADR-0007. Selecting a different snapshot backend = swap this
+	// import for the new plugin's package; api/persistence resolves
+	// the registered provider at startup, no other code change needed.
+	_ "gocache/pkg/persistence/v1snap"
 
 	// Embedded plugins — compile-time-linked observability hooks that run
 	// before config.Load and survive panics. See pkg/embedded for details.
@@ -254,13 +258,13 @@ func main() {
 	// coordinator runs in pass-through mode (no sinks registered) until
 	// a future PR adds the AOF / snapshot sink plugins.
 	//
-	// The snapshot format is selected by config: "gob" (legacy) or
-	// "v1" (ADR-0005 binary format with optional zstd). Both backends
-	// implement Source + Snapshotter, so SAVE, scheduled snapshots,
-	// and shutdown final-snapshot all run through the coordinator.
-	// snapSetFilename collects the per-backend hot-reload knobs so
-	// OnConfigChange can update both halves atomically.
-	snapSource, snapSnapshotter, snapSetFilename := buildSnapshotBackend(ctx, cfg.Persistence.SnapshotFormat, cfg.Persistence.SnapshotFile)
+	// The active snapshot backend comes from whichever embedded plugin
+	// was blank-imported above (ADR-0007). api/persistence resolves
+	// the registered provider; if none was compiled in, the server
+	// runs ephemeral and logs a warning. The provider's Build returns
+	// Source + Snapshotter + a hot-reload filename setter so config
+	// reload updates both halves atomically.
+	snapSource, snapSnapshotter, snapSetFilename := buildSnapshotBackend(ctx, cfg.Persistence.SnapshotFile)
 	coordinator := persistence.New(snapSource)
 	coordinator.RegisterSnapshotter(snapSnapshotter)
 	srv.SetPersistenceFeed(coordinator)
@@ -502,34 +506,22 @@ func handleShutdown(
 	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
 }
 
-// buildSnapshotBackend selects the on-disk format dictated by config
-// and returns Source + Snapshotter implementing it, plus a setter that
-// propagates a new filename to whichever backend is in use. Unknown
-// format strings fall back to the gob shim with a warning so a typo in
-// snapshot_format doesn't take the server offline at boot.
-func buildSnapshotBackend(ctx context.Context, format, filename string) (apipersistence.Source, apipersistence.Snapshotter, func(string)) {
-	switch format {
-	case apiconfig.SnapshotFormatV1:
-		src := v1snap.NewSource(filename)
-		snap := v1snap.NewSnapshotter(filename)
-		setBoth := func(f string) {
-			src.SetFilename(f)
-			snap.SetFilename(f)
-		}
-		logger.Info(ctx).Str("format", format).Msg("persistence: snapshot backend selected")
-		return src, snap, setBoth
-
-	case apiconfig.SnapshotFormatGob, "":
-		shim := persistence.NewGobSource(filename)
-		logger.Info(ctx).Str("format", apiconfig.SnapshotFormatGob).Msg("persistence: snapshot backend selected")
-		return shim, shim, shim.SetFilename
-
-	default:
-		shim := persistence.NewGobSource(filename)
-		logger.Warn(ctx).
-			Str("requested", format).
-			Str("fallback", apiconfig.SnapshotFormatGob).
-			Msg("persistence: unknown snapshot_format, falling back to gob")
-		return shim, shim, shim.SetFilename
+// buildSnapshotBackend resolves the registered embedded snapshot
+// plugin (ADR-0007) and asks it to build the Source + Snapshotter
+// pair. Selection is compile-time — whichever plugin's package was
+// blank-imported above wins via init-time RegisterSnapshotProvider.
+//
+// Returns nil source/snapshotter and a no-op filename setter when no
+// plugin was compiled in. The Coordinator handles nil source (no
+// recovery) and nil snapshotter (snapshot save returns
+// ErrNoSnapshotter). A warning surfaces the misbuild without
+// crashing — ephemeral mode is intentional for dev runs.
+func buildSnapshotBackend(ctx context.Context, filename string) (apipersistence.Source, apipersistence.Snapshotter, func(string)) {
+	provider := apipersistence.SnapshotProviderRegistered()
+	if provider == nil {
+		logger.Warn(ctx).Msg("persistence: no snapshot plugin compiled in; snapshots disabled")
+		return nil, nil, func(string) {}
 	}
+	logger.Info(ctx).Str("provider", provider.Name()).Msg("persistence: snapshot backend selected")
+	return provider.Build(filename)
 }
