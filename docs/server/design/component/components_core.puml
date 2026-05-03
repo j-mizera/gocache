@@ -13,19 +13,21 @@ frame "GoCache Core System HLD" as F {
         rectangle "Evaluator Boundary" as eval {
             component [Evaluator] as Evaluator <<Dispatch>>
             component [Hook Executor] as HookExec <<Pre/Post Hooks>>
+            component [Operation Tracker] as OpTracker <<Op lifecycle>>
             component [Command Router] as CmdRouter <<Plugin Fallback>>
         }
 
         rectangle "Engine Boundary" as eng {
-            component [Engine\n(serial dispatch)] as Engine <<Serialization>>
+            component [Engine\n(per-shard goroutines)] as Engine <<Serial dispatch>>
             component [Transaction\nManager] as TransactionMgr <<MULTI/EXEC>>
             component [Watch Manager] as WatchMgr <<WATCH/UNWATCH>>
             component [Blocking Registry] as BlockingReg <<BLPOP/BRPOP>>
         }
 
         rectangle "Storage Boundary" as storage {
+            component [Cache Router\nshardIndexOf(key) =\nfnv1a(key) & (N-1)] as CacheRouter <<Shard fan-out>>
+            component [Shard 0 .. Shard N-1\n{mu, items, slab arena,\nLRU, usedBytes, maxBytes}] as Shards <<Per-shard state>>
             component [Persistence\nManager] as PersistenceMgr <<gob Snapshots>>
-            component [Cache\n(in-memory)] as InMemCache <<Maps + LRU>>
         }
 
         rectangle "Background Workers" as workers {
@@ -39,16 +41,27 @@ frame "GoCache Core System HLD" as F {
     ProtocolHandler --> Evaluator : Parsed command
 
     Evaluator --> HookExec : Pre/Post hooks
+    Evaluator --> OpTracker : Start/Complete op
     Evaluator --> CmdRouter : Plugin fallback
     Evaluator --> Engine : Core commands
     Evaluator --> TransactionMgr : MULTI/EXEC/DISCARD
 
-    Engine --> InMemCache : Lock -> fn() -> Unlock
+    Engine --> CacheRouter : DispatchToShard / DispatchToShards / DispatchWithResult
+    CacheRouter --> Shards : Lock(shardIDs) -> fn() -> Unlock
     Engine --> WatchMgr : Mutation notify
     Engine --> BlockingReg : Unblock waiters
 
-    SnapshotWorker --> PersistenceMgr : Periodic save
-    TTLWorker --> InMemCache : Sweep expired
+    SnapshotWorker --> PersistenceMgr : Periodic save (full lock)
+    TTLWorker --> Shards : Per-shard sweep
 }
+
+note right of Shards
+  **Default N = 8** (power-of-two; per-key fast path masks).
+  Single-key handlers take only the touched shard's lock.
+  Multi-key handlers acquire the sorted shard set
+  (deadlock-free); full-bulk handlers (FLUSHDB,
+  SAVE, KEYS) take all shards. Cross-shard cost
+  is the structural sharding tax — see audits/.
+end note
 
 @enduml
