@@ -23,6 +23,18 @@ const (
 	DefaultSnapshotFile     = "snapshot.dat"
 	DefaultSnapshotInterval = 5 * time.Minute
 	DefaultLoadOnStartup    = true
+	// DefaultSnapshotFormat is the on-disk snapshot format. "gob" is the
+	// legacy Go gob-encoded format; "v1" is the custom binary format
+	// described in ADR-0005 (varint, magic header, CRC32, optional zstd).
+	// Default stays "gob" until the migration window for existing
+	// deployments closes — flip to "v1" in a follow-up release.
+	DefaultSnapshotFormat = "gob"
+
+	// SnapshotFormatGob and SnapshotFormatV1 are the recognised values
+	// for PersistenceConfig.SnapshotFormat. Unknown values fall back
+	// to the gob shim with a warning at boot.
+	SnapshotFormatGob = "gob"
+	SnapshotFormatV1  = "v1"
 	DefaultMaxMemoryMB      = int64(1024)
 	DefaultEvictionPolicy   = "lru"
 	DefaultCacheShards      = 8
@@ -65,6 +77,11 @@ type PersistenceConfig struct {
 	SnapshotFile     string        `yaml:"snapshot_file"     mapstructure:"snapshot_file"`
 	SnapshotInterval time.Duration `yaml:"snapshot_interval" mapstructure:"snapshot_interval"`
 	LoadOnStartup    bool          `yaml:"load_on_startup"   mapstructure:"load_on_startup"`
+	// SnapshotFormat selects the on-disk format. "gob" (default) keeps
+	// the legacy gob-encoded format; "v1" uses the format described in
+	// ADR-0005. Existing deployments stay on gob until a one-shot
+	// migration via the gocache-migrate CLI (ships in a follow-up).
+	SnapshotFormat string `yaml:"snapshot_format" mapstructure:"snapshot_format"`
 }
 
 // MemoryConfig holds memory management configuration.
@@ -117,6 +134,7 @@ func DefaultConfig() *Config {
 			SnapshotFile:     DefaultSnapshotFile,
 			SnapshotInterval: DefaultSnapshotInterval,
 			LoadOnStartup:    DefaultLoadOnStartup,
+			SnapshotFormat:   DefaultSnapshotFormat,
 		},
 		Memory: MemoryConfig{
 			MaxMemoryMB:          DefaultMaxMemoryMB,

@@ -51,3 +51,16 @@ type SnapshotSource interface {
 	// the temp file before returning).
 	Next(ctx context.Context) (SnapshotEntry, error)
 }
+
+// LSNSeeder is an optional capability a Snapshotter may expose. The
+// coordinator calls SetLSN with the current cursor right before
+// SaveSnapshot so the snapshotter can embed the LSN in its on-disk
+// format (the v1 binary format does this via a META record, ADR-0005).
+//
+// Snapshotters that don't carry LSN metadata in their format (e.g. the
+// legacy gob shim, or third-party connectors that only write key-values)
+// simply don't implement this interface — the coordinator skips the
+// call via a type assertion.
+type LSNSeeder interface {
+	SetLSN(lsn LSN)
+}

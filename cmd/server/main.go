@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"gocache/api/command"
+	apiconfig "gocache/api/config"
 	"gocache/api/crashdump"
 	"gocache/api/embedded"
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
+	apipersistence "gocache/api/persistence"
 	"gocache/pkg/blocking"
 	"gocache/pkg/bootstate"
 	"gocache/pkg/cache"
@@ -26,6 +28,7 @@ import (
 	"gocache/pkg/logcollector"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
+	"gocache/pkg/persistence/v1snap"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/plugin/ophooks"
@@ -249,15 +252,17 @@ func main() {
 	// Persistence coordinator. Created unconditionally so the runtime
 	// mutation feed can be wired even when LoadOnStartup is off; the
 	// coordinator runs in pass-through mode (no sinks registered) until
-	// a future PR adds the AOF / snapshot sink plugins. The current path
-	// uses GobSource for boot recovery AND for runtime snapshot writes —
-	// the gob shim implements both Source and Snapshotter so SAVE,
-	// scheduled snapshots, and shutdown final-snapshot all run through
-	// the coordinator. The shim goes away when the v1 snapshot plugin
-	// (ADR-0005) lands.
-	gobShim := persistence.NewGobSource(cfg.Persistence.SnapshotFile)
-	coordinator := persistence.New(gobShim)
-	coordinator.RegisterSnapshotter(gobShim)
+	// a future PR adds the AOF / snapshot sink plugins.
+	//
+	// The snapshot format is selected by config: "gob" (legacy) or
+	// "v1" (ADR-0005 binary format with optional zstd). Both backends
+	// implement Source + Snapshotter, so SAVE, scheduled snapshots,
+	// and shutdown final-snapshot all run through the coordinator.
+	// snapSetFilename collects the per-backend hot-reload knobs so
+	// OnConfigChange can update both halves atomically.
+	snapSource, snapSnapshotter, snapSetFilename := buildSnapshotBackend(ctx, cfg.Persistence.SnapshotFormat, cfg.Persistence.SnapshotFile)
+	coordinator := persistence.New(snapSource)
+	coordinator.RegisterSnapshotter(snapSnapshotter)
 	srv.SetPersistenceFeed(coordinator)
 	srv.SetSnapshotInvoker(coordinator)
 
@@ -352,7 +357,7 @@ func main() {
 
 		snapshotWorker.UpdateInterval(newCfg.Persistence.SnapshotInterval)
 		snapshotWorker.UpdateFile(newCfg.Persistence.SnapshotFile)
-		gobShim.SetFilename(newCfg.Persistence.SnapshotFile)
+		snapSetFilename(newCfg.Persistence.SnapshotFile)
 		cleanupWorker.UpdateInterval(newCfg.Workers.CleanupInterval)
 		cacheInstance.SetMemoryLimit(
 			reloadCtx,
@@ -495,4 +500,36 @@ func handleShutdown(
 	}
 
 	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
+}
+
+// buildSnapshotBackend selects the on-disk format dictated by config
+// and returns Source + Snapshotter implementing it, plus a setter that
+// propagates a new filename to whichever backend is in use. Unknown
+// format strings fall back to the gob shim with a warning so a typo in
+// snapshot_format doesn't take the server offline at boot.
+func buildSnapshotBackend(ctx context.Context, format, filename string) (apipersistence.Source, apipersistence.Snapshotter, func(string)) {
+	switch format {
+	case apiconfig.SnapshotFormatV1:
+		src := v1snap.NewSource(filename)
+		snap := v1snap.NewSnapshotter(filename)
+		setBoth := func(f string) {
+			src.SetFilename(f)
+			snap.SetFilename(f)
+		}
+		logger.Info(ctx).Str("format", format).Msg("persistence: snapshot backend selected")
+		return src, snap, setBoth
+
+	case apiconfig.SnapshotFormatGob, "":
+		shim := persistence.NewGobSource(filename)
+		logger.Info(ctx).Str("format", apiconfig.SnapshotFormatGob).Msg("persistence: snapshot backend selected")
+		return shim, shim, shim.SetFilename
+
+	default:
+		shim := persistence.NewGobSource(filename)
+		logger.Warn(ctx).
+			Str("requested", format).
+			Str("fallback", apiconfig.SnapshotFormatGob).
+			Msg("persistence: unknown snapshot_format, falling back to gob")
+		return shim, shim, shim.SetFilename
+	}
 }
