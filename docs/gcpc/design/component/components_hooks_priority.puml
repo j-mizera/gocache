@@ -1,4 +1,4 @@
-@startuml components_permission_priority
+@startuml components_hooks_priority
 !include ../../../design/theme.iuml
 
 frame "Plugin Hook & Priority System" as F {
