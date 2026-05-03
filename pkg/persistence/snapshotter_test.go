@@ -242,3 +242,57 @@ func TestGobSource_SaveSnapshot_EmptyFilename(t *testing.T) {
 // Compile-time check: the recording test snapshotter satisfies the
 // api/persistence contract. Catches contract drift at build time.
 var _ apipersistence.Snapshotter = (*recordingSnapshotter)(nil)
+
+// recordingLSNSnapshotter implements both Snapshotter and LSNSeeder so
+// tests can assert that the coordinator threads the LSN cursor through
+// before delegating to SaveSnapshot.
+type recordingLSNSnapshotter struct {
+	recordingSnapshotter
+	seededLSN apipersistence.LSN
+}
+
+func (r *recordingLSNSnapshotter) SetLSN(lsn apipersistence.LSN) {
+	r.seededLSN = lsn
+}
+
+func TestCoordinator_Snapshot_SeedsLSN(t *testing.T) {
+	target := cache.New()
+	target.Lock()
+	_ = target.RawSet(context.Background(), "k", "v", 0)
+	target.Unlock()
+
+	rec := &recordingLSNSnapshotter{recordingSnapshotter: recordingSnapshotter{name: "v1-mock"}}
+	c := New(nil)
+	c.RegisterSnapshotter(rec)
+	// Burn LSNs so CurrentLSN is non-zero — verifies the coordinator
+	// reads its own cursor instead of always passing ZeroLSN.
+	c.AllocateLSN()
+	c.AllocateLSN()
+	c.AllocateLSN()
+
+	if err := c.Snapshot(context.Background(), target); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if rec.seededLSN != apipersistence.LSN(3) {
+		t.Errorf("seeded LSN = %d, want 3", rec.seededLSN)
+	}
+}
+
+func TestCoordinator_Snapshot_NoSeedWhenNoLSNSeeder(t *testing.T) {
+	// Plain Snapshotter (no LSNSeeder) should not be seeded — the
+	// coordinator's type assertion fails silently.
+	target := cache.New()
+	target.Lock()
+	_ = target.RawSet(context.Background(), "k", "v", 0)
+	target.Unlock()
+
+	rec := &recordingSnapshotter{name: "gob-mock"}
+	c := New(nil)
+	c.RegisterSnapshotter(rec)
+	c.AllocateLSN() // make CurrentLSN > 0
+	if err := c.Snapshot(context.Background(), target); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	// No assertion on seededLSN — the recording snapshotter doesn't
+	// have one. Compiling without a panic is the test.
+}

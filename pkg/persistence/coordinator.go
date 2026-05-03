@@ -185,6 +185,12 @@ func (c *Coordinator) Snapshot(ctx context.Context, target *cache.Cache) error {
 	if s == nil {
 		return apipersistence.ErrNoSnapshotter
 	}
+	// Optional LSN seeding — snapshotters that record the cursor in
+	// their on-disk format (v1 binary format, ADR-0005) implement
+	// LSNSeeder. Skip silently for snapshotters that don't.
+	if seeder, ok := s.(apipersistence.LSNSeeder); ok {
+		seeder.SetLSN(c.CurrentLSN())
+	}
 	entries := captureSnapshotEntries(target)
 	src := &sliceSnapshotSource{entries: entries}
 	return s.SaveSnapshot(ctx, src)
