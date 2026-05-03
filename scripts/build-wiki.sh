@@ -85,18 +85,78 @@ copy_renamed "$DOCSROOT/plugins/gobservability/SOLUTION_ARCHITECTURE.md" \
 copy_renamed "$DOCSROOT/gcpc/README.md"                        "GCPC.md"
 copy_renamed "$DOCSROOT/performance/README.md"                 "Performance.md"
 
-# 3. Audits — `Audit-<basename>.md` keeps them grouped in the flat namespace.
-#    Audits are cross-cutting (performance, design, races) so they keep their
-#    own group rather than being folded under Performance.
-echo "==> Audits"
-if [[ -d "$DOCSROOT/audits" ]]; then
-  for f in "$DOCSROOT/audits"/*.md; do
+# Dynamic-rewrite accumulator. Indexed sections push wiki-link rewrites here
+# so cross-references resolve after flattening. Static (hand-curated) rewrites
+# live in the REWRITES associative array further down. Two parallel arrays
+# (rather than one delimited string) keep "from" / "to" robust against any
+# special characters that might appear in either side.
+declare -a DYNAMIC_FROM=()
+declare -a DYNAMIC_TO=()
+
+# Process an "indexed" section: a directory containing an optional README.md
+# (rendered as <prefix>.md) plus any number of leaf .md files (rendered as
+# <prefix>-<basename>.md). `template.md` is skipped — it is a manual scaffold,
+# not wiki content.
+#
+# Usage:  process_indexed_section <source-dir> <wiki-prefix>
+#
+# Example: process_indexed_section docs/adr ADR
+#   docs/adr/README.md           -> wiki-staging/ADR.md
+#   docs/adr/template.md         -> (skipped)
+#   docs/adr/0001-foo.md         -> wiki-staging/ADR-0001-foo.md
+#   plus link rewrites:
+#     ](README.md)               -> ](ADR)             (path-prefixed forms)
+#     ](0001-foo.md)             -> ](ADR-0001-foo)    (sibling cross-refs)
+#
+# Adding a new indexed section is a single function call below. The directory
+# can grow new files without further script edits.
+process_indexed_section() {
+  local src_dir="$1"
+  local prefix="$2"
+
+  if [[ ! -d "$src_dir" ]]; then
+    return 0
+  fi
+
+  echo "==> $prefix (from $src_dir)"
+
+  local dir_basename
+  dir_basename=$(basename "$src_dir")
+
+  if [[ -f "$src_dir/README.md" ]]; then
+    strip_frontmatter "$src_dir/README.md" "$OUTDIR/${prefix}.md"
+    echo "    $src_dir/README.md -> ${prefix}.md"
+    # README cross-refs (path-prefixed forms typical from sibling docs).
+    DYNAMIC_FROM+=("](${dir_basename}/README.md)")
+    DYNAMIC_TO+=("](${prefix})")
+    DYNAMIC_FROM+=("](../${dir_basename}/README.md)")
+    DYNAMIC_TO+=("](${prefix})")
+  fi
+
+  for f in "$src_dir"/*.md; do
     [[ -f "$f" ]] || continue
+    local base
     base=$(basename "$f" .md)
-    strip_frontmatter "$f" "$OUTDIR/Audit-${base}.md"
-    echo "    $f -> Audit-${base}.md"
+    case "$base" in
+      README|template) continue ;;
+    esac
+    strip_frontmatter "$f" "$OUTDIR/${prefix}-${base}.md"
+    echo "    $f -> ${prefix}-${base}.md"
+    # Sibling cross-refs (bare slug — the common shape inside the section).
+    DYNAMIC_FROM+=("](${base}.md)")
+    DYNAMIC_TO+=("](${prefix}-${base})")
+    # Path-prefixed cross-refs from sibling docs.
+    DYNAMIC_FROM+=("](${dir_basename}/${base}.md)")
+    DYNAMIC_TO+=("](${prefix}-${base})")
+    DYNAMIC_FROM+=("](../${dir_basename}/${base}.md)")
+    DYNAMIC_TO+=("](${prefix}-${base})")
   done
-fi
+}
+
+# 3. Indexed sections — README + numbered/named children flattened with a
+#    section prefix. Adding a new section is a single function call.
+process_indexed_section "$DOCSROOT/audits" "Audit"
+process_indexed_section "$DOCSROOT/adr"    "ADR"
 
 # 4. Render every .puml to .svg into a tmp area, then bundle by section.
 TMPRENDER=$(mktemp -d)
@@ -241,12 +301,6 @@ declare -A REWRITES=(
   ['](../server/README)']='](Server)'
   ['](../gcpc/README.md)']='](GCPC)'
   ['](../gcpc/README.md#rex-metadata)']='](GCPC#rex-metadata)'
-  ['](../audits/per-shard-arc-summary.md)']='](Audit-per-shard-arc-summary)'
-  ['](../audits/go-bench-vs-docker-gap.md)']='](Audit-go-bench-vs-docker-gap)'
-  ['](../audits/clientctx-cross-goroutine.md)']='](Audit-clientctx-cross-goroutine)'
-  ['](audits/per-shard-arc-summary.md)']='](Audit-per-shard-arc-summary)'
-  ['](audits/go-bench-vs-docker-gap.md)']='](Audit-go-bench-vs-docker-gap)'
-  ['](audits/clientctx-cross-goroutine.md)']='](Audit-clientctx-cross-goroutine)'
   ['](performance/README.md)']='](Performance)'
   ['](performance/README)']='](Performance)'
   ['](../performance/README.md)']='](Performance)'
@@ -270,9 +324,16 @@ declare -A REWRITES=(
 )
 
 for md in "$OUTDIR"/*.md; do
+  # Static rewrites first (hand-curated section pages, design subdirs, etc.).
   for from in "${!REWRITES[@]}"; do
     to="${REWRITES[$from]}"
     # Use a delimiter that won't appear in either string. ASCII 0x01 is safe.
+    sed -i "s$(printf '\1')${from//\//\\/}$(printf '\1')${to//\//\\/}$(printf '\1')g" "$md"
+  done
+  # Dynamic rewrites (registered by indexed sections — audits, adr, …).
+  for i in "${!DYNAMIC_FROM[@]}"; do
+    from="${DYNAMIC_FROM[$i]}"
+    to="${DYNAMIC_TO[$i]}"
     sed -i "s$(printf '\1')${from//\//\\/}$(printf '\1')${to//\//\\/}$(printf '\1')g" "$md"
   done
 done
