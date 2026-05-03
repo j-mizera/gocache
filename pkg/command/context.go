@@ -46,6 +46,19 @@ type Context struct {
 	SnapshotFile string
 	RequirePass  string
 
+	// Sharding routing — set by the evaluator before invoking the handler
+	// based on the command's Spec.KeyArgIndex / Spec.MultiKey.
+	//
+	//   Shard >= 0  — single-key command; Dispatch routes to that shard's
+	//                 engine goroutine.
+	//   Shard == -1 — keyless command (PING, AUTH, HELLO, MULTI, …); Dispatch
+	//                 runs the closure inline without acquiring any cache lock.
+	//   MultiKey    — multi-key command; Dispatch acquires every shard's
+	//                 write lock (in id order) for cross-shard atomicity.
+	//                 Shard is ignored when MultiKey is true.
+	Shard    int
+	MultiKey bool
+
 	// EvalFn re-enters the evaluator pipeline. Used by EXEC to execute
 	// queued commands in a batch. parentCtx is the connection-scoped ctx
 	// from the outer Evaluate call.
@@ -93,23 +106,50 @@ func (c *Context) Reset() {
 	c.WatchManager = nil
 	c.SnapshotFile = ""
 	c.RequirePass = ""
+	c.Shard = 0
+	c.MultiKey = false
 	c.EvalFn = nil
 }
 
-// Dispatch runs fn either directly (when InBatch is true, meaning the engine
-// lock is already held) or through the engine dispatcher. It wraps the result
-// into a Result, propagating any error. If the engine is stopped or the
-// command context is cancelled before fn runs, the returned Result carries
-// that error.
+// Dispatch runs fn under the appropriate locking discipline for the
+// command's sharding shape:
+//
+//   InBatch          — engine lock already held by an outer dispatcher
+//                      (e.g. EXEC), run inline.
+//   MultiKey         — acquire every shard's write lock (Engine.Dispatch-
+//                      WithResult takes Cache bulk lock) and run fn under
+//                      that umbrella.
+//   Shard < 0        — keyless command; no cache touch, run inline.
+//   Shard >= 0       — single-key command; route to that shard's engine
+//                      goroutine via Engine.DispatchToShard.
+//
+// Wraps the result into a Result, propagating any error. If the engine
+// is stopped or the command context is cancelled before fn runs, the
+// returned Result carries that error.
 func Dispatch(ctx *Context, fn func() any) Result {
 	if ctx.InBatch {
-		res := fn()
-		if err, ok := res.(error); ok {
-			return Result{Err: err}
-		}
-		return Result{Value: res}
+		return wrapInline(fn)
 	}
-	res, err := ctx.Engine.DispatchWithResult(ctx.Context(), fn)
+	if ctx.MultiKey {
+		res, err := ctx.Engine.DispatchWithResult(ctx.Context(), fn)
+		return wrapDispatch(res, err)
+	}
+	if ctx.Shard < 0 {
+		return wrapInline(fn)
+	}
+	res, err := ctx.Engine.DispatchToShard(ctx.Context(), ctx.Shard, fn)
+	return wrapDispatch(res, err)
+}
+
+func wrapInline(fn func() any) Result {
+	res := fn()
+	if err, ok := res.(error); ok {
+		return Result{Err: err}
+	}
+	return Result{Value: res}
+}
+
+func wrapDispatch(res any, err error) Result {
 	if err != nil {
 		return Result{Err: err}
 	}

@@ -182,7 +182,8 @@ func main() {
 
 	// Initialize core components (no operations yet — infrastructure setup).
 	_ = bootstate.Write(bootStateFile, stageCoreInit)
-	cacheInstance := cache.NewWithConfig(
+	cacheInstance := cache.NewWithShards(
+		cfg.Memory.CacheShards,
 		cfg.Memory.MaxMemoryMB,
 		cache.ParseEvictionPolicy(cfg.Memory.EvictionPolicy),
 	)

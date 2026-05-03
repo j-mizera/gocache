@@ -140,24 +140,55 @@ type Cache struct {
 	OnMutateAll func()
 }
 
-// New constructs a Cache with one shard, no memory limit, and LRU eviction.
+// DefaultShards is the per-shard count used by constructors that don't
+// take an explicit shardCount. 16 is the optimum measured by the
+// prototype N-sweep in #39. Must be a positive power of two so the
+// per-key fast path can mask instead of mod.
+const DefaultShards = 16
+
+// New constructs a Cache with the default shard count, no memory limit,
+// and LRU eviction.
 func New() *Cache {
-	return newCache(1, 0, EvictionLRU)
+	return newCache(DefaultShards, 0, EvictionLRU)
 }
 
-// NewWithConfig constructs a Cache from a megabyte limit. shardCount
-// defaults to 1; a future change exposes it as a constructor option.
+// NewWithConfig constructs a Cache with the default shard count from a
+// megabyte limit. Use NewWithShards to override the shard count.
 func NewWithConfig(maxMemoryMB int64, policy EvictionPolicy) *Cache {
+	return NewWithShards(DefaultShards, maxMemoryMB, policy)
+}
+
+// NewWithShards constructs a Cache with a specific shard count and
+// memory limit. shardCount must be a positive power of two; non-power-
+// of-two values are rounded down to the nearest power of two (so the
+// per-key fast path stays a single mask rather than a mod).
+func NewWithShards(shardCount int, maxMemoryMB int64, policy EvictionPolicy) *Cache {
 	var maxBytes int64
 	if maxMemoryMB > 0 {
 		maxBytes = maxMemoryMB * bytesPerMB
 	}
+	return newCache(roundDownPow2(shardCount), maxBytes, policy)
+}
+
+// NewWithBytes creates a single-shard cache with a raw byte limit.
+// Intended for testing where the budget is tight (a few hundred bytes)
+// — at the production default shard count (16) the per-shard slice of
+// such a budget would round to zero and trip every write. Tests that
+// want sharded byte-precise behaviour can call newCache directly.
+func NewWithBytes(maxBytes int64, policy EvictionPolicy) *Cache {
 	return newCache(1, maxBytes, policy)
 }
 
-// NewWithBytes creates a cache with a raw byte limit. Intended for testing.
-func NewWithBytes(maxBytes int64, policy EvictionPolicy) *Cache {
-	return newCache(1, maxBytes, policy)
+// roundDownPow2 returns the largest power of two ≤ n, or 1 for n ≤ 1.
+func roundDownPow2(n int) int {
+	if n <= 1 {
+		return 1
+	}
+	p := 1
+	for p<<1 <= n {
+		p <<= 1
+	}
+	return p
 }
 
 func newCache(shards int, maxBytes int64, policy EvictionPolicy) *Cache {
@@ -227,14 +258,19 @@ func (c *Cache) ShardByIndex(i int) *Shard {
 // ShardCount returns the total number of shards.
 func (c *Cache) ShardCount() int { return len(c.shards) }
 
-// shardIndex maps a key to its shard index. fnv1a64 over the key bytes;
-// at N=1 always returns 0. Inlined hot path.
+// shardIndex maps a key to its shard index. fnv1a64 over the key bytes
+// masked by (n-1) — the constructors guarantee n is a power of two so
+// this is a single AND instruction. At N=1 the mask is zero and every
+// key trivially routes to shard 0.
 func (c *Cache) shardIndex(key string) int {
-	if c.n == 1 {
-		return 0
-	}
-	return int(fnv1a(key) % c.n)
+	return int(fnv1a(key) & (c.n - 1))
 }
+
+// ShardIndexOf is the exported routing helper used by the evaluator
+// before dispatching a single-key handler. Returns the shard index for
+// key, computed the same way Shard(key) routes — callers that need the
+// pointer should use Shard(key) instead.
+func (c *Cache) ShardIndexOf(key string) int { return c.shardIndex(key) }
 
 // fnv1a is the 64-bit FNV-1a hash. Allocation-free, no library dependency.
 // At N=1 the caller short-circuits before reaching here. Replaceable with
@@ -304,20 +340,49 @@ func (c *Cache) ResolvePacked(e Entry) []byte {
 
 // Multi-key / cross-shard API ----------------------------------------------
 
-// Rename moves src's entry to dst. Today (N=1) every key is on shard 0
-// so the src/dst-on-same-shard fast path is always taken; multi-shard
-// RENAME is a follow-up.
+// Rename moves src's entry to dst. Same-shard takes the slot-preserving
+// fast path; cross-shard re-encodes through the regular write path on
+// dst's shard. Caller must hold all shard locks (the multi-key dispatch
+// path acquires them via Cache.Lock).
 func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
 	srcShard := c.Shard(src)
 	dstShard := c.Shard(dst)
 	if srcShard == dstShard {
 		return srcShard.rename(src, dst, newExpiration)
 	}
-	// N>1 cross-shard rename: not yet implemented. Behaviour falls back
-	// to "key absent" so callers see a consistent ErrNoSuchKey rather
-	// than partial state. A follow-up adds atomic cross-shard rename
-	// via sorted-shard-ID lock acquisition.
-	return false
+	entry, found := srcShard.rawGet(src)
+	if !found {
+		return false
+	}
+
+	// Extract the value before deleting src so we can rewrite it on dst.
+	// Packed bytes alias src's slab; copy because the slab slot is freed
+	// by srcShard.delete.
+	var packedValue []byte
+	var nativeValue any
+	if entry.Encoding == EncPacked {
+		buf := srcShard.ResolvePacked(entry)
+		packedValue = append([]byte(nil), buf...)
+	} else {
+		nativeValue = entry.Value
+	}
+	nativeBytes := srcShard.nativeSize(src)
+
+	if _, dstFound := dstShard.rawGet(dst); dstFound {
+		dstShard.delete(dst)
+	}
+	srcShard.delete(src)
+
+	if entry.Encoding == EncPacked {
+		dstShard.setPackedInternal(dst, entry.ValueType, packedValue, newExpiration, true)
+	} else {
+		dstShard.setNativeInternal(dst, nativeValue, entry.ValueType, nativeBytes, newExpiration, true)
+	}
+	if c.OnMutate != nil {
+		c.OnMutate(src)
+		c.OnMutate(dst)
+	}
+	return true
 }
 
 // Range iterates over every entry across every shard. Caller must

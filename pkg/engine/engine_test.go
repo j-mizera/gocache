@@ -117,14 +117,15 @@ func TestStop_Idempotent(t *testing.T) {
 }
 
 // TestSendAndWait_PoolSafety_CancelDuringWait pins down the resChan-pool
-// safety rule: when ctx.Done() fires AFTER the engine has taken ownership
-// of the result channel but BEFORE sendAndWait observed the result, the
-// channel must NOT be returned to the pool — the engine may still write to
-// it. The next caller must always Get a clean channel.
+// safety rule on the per-shard dispatch path: when ctx.Done() fires AFTER
+// the engine has taken ownership of the result channel but BEFORE
+// sendAndWait observed the result, the channel must NOT be returned to
+// the pool — the engine may still write to it. The next caller must
+// always Get a clean channel.
 //
 // We verify by stalling the engine inside its execute callback, cancelling
-// the context, then issuing a fresh dispatch and asserting it gets a
-// distinct (or at minimum drained) channel.
+// the context, then issuing a fresh dispatch and asserting it does not
+// see the stale value.
 func TestSendAndWait_PoolSafety_CancelDuringWait(t *testing.T) {
 	e, _ := newTestEngine(t)
 
@@ -135,7 +136,7 @@ func TestSendAndWait_PoolSafety_CancelDuringWait(t *testing.T) {
 	doneCh := make(chan struct{})
 
 	go func() {
-		_, _ = e.DispatchWithResult(ctx1, func() any {
+		_, _ = e.DispatchToShard(ctx1, 0, func() any {
 			close(enter)
 			<-release
 			return "stalled-result"
@@ -143,15 +144,15 @@ func TestSendAndWait_PoolSafety_CancelDuringWait(t *testing.T) {
 		close(doneCh)
 	}()
 
-	<-enter            // engine is now executing fn, holding resChan
-	cancel1()          // cancellation fires while engine still owns the channel
-	<-doneCh           // sendAndWait returned ctx.Err(); resChan was orphaned
-	close(release)     // let the engine finish writing to the orphaned channel
+	<-enter        // engine is now executing fn, holding resChan
+	cancel1()      // cancellation fires while engine still owns the channel
+	<-doneCh       // sendAndWait returned ctx.Err(); resChan was orphaned
+	close(release) // let the engine finish writing to the orphaned channel
 
 	// Drain. The engine wrote "stalled-result" into the orphaned channel
 	// after sendAndWait returned. Any next dispatch must NOT see that
 	// stale value.
-	res, err := e.DispatchWithResult(context.Background(), func() any { return "fresh" })
+	res, err := e.DispatchToShard(context.Background(), 0, func() any { return "fresh" })
 	if err != nil {
 		t.Fatalf("post-cancel dispatch error: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestSendAndWait_PoolSafety_StopDuringWait(t *testing.T) {
 	doneCh := make(chan struct{})
 
 	go func() {
-		_, _ = e.DispatchWithResult(context.Background(), func() any {
+		_, _ = e.DispatchToShard(context.Background(), 0, func() any {
 			close(enter)
 			<-release
 			return "stalled-result"
@@ -180,31 +181,30 @@ func TestSendAndWait_PoolSafety_StopDuringWait(t *testing.T) {
 		close(doneCh)
 	}()
 
-	<-enter            // engine is executing fn
-	e.Stop()           // stop fires while engine holds the channel
-	<-doneCh           // sendAndWait returned ErrEngineStopped
-	close(release)     // engine finishes writing to the orphaned channel
+	<-enter        // engine is executing fn
+	e.Stop()       // stop fires while engine holds the channel
+	<-doneCh       // sendAndWait returned ErrEngineStopped
+	close(release) // engine finishes writing to the orphaned channel
 
 	// After stop the engine is gone, so a follow-up dispatch returns
 	// ErrEngineStopped instead of running. The important guarantee is
 	// "no panic, no goroutine leak"; both are observable here because
 	// the test would deadlock otherwise.
-	_, err := e.DispatchWithResult(context.Background(), func() any { return "fresh" })
+	_, err := e.DispatchToShard(context.Background(), 0, func() any { return "fresh" })
 	if !errors.Is(err, ErrEngineStopped) {
 		t.Fatalf("expected ErrEngineStopped after stop, got %v", err)
 	}
 }
 
 // TestSendAndWait_PoolReuse_Sequential exercises the success path's Put
-// and asserts that sequential dispatches reuse channels from the pool
-// without leaking results. Concurrent correctness is covered by -race
-// across the existing serialization test.
+// and asserts that sequential per-shard dispatches reuse channels from
+// the pool without leaking results.
 func TestSendAndWait_PoolReuse_Sequential(t *testing.T) {
 	e, _ := newTestEngine(t)
 
 	const n = 100
 	for i := 0; i < n; i++ {
-		res, err := e.DispatchWithResult(context.Background(), func() any { return i })
+		res, err := e.DispatchToShard(context.Background(), 0, func() any { return i })
 		if err != nil {
 			t.Fatalf("iter %d: dispatch error %v", i, err)
 		}

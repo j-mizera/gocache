@@ -213,7 +213,7 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 	// correlation works; the operation is simply never registered, enriched,
 	// emitted, or hook-fired.
 	if !b.hasAnySink() {
-		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler)
+		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec)
 	}
 
 	// --- Create command operation ---
@@ -252,7 +252,7 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
-	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch)
+	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
 	cmdCtx.SetContext(opCtx)
 
 	// --- Command hooks (pre) ---
@@ -315,13 +315,13 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 // evaluateFast runs the handler with a bare *ops.Operation and no
 // instrumentation. Hot path when no sinks are attached. See hasAnySink for
 // the documented invariant on late-subscriber visibility.
-func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler) command.Result {
+func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec command.Spec) command.Result {
 	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
 	opCtx := ops.WithContext(parentCtx, cmdOp)
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
-	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch)
+	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
 	cmdCtx.SetContext(opCtx)
 
 	result := handler(cmdCtx)
@@ -336,7 +336,12 @@ func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.C
 // field assignment so the fast path and the slow path share the exact set
 // of dependencies — drift between the two would surface as a nil-pointer
 // crash inside the handler under one path but not the other.
-func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) {
+//
+// Computes the sharding routing fields (Shard / MultiKey) from the
+// command's Spec so command.Dispatch can decide whether to take a single
+// shard's lock (single-key), all shard locks (multi-key), or run inline
+// (keyless) — see command.Dispatch for the routing matrix.
+func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, spec command.Spec) {
 	c.Client = ctx
 	c.Op = op
 	c.Args = args
@@ -348,6 +353,20 @@ func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientCont
 	c.WatchManager = b.watchManager
 	c.SnapshotFile = b.snapshotFile
 	c.RequirePass = b.requirePass
+	c.MultiKey = spec.MultiKey
+	switch {
+	case spec.MultiKey:
+		c.Shard = -1 // ignored when MultiKey is true; set defensively
+	case spec.KeyArgIndex < 0:
+		c.Shard = -1 // keyless
+	case spec.KeyArgIndex < len(args):
+		c.Shard = b.cache.ShardIndexOf(args[spec.KeyArgIndex])
+	default:
+		// Spec.KeyArgIndex points past Args — register_test.go guarantees
+		// this is unreachable in practice (KeyArgIndex < Min). Fall back to
+		// shard 0 so behaviour is deterministic.
+		c.Shard = 0
+	}
 	c.EvalFn = b.evaluateInternal
 }
 

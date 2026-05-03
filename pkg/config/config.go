@@ -25,6 +25,7 @@ const (
 	defaultLoadOnStartup     = true
 	defaultMaxMemoryMB       = int64(1024)
 	defaultEvictionPolicy    = "lru"
+	defaultCacheShards       = 16
 
 	// Hybrid-encoding thresholds. Defaults match Valkey 8 (src/config.c).
 	// Collections that exceed either threshold (count or per-item length)
@@ -87,6 +88,12 @@ type MemoryConfig struct {
 	MaxMemoryMB    int64  `yaml:"max_memory_mb"    mapstructure:"max_memory_mb"`
 	EvictionPolicy string `yaml:"eviction_policy"  mapstructure:"eviction_policy"`
 
+	// CacheShards is the number of cache shards (and engine goroutines).
+	// Must be a positive power of two. Default 16 — validated by issue
+	// #34's prototype as the throughput sweet spot. Lower values save a
+	// little memory; higher values stop helping (#39 N-sweep).
+	CacheShards int `yaml:"cache_shards" mapstructure:"cache_shards"`
+
 	HashMaxPackedEntries int `yaml:"hash_max_packed_entries" mapstructure:"hash_max_packed_entries"`
 	HashMaxPackedValue   int `yaml:"hash_max_packed_value"   mapstructure:"hash_max_packed_value"`
 	SetMaxPackedEntries  int `yaml:"set_max_packed_entries"  mapstructure:"set_max_packed_entries"`
@@ -126,6 +133,7 @@ func DefaultConfig() *Config {
 		Memory: MemoryConfig{
 			MaxMemoryMB:          defaultMaxMemoryMB,
 			EvictionPolicy:       defaultEvictionPolicy,
+			CacheShards:          defaultCacheShards,
 			HashMaxPackedEntries: defaultHashMaxPackedEntries,
 			HashMaxPackedValue:   defaultHashMaxPackedValue,
 			SetMaxPackedEntries:  defaultSetMaxPackedEntries,
@@ -173,6 +181,7 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v.SetDefault("persistence.load_on_startup", defaultLoadOnStartup)
 	v.SetDefault("memory.max_memory_mb", defaultMaxMemoryMB)
 	v.SetDefault("memory.eviction_policy", defaultEvictionPolicy)
+	v.SetDefault("memory.cache_shards", defaultCacheShards)
 	v.SetDefault("memory.hash_max_packed_entries", defaultHashMaxPackedEntries)
 	v.SetDefault("memory.hash_max_packed_value", defaultHashMaxPackedValue)
 	v.SetDefault("memory.set_max_packed_entries", defaultSetMaxPackedEntries)
