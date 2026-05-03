@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"gocache/api/logger"
 	"gocache/pkg/cache"
@@ -53,6 +54,7 @@ type shardEngine struct {
 type Engine struct {
 	cache    *cache.Cache
 	shards   []*shardEngine
+	stopped  atomic.Bool
 	stopOnce sync.Once
 }
 
@@ -81,6 +83,7 @@ func (e *Engine) Run() {
 func (e *Engine) Stop() {
 	e.stopOnce.Do(func() {
 		logger.InfoNoCtx().Msg("engine stop signal received")
+		e.stopped.Store(true)
 		for _, se := range e.shards {
 			close(se.stopChan)
 		}
@@ -135,23 +138,53 @@ func (e *Engine) sendAndWait(ctx context.Context, shard int, fn func() any) (any
 	}
 }
 
-// Dispatch submits fn to the engine goroutine owning shard 0 and blocks
-// until it runs. Use DispatchToShard when the caller knows the routing.
-// Today (N=1) the two are equivalent; at N>1 this is the legacy multi-
-// shard path used by snapshot save / cleanup workers and is the
-// transition point where cross-shard coordination needs to be added.
+// Dispatch acquires every shard's write lock in shard-id order and runs
+// fn under all of them, returning when fn completes. Used by callers
+// that need a globally-consistent view of the cache: snapshot worker,
+// cleanup worker, MULTI/EXEC, FLUSHDB, and other multi-key paths. The
+// per-shard engine goroutines are not involved on this path; the bulk
+// lock provides the same serialization the single-engine model used to
+// give "for free."
+//
+// At N=1 this is equivalent to taking the (only) shard's lock — exactly
+// the pre-shard behaviour. At N>1 the locks are acquired in id order so
+// concurrent callers cannot deadlock against each other.
+//
+// Returns ctx.Err() if ctx is cancelled before any lock is acquired, or
+// nil otherwise. The bulk lock acquisition itself is unconditional once
+// started; at the per-shard granularity this is a sync.RWMutex.Lock call
+// which doesn't honour cancellation.
 func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
-	_, err := e.sendAndWait(ctx, 0, func() any {
-		fn()
-		return nil
-	})
-	return err
+	if e.stopped.Load() {
+		return ErrEngineStopped
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	e.cache.Lock()
+	defer e.cache.Unlock()
+	if e.stopped.Load() {
+		// A Stop concurrent with the lock acquisition: refuse to run.
+		return ErrEngineStopped
+	}
+	fn()
+	return nil
 }
 
-// DispatchWithResult is Dispatch with a return value. Same shard-0
-// routing as Dispatch.
+// DispatchWithResult is Dispatch with a return value.
 func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, error) {
-	return e.sendAndWait(ctx, 0, fn)
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	e.cache.Lock()
+	defer e.cache.Unlock()
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	return fn(), nil
 }
 
 // DispatchToShard routes fn to the goroutine owning the named shard.

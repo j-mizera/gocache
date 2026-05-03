@@ -1,0 +1,234 @@
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:26Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:27Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:27Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:27Z","message":"engine stop signal received"}
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/server
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkTCP_GET_Pipelined-4             	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:27Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:29Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:29Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:29Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:29Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:31Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:31Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:31Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:31Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:38Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:38Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:38Z","message":"engine stop signal received"}
+  453022	     11553 ns/op	    9845 B/op	     280 allocs/op
+BenchmarkTCP_GET_Pipelined-4             	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:38Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:40Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:40Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:40Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:40Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:42Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:42Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:42Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:42Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:44Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:44Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:44Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:44Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:52Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:52Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:52Z","message":"engine stop signal received"}
+  523410	     11272 ns/op	    9844 B/op	     280 allocs/op
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:52Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:54Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:54Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:54Z","message":"engine stop signal received"}
+BenchmarkTCP_GET_Standard-4              	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:54Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:56Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:56Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:56Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:56Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:57Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:57Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:22:57Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:22:57Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:03Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:03Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:03Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:03Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:11Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:11Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:11Z","message":"engine stop signal received"}
+ 1438198	      4214 ns/op	     822 B/op	      27 allocs/op
+BenchmarkTCP_GET_Standard-4              	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:11Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:13Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:13Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:13Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:13Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:15Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:15Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:15Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:15Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:17Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:17Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:17Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:17Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:23Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:23Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:23Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:23Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:31Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:31Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:31Z","message":"engine stop signal received"}
+ 1467412	      4115 ns/op	     822 B/op	      27 allocs/op
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:31Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:33Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:33Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:33Z","message":"engine stop signal received"}
+BenchmarkTCP_Mixed_GetSet_Pipelined-4    	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:33Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:35Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:35Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:35Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:35Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:37Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:37Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:37Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:37Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:45Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:45Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:45Z","message":"engine stop signal received"}
+  530707	     11195 ns/op	    9178 B/op	     270 allocs/op
+BenchmarkTCP_Mixed_GetSet_Pipelined-4    	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:45Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:46Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:46Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:46Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:46Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:48Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:48Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:48Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:48Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:50Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:50Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:50Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:50Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:58Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:58Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:23:58Z","message":"engine stop signal received"}
+  521103	     11125 ns/op	    9177 B/op	     270 allocs/op
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:23:58Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:00Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:00Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:00Z","message":"engine stop signal received"}
+BenchmarkTCP_Mixed_GetHset_Pipelined-4   	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:00Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:02Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:02Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:02Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:02Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:04Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:04Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:04Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:04Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:11Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:11Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:11Z","message":"engine stop signal received"}
+  447922	     13044 ns/op	   10786 B/op	     280 allocs/op
+BenchmarkTCP_Mixed_GetHset_Pipelined-4   	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:11Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:13Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:13Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:13Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:13Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:15Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:15Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:15Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:15Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:17Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:17Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:17Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:17Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:24Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:24Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:24Z","message":"engine stop signal received"}
+  383342	     13269 ns/op	   10862 B/op	     280 allocs/op
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:24Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:26Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:26Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:26Z","message":"engine stop signal received"}
+BenchmarkTCP_Mixed_GetSet_Standard-4     	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:26Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:28Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:28Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:28Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:28Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:30Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:30Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:30Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:30Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:36Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:36Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:36Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:36Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:44Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:44Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:44Z","message":"engine stop signal received"}
+ 1468998	      4198 ns/op	     725 B/op	      26 allocs/op
+BenchmarkTCP_Mixed_GetSet_Standard-4     	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:44Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:46Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:46Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:46Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:46Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:48Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:48Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:48Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:48Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:50Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:50Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:50Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:50Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:56Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:56Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:24:56Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:24:56Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"engine stop signal received"}
+ 1422493	      4204 ns/op	     725 B/op	      26 allocs/op
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:04Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"engine stop signal received"}
+BenchmarkTCP_SET_Standard-4              	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:04Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:04Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:04Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:04Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:08Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:08Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:08Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:08Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"engine stop signal received"}
+ 1373632	      4376 ns/op	    1065 B/op	      27 allocs/op
+BenchmarkTCP_SET_Standard-4              	{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:14Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:14Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:14Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:14Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:14Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:19Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:19Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:19Z","message":"engine stop signal received"}
+{"level":"info","source":"server","shards":16,"time":"2026-05-03T00:25:19Z","message":"engine dispatch loop started"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:25Z","message":"initiating graceful shutdown"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:25Z","message":"all connections closed gracefully"}
+{"level":"info","source":"server","time":"2026-05-03T00:25:25Z","message":"engine stop signal received"}
+ 1343294	      4351 ns/op	    1071 B/op	      27 allocs/op
+PASS
+ok  	gocache/pkg/server	179.298s
