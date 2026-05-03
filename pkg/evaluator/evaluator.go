@@ -84,6 +84,7 @@ type BaseEvaluator struct {
 	emitter            events.Emitter
 	tracker            *serverOps.Tracker
 	opHookExecutor     OpHookExecutor
+	persistenceFeed    command.MutationEmitter
 }
 
 func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *BaseEvaluator {
@@ -129,6 +130,15 @@ func (b *BaseEvaluator) SetEmitter(e events.Emitter) {
 
 func (b *BaseEvaluator) SetTracker(t *serverOps.Tracker) {
 	b.tracker = t
+}
+
+// SetPersistenceFeed wires the persistence coordinator's mutation-feed
+// hook into the evaluator. Each *command.Context populated by fillCmdCtx
+// inherits the same instance, so command.Dispatch can decide per-command
+// whether to wrap the write closure with emission. Pass nil to disable
+// emission (the default — no coordinator means no mutation feed).
+func (b *BaseEvaluator) SetPersistenceFeed(f command.MutationEmitter) {
+	b.persistenceFeed = f
 }
 
 func (b *BaseEvaluator) SetOpHookExecutor(e OpHookExecutor) {
@@ -368,6 +378,8 @@ func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientCont
 		c.Shard = 0
 	}
 	c.EvalFn = b.evaluateInternal
+	c.Spec = spec
+	c.Coordinator = b.persistenceFeed
 }
 
 // routeToPlugin dispatches a command to a plugin via the router. The per-call

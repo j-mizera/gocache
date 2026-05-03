@@ -246,6 +246,15 @@ func main() {
 	}
 	eventBus.Emit(events.NewOperationStart(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
 
+	// Persistence coordinator. Created unconditionally so the runtime
+	// mutation feed can be wired even when LoadOnStartup is off; the
+	// coordinator runs in pass-through mode (no sinks registered) until
+	// a future PR adds the AOF / snapshot sink plugins. The current path
+	// uses GobSource for boot recovery; that goes away when the snapshot
+	// plugin (ADR-0005) replaces the gob format.
+	coordinator := persistence.New(persistence.NewGobSource(cfg.Persistence.SnapshotFile))
+	srv.SetPersistenceFeed(coordinator)
+
 	// LoadSnapshot operation.
 	_ = bootstate.Write(bootStateFile, stageSnapshotLoad)
 	if cfg.Persistence.LoadOnStartup {
@@ -257,11 +266,6 @@ func main() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
 		}
 		eventBus.Emit(events.NewOperationStart(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
-		// Boot via the persistence coordinator. The coordinator dispatches
-		// to the registered Source (here: GobSource over the configured
-		// snapshot file); future PRs replace this with the new on-disk
-		// format and add Sink dispatch for the runtime mutation feed.
-		coordinator := persistence.New(persistence.NewGobSource(cfg.Persistence.SnapshotFile))
 		if _, err := coordinator.BootInto(snapCtx, cacheInstance); err != nil {
 			logger.Warn(snapCtx).Err(err).Msg("failed to load snapshot")
 			snapOp.Fail(err.Error())
@@ -284,6 +288,13 @@ func main() {
 	// Start engine.
 	go engineInstance.Run()
 
+	// Start the persistence coordinator AFTER boot so the LSN cursor
+	// reflects the recovered snapshot. With no sinks registered (current
+	// configuration), Start is a no-op aside from arming the lifecycle —
+	// HasSinks remains false and the dispatcher's emission fast-path
+	// short-circuits. Stop runs in the shutdown sequence below.
+	coordinator.Start(ctx)
+
 	// Initialize and start workers.
 	_ = bootstate.Write(bootStateFile, stageWorkersStart)
 	snapshotWorker := workers.NewSnapshotWorker(
@@ -292,6 +303,7 @@ func main() {
 		cfg.Persistence.SnapshotFile,
 	)
 	cleanupWorker := workers.NewCleanupWorker(cacheInstance, engineInstance, cfg.Workers.CleanupInterval)
+	cleanupWorker.SetPersistenceFeed(coordinator)
 	snapshotWorker.SetTracker(tracker)
 	snapshotWorker.SetEmitter(eventBus)
 	if opHookExec != nil {
@@ -375,10 +387,10 @@ func main() {
 	select {
 	case sig := <-sigChan:
 		logger.InfoNoCtx().Str("signal", sig.String()).Msg("received signal")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, sig.String())
+		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, coordinator, sig.String())
 	case err := <-serverErrChan:
 		logger.ErrorNoCtx().Err(err).Msg("server error")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, "error: "+err.Error())
+		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, coordinator, "error: "+err.Error())
 		os.Exit(1)
 	}
 
@@ -407,6 +419,7 @@ func handleShutdown(
 	tracker *serverOps.Tracker,
 	eventBus *serverEvents.Bus,
 	opHookExec *ophooks.Executor,
+	coordinator *persistence.Coordinator,
 	reason string,
 ) {
 	// Create shutdown operation — plugins see this via operation hooks
@@ -448,6 +461,12 @@ func handleShutdown(
 	logger.Info(shutdownCtx).Str("step", "3/6").Msg("stopping background workers")
 	snapshotWorker.Stop()
 	cleanupWorker.Stop()
+
+	// Drain the persistence coordinator BEFORE the final snapshot so any
+	// inflight mutations make it to their sinks. With no sinks registered
+	// in this build, Stop is a no-op; with sinks, Stop blocks until each
+	// sink's flush goroutine drains its buffer and Sink.Close returns.
+	coordinator.Stop(shutdownCtx)
 
 	logger.Info(shutdownCtx).Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
 	if err := persistence.SaveSnapshot(shutdownCtx, cfg.Persistence.SnapshotFile, cacheInstance); err != nil {

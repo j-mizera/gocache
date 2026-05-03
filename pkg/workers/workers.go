@@ -10,6 +10,7 @@ import (
 	"gocache/api/logger"
 	ops "gocache/api/operations"
 	"gocache/pkg/cache"
+	pkgcommand "gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/evaluator"
 	serverOps "gocache/pkg/operations"
@@ -183,6 +184,7 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 // CleanupWorker periodically removes expired keys from the cache.
 type CleanupWorker struct {
 	baseWorker
+	feed pkgcommand.MutationEmitter
 }
 
 func NewCleanupWorker(c *cache.Cache, e *engine.Engine, interval time.Duration) *CleanupWorker {
@@ -197,6 +199,16 @@ func NewCleanupWorker(c *cache.Cache, e *engine.Engine, interval time.Duration) 
 	}
 }
 
+// SetPersistenceFeed wires the persistence coordinator's mutation-feed
+// hook so TTL-driven deletes emit DEL mutations under the same lock that
+// performs the deletion. Replay parity with snapshot-time state requires
+// these emissions; without them, a recovered cache could diverge from a
+// snapshot+log replay because expired entries would not appear as deletes
+// in the mutation log.
+func (w *CleanupWorker) SetPersistenceFeed(f pkgcommand.MutationEmitter) {
+	w.feed = f
+}
+
 func (w *CleanupWorker) Start(parentCtx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	w.wg.Add(1)
@@ -208,9 +220,15 @@ func (w *CleanupWorker) Start(parentCtx context.Context) {
 				op, opCtx := w.startOp(parentCtx, ops.TypeCleanup)
 				if err := w.engine.Dispatch(opCtx, func() {
 					now := time.Now().UnixNano()
+					emit := w.feed != nil && w.feed.HasSinks()
 					w.cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
 						if expiration > 0 && now > expiration {
 							w.cache.RawDelete(key)
+							if emit {
+								// Inside engine.Dispatch's bulk lock — LSN
+								// allocation order matches deletion order.
+								w.feed.AllocateAndEmit("DEL", key, [][]byte{[]byte(key)})
+							}
 						}
 						return true
 					})

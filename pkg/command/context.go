@@ -8,6 +8,7 @@ import (
 	"context"
 
 	apicommand "gocache/api/command"
+	apipersistence "gocache/api/persistence"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -15,6 +16,19 @@ import (
 	"gocache/pkg/transaction"
 	"gocache/pkg/watch"
 )
+
+// MutationEmitter is the dispatcher-side hook into the persistence
+// coordinator. The cache write path uses HasSinks to short-circuit
+// emission when no sink is registered (~1ns atomic load); when at least
+// one sink is registered, AllocateAndEmit is called inside the shard
+// lock to allocate the LSN and push the mutation to per-sink buffers.
+//
+// Implemented by *pkg/persistence.Coordinator. Nil is a valid value —
+// the dispatcher treats it the same as "no sinks".
+type MutationEmitter interface {
+	HasSinks() bool
+	AllocateAndEmit(op, key string, args [][]byte) apipersistence.LSN
+}
 
 // Re-export shared types from api/command so existing importers don't break.
 type Result = apicommand.Result
@@ -74,6 +88,18 @@ type Context struct {
 	// queued commands in a batch. parentCtx is the connection-scoped ctx
 	// from the outer Evaluate call.
 	EvalFn func(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string, inBatch bool) Result
+
+	// Spec is the command's classification, populated by the evaluator
+	// from the command registration. Dispatch reads Spec.ReadOnly to
+	// decide whether to wrap fn with persistence emission.
+	Spec Spec
+
+	// Coordinator is the persistence mutation-feed entry point, set by
+	// the evaluator from the server's coordinator instance. May be nil
+	// when no persistence is configured. When non-nil, Dispatch wraps
+	// non-read-only fn closures with HasSinks-gated emission inside the
+	// shard lock so LSN allocation order matches lock order.
+	Coordinator MutationEmitter
 }
 
 // Context returns the ambient context.Context carrying the current
@@ -121,6 +147,8 @@ func (c *Context) Reset() {
 	c.MultiKey = false
 	c.TouchedShards = nil
 	c.EvalFn = nil
+	c.Spec = Spec{}
+	c.Coordinator = nil
 }
 
 // Dispatch runs fn under the appropriate locking discipline for the
@@ -139,6 +167,15 @@ func (c *Context) Reset() {
 // is stopped or the command context is cancelled before fn runs, the
 // returned Result carries that error.
 func Dispatch(ctx *Context, fn func() any) Result {
+	// Wrap fn with persistence-feed emission when (a) the command writes
+	// (Spec.ReadOnly is false) and (b) a coordinator is attached. The
+	// HasSinks check inside the wrapper is what gates the per-command
+	// cost: zero when no sink is registered, atomic-load + LSN-allocate +
+	// channel-send when one is. The wrapper always runs inside the shard
+	// lock so LSN allocation order matches lock order — critical for
+	// replay correctness.
+	fn = wrapWithEmission(ctx, fn)
+
 	if ctx.InBatch {
 		return wrapInline(fn)
 	}
@@ -159,6 +196,68 @@ func Dispatch(ctx *Context, fn func() any) Result {
 	}
 	res, err := ctx.Engine.DispatchToShard(ctx.Context(), ctx.Shard, fn)
 	return wrapDispatch(res, err)
+}
+
+// wrapWithEmission returns fn unchanged for read-only commands or when
+// no coordinator is attached. For writes with a coordinator, returns a
+// closure that runs fn, then (inside the same goroutine and the same
+// lock the dispatcher acquired) emits a Mutation if at least one sink
+// is registered AND fn's result is not an error.
+//
+// The closure does NOT pay the emission cost on three short-circuits:
+//
+//   - read-only command (compile-time skip — bare fn returned)
+//   - no coordinator   (compile-time skip — bare fn returned)
+//   - HasSinks == false (atomic load, ~1 ns) — runtime skip inside lock
+func wrapWithEmission(ctx *Context, fn func() any) func() any {
+	if ctx.Spec.ReadOnly || ctx.Coordinator == nil {
+		return fn
+	}
+	return func() any {
+		res := fn()
+		if !ctx.Coordinator.HasSinks() {
+			return res
+		}
+		if _, isErr := res.(error); isErr {
+			return res
+		}
+		ctx.Coordinator.AllocateAndEmit(ctx.Op, primaryKey(ctx), argsAsBytes(ctx.Args))
+		return res
+	}
+}
+
+// primaryKey returns the command's primary key for routing/sharding hints
+// in the Mutation. For keyless commands or out-of-range KeyArgIndex
+// returns the empty string. For multi-key commands returns the first key
+// (Args[KeyArgIndex] if valid, else Args[0] when Args is non-empty).
+//
+// Mutation.Args carries the full argument list, so a sink that needs every
+// key (AOF replay, multi-key replication) reads from there. Mutation.Key
+// is a routing hint, not the source of truth.
+func primaryKey(ctx *Context) string {
+	idx := ctx.Spec.KeyArgIndex
+	if idx >= 0 && idx < len(ctx.Args) {
+		return ctx.Args[idx]
+	}
+	if ctx.MultiKey && len(ctx.Args) > 0 {
+		return ctx.Args[0]
+	}
+	return ""
+}
+
+// argsAsBytes converts the string-typed argument slice to [][]byte for
+// the Mutation wire shape. Each conversion copies (Go strings are
+// immutable). Verbatim zero-copy from the RESP parser is a future
+// optimization once the dispatcher carries the raw RESP bytes through.
+func argsAsBytes(args []string) [][]byte {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([][]byte, len(args))
+	for i, a := range args {
+		out[i] = []byte(a)
+	}
+	return out
 }
 
 func wrapInline(fn func() any) Result {
