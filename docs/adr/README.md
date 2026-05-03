@@ -30,9 +30,9 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| [0001](0001-persistence-as-pluggable-log-snapshot.md) | Persistence as pluggable log+snapshot+LSN | proposed | 2026-05-03 |
-| [0002](0002-source-sink-contract.md) | Source/Sink contract with BootMode trichotomy | proposed | 2026-05-03 |
-| [0003](0003-mutation-feed-and-fsync.md) | Mutation feed: group commit + fsync policy | proposed | 2026-05-03 |
+| [0001](0001-persistence-as-pluggable-log-snapshot.md) | Persistence as pluggable log+snapshot+LSN | accepted | 2026-05-03 |
+| [0002](0002-source-sink-contract.md) | Source/Sink contract with BootMode trichotomy | accepted | 2026-05-03 |
+| [0003](0003-mutation-feed-and-fsync.md) | Mutation feed: group commit + fsync policy | accepted | 2026-05-03 |
 | [0004](0004-command-namespacing.md) | Persistence command namespacing | proposed | 2026-05-03 |
 | [0005](0005-snapshot-wire-and-file-format.md) | Snapshot wire and file format | proposed | 2026-05-03 |
 | [0006](0006-builtin-vs-third-party-transport.md) | Built-in vs third-party plugin transport | proposed | 2026-05-03 |

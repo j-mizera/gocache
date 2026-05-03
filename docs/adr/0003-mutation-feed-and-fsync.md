@@ -1,7 +1,7 @@
 ---
 title: ADR-0003 Mutation feed — group commit and fsync policy
 description: Mutations flow to Sinks via a buffered group-commit channel (1ms or 64KB triggers); fsync is a per-Sink policy with three levels (Always, EverySec, No)
-status: proposed
+status: accepted
 date: 2026-05-03
 deciders: [witherxse]
 related:
