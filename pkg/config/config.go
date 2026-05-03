@@ -25,7 +25,7 @@ const (
 	defaultLoadOnStartup     = true
 	defaultMaxMemoryMB       = int64(1024)
 	defaultEvictionPolicy    = "lru"
-	defaultCacheShards       = 16
+	defaultCacheShards       = 8
 
 	// Hybrid-encoding thresholds. Defaults match Valkey 8 (src/config.c).
 	// Collections that exceed either threshold (count or per-item length)
