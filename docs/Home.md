@@ -4,15 +4,28 @@ Redis-compatible in-memory cache server with a microkernel architecture. The cor
 
 > Bachelor's thesis project exploring whether safe extensibility and high performance can coexist.
 
-This wiki is **auto-generated** from `docs/` on every push to `main`. To edit a page, edit the corresponding file in the repo's `docs/` directory and open a PR.
+This wiki is **auto-generated** from `docs/` on every push to `main` via `scripts/build-wiki.sh`. To edit a page, edit the corresponding file in the repo's `docs/` directory and open a PR.
 
 ## Where to start
 
-- **[Server](server/README)** — Server overview, configuration, supported commands, env vars, embedded plugins.
-- **[Plugins](plugins/README)** — Embedded vs IPC plugins, build-tag matrix, the `api/`-only import rule, available plugins.
-- **[GCPC protocol](gcpc/README)** — GCPC v1 specification (Protobuf over Unix domain sockets) — the contract IPC plugins implement.
-- **[Audits](audits)** — Performance audits and thesis anchors (per-shard arc summary, Go-vs-docker bench gap).
-- **[Design diagrams](server/design)** — Component, sequence, and state diagrams in PlantUML.
+- **[Server](Server)** — Server overview, configuration, supported commands, env vars, embedded plugins.
+- **[Plugins](Plugins)** — Embedded vs IPC plugins, build-tag matrix, the `api/`-only import rule, available plugins.
+- **[GCPC protocol](GCPC)** — GCPC v1 specification (Protobuf over Unix domain sockets) — the contract IPC plugins implement.
+- Audits and thesis anchors:
+  - [Per-shard arc summary](Audit-per-shard-arc-summary)
+  - [Go-vs-docker bench gap](Audit-go-bench-vs-docker-gap)
+  - [clientctx cross-goroutine](Audit-clientctx-cross-goroutine)
+- Design diagrams (server, rendered SVGs):
+  - [Components](Server-Components-Diagrams)
+  - [Sequences](Server-Sequence-Diagrams)
+  - [States](Server-State-Diagrams)
+- Design diagrams (GCPC):
+  - [Components](GCPC-Components-Diagrams)
+  - [Sequences](GCPC-Sequence-Diagrams)
+  - [States](GCPC-State-Diagrams)
+- Design diagrams (gobservability plugin):
+  - [Components](Plugin-Gobservability-Components-Diagrams)
+  - [Sequences](Plugin-Gobservability-Sequence-Diagrams)
 
 ## Active development
 
@@ -34,7 +47,7 @@ sdk/        Plugin author SDK
 cmd/        Entry points (server, cli)
 pkg/        Server internals — depends on api/, never on sdk/, never imported by plugins/
 plugins/    Plugin implementations (embedded + IPC)
-docs/       This wiki — auto-synced on push to main
+docs/       Source for this wiki — auto-flattened by scripts/build-wiki.sh on push
 bench/      Benchmarks and results per branch
 scripts/    Build/test/CI helpers
 ```
@@ -55,4 +68,4 @@ go build -tags "crashdump otlp pprof" -o bin/gocache-server ./cmd/server
 docker build --build-arg PLUGINS=crashdump,otlp -t gocache:full .
 ```
 
-See [Server / build](server/README#building) for details.
+See [Server / build](Server#building) for details.

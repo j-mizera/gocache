@@ -277,7 +277,15 @@ jobs:
         with:
           ref: main
 
-      - name: Sync docs/ to wiki
+      - name: Install plantuml
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends plantuml
+
+      - name: Build flat wiki layout (renders .puml -> .svg)
+        run: bash scripts/build-wiki.sh wiki-staging
+
+      - name: Sync wiki-staging/ to wiki
         env:
           # Classic PAT with public_repo scope. GitHub App tokens cannot push
           # to wikis (no Wiki permission exists for Apps); this PAT is the
@@ -289,12 +297,12 @@ jobs:
 
           if [[ -z "${WIKI_SYNC_TOKEN:-}" ]]; then
             echo "::warning::WIKI_SYNC_TOKEN not set — skipping wiki sync."
-            echo "::warning::See docs/plugins/README.md or release.yml header for setup steps."
+            echo "::warning::Add a classic PAT with public_repo scope as a repo secret to enable."
             exit 0
           fi
 
-          if [[ ! -d docs ]]; then
-            echo "::error::docs/ directory missing — nothing to sync."
+          if [[ ! -d wiki-staging ]]; then
+            echo "::error::wiki-staging/ missing — build-wiki.sh did not run."
             exit 1
           fi
 
@@ -304,14 +312,14 @@ jobs:
           echo "Cloning wiki repo..."
           git clone "https://x-access-token:${WIKI_SYNC_TOKEN}@github.com/${REPO}.wiki.git" "$tmp"
 
-          echo "Mirroring docs/ -> wiki (preserving .git)..."
-          rsync -a --delete --exclude='.git/' docs/ "$tmp/"
+          echo "Mirroring wiki-staging/ -> wiki (preserving .git)..."
+          rsync -a --delete --exclude='.git/' wiki-staging/ "$tmp/"
 
           cd "$tmp"
           git config user.name "gocache-wiki-sync[bot]"
           git config user.email "actions@users.noreply.github.com"
 
-          if git diff --quiet && git diff --cached --quiet && [[ -z "$(git status --porcelain)" ]]; then
+          if [[ -z "$(git status --porcelain)" ]]; then
             echo "No wiki changes to commit."
             exit 0
           fi
