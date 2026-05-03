@@ -15,6 +15,15 @@
 **Performance**
 - [Overview](Performance)
 
+**Decisions (ADR)**
+- [Index](ADR)
+- [0001 — Pluggable log+snapshot](ADR-0001-persistence-as-pluggable-log-snapshot)
+- [0002 — Source/Sink contract](ADR-0002-source-sink-contract)
+- [0003 — Mutation feed + fsync](ADR-0003-mutation-feed-and-fsync)
+- [0004 — Command namespacing](ADR-0004-command-namespacing)
+- [0005 — Snapshot wire format](ADR-0005-snapshot-wire-and-file-format)
+- [0006 — Built-in vs IPC transport](ADR-0006-builtin-vs-third-party-transport)
+
 **Diagrams (server)**
 - [Components](Server-Components-Diagrams)
 - [Sequences](Server-Sequence-Diagrams)

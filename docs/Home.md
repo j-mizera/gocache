@@ -24,6 +24,7 @@ This wiki is **auto-generated** from `docs/` on every push to `main` via `script
 - **[Plugins](Plugins)** — Embedded vs IPC plugins, build-tag matrix, the `api/`-only import rule, available plugins.
 - **[GCPC protocol](GCPC)** — GCPC v1 specification (Protobuf over Unix domain sockets) — the contract IPC plugins implement.
 - **[Performance](Performance)** — Per-shard locking arc — shipped optimizations, measured deltas, structural caps, remaining levers.
+- **[Decisions (ADR)](ADR)** — Architecture Decision Records — the durable record of significant architectural choices.
 - Audits (cross-cutting — performance, design, races):
   - [Per-shard arc summary](Audit-per-shard-arc-summary)
   - [Go-vs-docker bench gap](Audit-go-bench-vs-docker-gap)
