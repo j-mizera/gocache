@@ -250,10 +250,16 @@ func main() {
 	// mutation feed can be wired even when LoadOnStartup is off; the
 	// coordinator runs in pass-through mode (no sinks registered) until
 	// a future PR adds the AOF / snapshot sink plugins. The current path
-	// uses GobSource for boot recovery; that goes away when the snapshot
-	// plugin (ADR-0005) replaces the gob format.
-	coordinator := persistence.New(persistence.NewGobSource(cfg.Persistence.SnapshotFile))
+	// uses GobSource for boot recovery AND for runtime snapshot writes —
+	// the gob shim implements both Source and Snapshotter so SAVE,
+	// scheduled snapshots, and shutdown final-snapshot all run through
+	// the coordinator. The shim goes away when the v1 snapshot plugin
+	// (ADR-0005) lands.
+	gobShim := persistence.NewGobSource(cfg.Persistence.SnapshotFile)
+	coordinator := persistence.New(gobShim)
+	coordinator.RegisterSnapshotter(gobShim)
 	srv.SetPersistenceFeed(coordinator)
+	srv.SetSnapshotInvoker(coordinator)
 
 	// LoadSnapshot operation.
 	_ = bootstate.Write(bootStateFile, stageSnapshotLoad)
@@ -304,6 +310,7 @@ func main() {
 	)
 	cleanupWorker := workers.NewCleanupWorker(cacheInstance, engineInstance, cfg.Workers.CleanupInterval)
 	cleanupWorker.SetPersistenceFeed(coordinator)
+	snapshotWorker.SetSnapshotInvoker(coordinator)
 	snapshotWorker.SetTracker(tracker)
 	snapshotWorker.SetEmitter(eventBus)
 	if opHookExec != nil {
@@ -345,6 +352,7 @@ func main() {
 
 		snapshotWorker.UpdateInterval(newCfg.Persistence.SnapshotInterval)
 		snapshotWorker.UpdateFile(newCfg.Persistence.SnapshotFile)
+		gobShim.SetFilename(newCfg.Persistence.SnapshotFile)
 		cleanupWorker.UpdateInterval(newCfg.Workers.CleanupInterval)
 		cacheInstance.SetMemoryLimit(
 			reloadCtx,
@@ -469,7 +477,7 @@ func handleShutdown(
 	coordinator.Stop(shutdownCtx)
 
 	logger.Info(shutdownCtx).Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
-	if err := persistence.SaveSnapshot(shutdownCtx, cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
+	if err := coordinator.Snapshot(shutdownCtx, cacheInstance); err != nil {
 		logger.Warn(shutdownCtx).Err(err).Msg("failed to save final snapshot")
 	} else {
 		logger.Info(shutdownCtx).Msg("final snapshot saved successfully")

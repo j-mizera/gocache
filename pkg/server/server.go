@@ -110,6 +110,12 @@ func (srv *Server) SetPersistenceFeed(f command.MutationEmitter) {
 	srv.evaluator.SetPersistenceFeed(f)
 }
 
+// SetSnapshotInvoker wires the persistence coordinator's SAVE/BGSAVE
+// entry point into the evaluator. Pass nil to disable snapshot commands.
+func (srv *Server) SetSnapshotInvoker(s command.SnapshotInvoker) {
+	srv.evaluator.SetSnapshotInvoker(s)
+}
+
 // EmitEvent emits an event through the server's emitter.
 func (srv *Server) EmitEvent(evt events.Event) {
 	srv.emitter.Emit(evt)

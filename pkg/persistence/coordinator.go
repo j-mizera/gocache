@@ -29,6 +29,13 @@ type Coordinator struct {
 	source apipersistence.Source
 	sinks  []apipersistence.Sink
 
+	// snapshotter is the registered point-in-time snapshot writer.
+	// Optional — Coordinator.Snapshot returns ErrNoSnapshotter when nil.
+	// Guarded by snapshotterMu so RegisterSnapshotter can race with
+	// in-flight Snapshot calls during config reload without tearing.
+	snapshotterMu sync.RWMutex
+	snapshotter   apipersistence.Snapshotter
+
 	// lsn is the most recently allocated LSN. AllocateLSN increments it;
 	// boot reads it from the snapshot and seeds the runtime allocator.
 	lsn atomic.Uint64
@@ -141,6 +148,95 @@ func (c *Coordinator) Source() apipersistence.Source { return c.source }
 
 // Sinks returns the registered sinks (may be empty).
 func (c *Coordinator) Sinks() []apipersistence.Sink { return c.sinks }
+
+// RegisterSnapshotter installs the point-in-time snapshot writer. Safe to
+// call before or after Start. A nil argument clears the registration.
+// Replacing an existing snapshotter is allowed — useful when config
+// reload swaps the on-disk format (e.g. gob → v1 binary).
+func (c *Coordinator) RegisterSnapshotter(s apipersistence.Snapshotter) {
+	c.snapshotterMu.Lock()
+	c.snapshotter = s
+	c.snapshotterMu.Unlock()
+}
+
+// Snapshotter returns the registered snapshotter (may be nil).
+func (c *Coordinator) Snapshotter() apipersistence.Snapshotter {
+	c.snapshotterMu.RLock()
+	defer c.snapshotterMu.RUnlock()
+	return c.snapshotter
+}
+
+// Snapshot writes a point-in-time dump of target to the registered
+// snapshotter. Iterates the cache, materialises a SnapshotSource backed
+// by the captured slice, then delegates to snapshotter.SaveSnapshot.
+//
+// Returns ErrNoSnapshotter when none is registered — callers can choose
+// to treat that as fatal (SAVE command) or as a no-op (scheduled worker
+// when persistence is disabled).
+//
+// The cache snapshot is captured eagerly into a slice before the
+// snapshotter sees it. That keeps the snapshotter simple (it just walks
+// Next/io.EOF) at the cost of buffering all entries in memory once. The
+// upcoming v1 streaming format (ADR-0005) can reduce buffering by
+// writing each record as it's yielded; the gob shim already buffers
+// internally so this PR is no worse than the legacy SaveSnapshot.
+func (c *Coordinator) Snapshot(ctx context.Context, target *cache.Cache) error {
+	s := c.Snapshotter()
+	if s == nil {
+		return apipersistence.ErrNoSnapshotter
+	}
+	entries := captureSnapshotEntries(target)
+	src := &sliceSnapshotSource{entries: entries}
+	return s.SaveSnapshot(ctx, src)
+}
+
+// captureSnapshotEntries walks the cache and returns every live entry as
+// an api/persistence.SnapshotEntry. Packed values are copied out of the
+// slab allocator so the snapshotter sees a stable []byte independent of
+// slab lifecycle. ValueType and Encoding cast directly from the cache
+// enums to the api enums — the values are aligned by construction (see
+// type comments in api/persistence/types.go).
+func captureSnapshotEntries(target *cache.Cache) []apipersistence.SnapshotEntry {
+	var entries []apipersistence.SnapshotEntry
+	target.Range(func(key string, entry cache.Entry, expiration int64) bool {
+		var v any
+		if entry.Encoding == cache.EncPacked {
+			src := target.ResolvePacked(entry)
+			buf := make([]byte, len(src))
+			copy(buf, src)
+			v = buf
+		} else {
+			v = entry.Value
+		}
+		entries = append(entries, apipersistence.SnapshotEntry{
+			Key:        key,
+			ValueType:  apipersistence.ValueType(entry.ValueType),
+			Encoding:   apipersistence.Encoding(entry.Encoding),
+			Value:      v,
+			Expiration: expiration,
+		})
+		return true
+	})
+	return entries
+}
+
+// sliceSnapshotSource is a SnapshotSource backed by a pre-captured slice.
+// Forward-only single-pass — Next walks the slice and returns io.EOF once
+// exhausted. Internal to the coordinator; snapshotters never type-assert
+// against it.
+type sliceSnapshotSource struct {
+	entries []apipersistence.SnapshotEntry
+	cursor  int
+}
+
+func (s *sliceSnapshotSource) Next(_ context.Context) (apipersistence.SnapshotEntry, error) {
+	if s.cursor >= len(s.entries) {
+		return apipersistence.SnapshotEntry{}, io.EOF
+	}
+	e := s.entries[s.cursor]
+	s.cursor++
+	return e, nil
+}
 
 // BootInto drives the recovery path: fetches the BootResult from the
 // Source, applies it to the target cache, and seeds the LSN cursor. The

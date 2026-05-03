@@ -14,7 +14,6 @@ import (
 	"gocache/pkg/engine"
 	"gocache/pkg/evaluator"
 	serverOps "gocache/pkg/operations"
-	"gocache/pkg/persistence"
 )
 
 const defaultInterval = 5 * time.Minute
@@ -121,8 +120,13 @@ func safeInterval(d time.Duration) time.Duration {
 // SnapshotWorker periodically saves a snapshot of the cache to disk.
 type SnapshotWorker struct {
 	baseWorker
-	file     string
-	fileChan chan string
+	// file is retained for op-enrichment and log correlation only — the
+	// snapshotter owns the durable path. Hot-reload updates both via
+	// UpdateFile (worker copy) + the wired SnapshotInvoker (the actual
+	// path the on-disk write hits).
+	file        string
+	fileChan    chan string
+	snapshotter pkgcommand.SnapshotInvoker
 }
 
 func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration, file string) *SnapshotWorker {
@@ -139,7 +143,18 @@ func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration,
 	}
 }
 
-// UpdateFile updates the snapshot file path at runtime.
+// SetSnapshotInvoker wires the persistence coordinator's SAVE entry point
+// into the worker. Each tick calls Snapshot through this invoker. Pass
+// nil to disable scheduled saves (operation is failed with a clear
+// reason — never a silent no-op).
+func (w *SnapshotWorker) SetSnapshotInvoker(s pkgcommand.SnapshotInvoker) {
+	w.snapshotter = s
+}
+
+// UpdateFile updates the snapshot file path at runtime. The worker copy
+// is used only for log/op enrichment — the actual durable path lives on
+// the registered Snapshotter and must be updated independently (config
+// reload calls both in main.go).
 func (w *SnapshotWorker) UpdateFile(file string) {
 	w.fileChan <- file
 }
@@ -157,8 +172,13 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 				if op != nil {
 					op.Enrich(command.FileKey, file)
 				}
+				if w.snapshotter == nil {
+					logger.Warn(opCtx).Msg("snapshot scheduled but no snapshotter registered")
+					w.failOp(op, "no snapshotter registered")
+					continue
+				}
 				if err := w.engine.Dispatch(opCtx, func() {
-					if err := persistence.SaveSnapshot(opCtx, file, w.cache); err != nil {
+					if err := w.snapshotter.Snapshot(opCtx, w.cache); err != nil {
 						logger.Warn(opCtx).Err(err).Msg("snapshot save failed")
 						w.failOp(op, err.Error())
 					} else {

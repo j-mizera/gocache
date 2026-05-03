@@ -30,6 +30,18 @@ type MutationEmitter interface {
 	AllocateAndEmit(op, key string, args [][]byte) apipersistence.LSN
 }
 
+// SnapshotInvoker is the SAVE/BGSAVE handler-side hook into the
+// persistence coordinator. Distinct from MutationEmitter so the snapshot
+// command path doesn't drag mutation-feed concerns and vice versa: both
+// are implemented by *pkg/persistence.Coordinator, but consumers see only
+// the surface they need.
+//
+// Nil means "no snapshotter wired" — handler returns an error to the
+// client rather than silently no-oping a SAVE command.
+type SnapshotInvoker interface {
+	Snapshot(ctx context.Context, target *cache.Cache) error
+}
+
 // Re-export shared types from api/command so existing importers don't break.
 type Result = apicommand.Result
 type Spec = apicommand.Spec
@@ -100,6 +112,12 @@ type Context struct {
 	// non-read-only fn closures with HasSinks-gated emission inside the
 	// shard lock so LSN allocation order matches lock order.
 	Coordinator MutationEmitter
+
+	// Snapshotter is the SAVE/BGSAVE entry point. Set by the evaluator
+	// from the same coordinator instance. May be nil when persistence
+	// has no snapshot writer registered — the SAVE handler treats nil
+	// as a configuration error and surfaces it to the client.
+	Snapshotter SnapshotInvoker
 }
 
 // Context returns the ambient context.Context carrying the current
@@ -149,6 +167,7 @@ func (c *Context) Reset() {
 	c.EvalFn = nil
 	c.Spec = Spec{}
 	c.Coordinator = nil
+	c.Snapshotter = nil
 }
 
 // Dispatch runs fn under the appropriate locking discipline for the
