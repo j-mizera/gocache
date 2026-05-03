@@ -59,4 +59,4 @@ task version        # Print all artifact versions
 - [docs/gcpc/README.md](docs/gcpc/README.md) — GCPC v1 protocol specification (Protobuf over Unix domain sockets).
 - [docs/server/design/](docs/server/design/) and [docs/gcpc/design/](docs/gcpc/design/) — PlantUML diagrams (component, sequence, state).
 - [docs/audits/](docs/audits/) — Performance audits and thesis anchors.
-- [.claude/IMPLEMENTATION_STATUS.md](.claude/IMPLEMENTATION_STATUS.md) — Phase-by-phase progress tracker.
+- [docs/performance/README.md](docs/performance/README.md) — Per-shard locking arc — shipped optimizations, measured deltas, remaining levers.

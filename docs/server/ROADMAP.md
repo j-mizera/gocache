@@ -1,3 +1,14 @@
+---
+title: Server Roadmap
+description: Phase tracker for the server — core cache, plugin framework, REX metadata, production hardening, advanced plugins
+status: living
+last_updated: 2026-05-03
+related:
+  - Server
+  - Server-Architecture
+  - Performance
+---
+
 # Server Roadmap
 
 ## Phase 1: Core Cache -- COMPLETE

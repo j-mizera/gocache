@@ -1,3 +1,15 @@
+---
+title: Per-shard arc summary
+description: Thesis anchor — full chronicle of the per-shard locking arc, shipped PRs, structural caps, and remaining levers
+status: living
+last_updated: 2026-05-03
+related:
+  - Performance
+  - Audit-go-bench-vs-docker-gap
+  - Audit-clientctx-cross-goroutine
+  - Server-Architecture
+---
+
 # Per-shard locking arc — summary
 
 This is the thesis-anchor write-up for the per-shard locking arc that landed across issues #34 and follow-ups #43, #44, #46, #47, #48, #49, #50, plus the bench-methodology audit #45. It documents what was tried, what shipped, what didn't, and what's structurally bounded — so future readers know which gaps are still on the table and which are the price of the architecture.
@@ -113,4 +125,3 @@ Each branch directory contains `*-gocache.csv`, `*-gocache-pipelined.csv`, optio
 - Thesis writeup: this file plus `bench/results/perf-mset-locality-and-bench-gap/summary.md` and `docs/audits/go-bench-vs-docker-gap.md`.
 - Plan: [command-flow-optimization](../../projects/gocache/plans/command-flow-optimization.md), child plan [per-shard-locking](../../projects/gocache/plans/command-flow/per-shard-locking.md) (Obsidian).
 - Postmortem (Obsidian memory): `per-shard-arc-postmortem`.
-- Implementation status: [.claude/IMPLEMENTATION_STATUS.md](../../.claude/IMPLEMENTATION_STATUS.md) — per-shard arc section.

@@ -12,6 +12,9 @@
 **Protocol**
 - [GCPC v1](GCPC)
 
+**Performance**
+- [Overview](Performance)
+
 **Diagrams (server)**
 - [Components](Server-Components-Diagrams)
 - [Sequences](Server-Sequence-Diagrams)

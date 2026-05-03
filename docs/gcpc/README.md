@@ -1,3 +1,15 @@
+---
+title: GCPC
+description: GoCache Plugin Communication Protocol v1 — Protobuf over Unix domain sockets, the contract IPC plugins implement
+status: stable
+last_updated: 2026-05-03
+related:
+  - Plugins
+  - GCPC-Components-Diagrams
+  - GCPC-Sequence-Diagrams
+  - GCPC-State-Diagrams
+---
+
 # GCPC -- GoCache Plugin Communication Protocol
 
 GCPC is the binary protocol used for communication between the GoCache server and its plugins. Plugins run as separate OS processes and connect to the server over Unix domain sockets. All messages are Protobuf-encoded, versioned, and multiplexed via correlation IDs.

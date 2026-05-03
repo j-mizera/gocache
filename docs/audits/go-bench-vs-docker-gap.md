@@ -1,3 +1,13 @@
+---
+title: Go-vs-docker bench gap
+description: pprof-attributed audit explaining why Go bench shows +18% while docker shows +3% on the same code — runtime.selectgo park/unpark, not syscall cost
+status: stable
+last_updated: 2026-05-03
+related:
+  - Performance
+  - Audit-per-shard-arc-summary
+---
+
 # Go bench vs docker bench gap — investigation
 
 **Issue:** [#45](https://github.com/j-mizera/gocache/issues/45)

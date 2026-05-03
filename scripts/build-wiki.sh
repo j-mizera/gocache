@@ -38,16 +38,37 @@ mkdir -p "$OUTDIR"
 
 echo "==> Building wiki staging at $OUTDIR/"
 
-# 1. Top-level pages — copied 1:1 (these are wiki-aware already).
-cp "$DOCSROOT/Home.md"     "$OUTDIR/Home.md"
-cp "$DOCSROOT/_Sidebar.md" "$OUTDIR/_Sidebar.md"
+# Strip leading YAML frontmatter (--- ... ---) from a markdown file before
+# publishing to the wiki. GitHub's wiki renderer (Gollum) does not consume
+# Jekyll-style frontmatter and would show the raw YAML as plain text at the
+# top of every page. The frontmatter is intentional metadata for repo readers
+# and tooling — it just doesn't belong in the rendered wiki output.
+#
+# Idempotent: if the file has no frontmatter, output equals input.
+strip_frontmatter() {
+  local src="$1"
+  local dst="$2"
+  awk '
+    BEGIN { in_fm = 0; fm_seen = 0 }
+    NR == 1 && /^---$/ { in_fm = 1; fm_seen = 1; next }
+    in_fm && /^---$/   { in_fm = 0; next }
+    in_fm              { next }
+    { print }
+  ' "$src" > "$dst"
+}
 
-# 2. Section overview pages — flatten and rename so the wiki URL is clean.
+# 1. Top-level pages — _Sidebar.md is a special wiki nav file and intentionally
+#    does not carry frontmatter. Home.md does, and gets stripped on copy.
+strip_frontmatter "$DOCSROOT/Home.md"     "$OUTDIR/Home.md"
+cp                "$DOCSROOT/_Sidebar.md" "$OUTDIR/_Sidebar.md"
+
+# 2. Section overview pages — flatten, rename, strip frontmatter so the wiki
+#    URL is clean and YAML metadata doesn't bleed into rendered pages.
 copy_renamed() {
   local src="$1"
   local dst="$2"
   if [[ -f "$src" ]]; then
-    cp "$src" "$OUTDIR/$dst"
+    strip_frontmatter "$src" "$OUTDIR/$dst"
     echo "    $src -> $dst"
   fi
 }
@@ -62,14 +83,17 @@ copy_renamed "$DOCSROOT/plugins/gobservability/ROADMAP.md"     "Plugin-Gobservab
 copy_renamed "$DOCSROOT/plugins/gobservability/SOLUTION_ARCHITECTURE.md" \
                                                                "Plugin-Gobservability-Architecture.md"
 copy_renamed "$DOCSROOT/gcpc/README.md"                        "GCPC.md"
+copy_renamed "$DOCSROOT/performance/README.md"                 "Performance.md"
 
 # 3. Audits — `Audit-<basename>.md` keeps them grouped in the flat namespace.
+#    Audits are cross-cutting (performance, design, races) so they keep their
+#    own group rather than being folded under Performance.
 echo "==> Audits"
 if [[ -d "$DOCSROOT/audits" ]]; then
   for f in "$DOCSROOT/audits"/*.md; do
     [[ -f "$f" ]] || continue
     base=$(basename "$f" .md)
-    cp "$f" "$OUTDIR/Audit-${base}.md"
+    strip_frontmatter "$f" "$OUTDIR/Audit-${base}.md"
     echo "    $f -> Audit-${base}.md"
   done
 fi
@@ -223,6 +247,10 @@ declare -A REWRITES=(
   ['](audits/per-shard-arc-summary.md)']='](Audit-per-shard-arc-summary)'
   ['](audits/go-bench-vs-docker-gap.md)']='](Audit-go-bench-vs-docker-gap)'
   ['](audits/clientctx-cross-goroutine.md)']='](Audit-clientctx-cross-goroutine)'
+  ['](performance/README.md)']='](Performance)'
+  ['](performance/README)']='](Performance)'
+  ['](../performance/README.md)']='](Performance)'
+  ['](../performance/README)']='](Performance)'
   ['](gobservability/README.md)']='](Plugin-Gobservability)'
   ['](gobservability/README)']='](Plugin-Gobservability)'
   ['](SOLUTION_ARCHITECTURE.md)']='](Server-Architecture)'
