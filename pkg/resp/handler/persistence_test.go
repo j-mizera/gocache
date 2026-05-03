@@ -9,6 +9,7 @@ import (
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
+	"gocache/pkg/persistence"
 	"gocache/pkg/resp/handler"
 )
 
@@ -30,13 +31,20 @@ func TestHandler_Snapshot(t *testing.T) {
 		t.Fatalf("SET: %v", res.Value)
 	}
 
-	// SNAPSHOT -- needs SnapshotFile on context
+	// SNAPSHOT — needs Snapshotter wired through the coordinator. The
+	// gob shim implements both Source (boot side) and Snapshotter
+	// (runtime save side).
+	gob := persistence.NewGobSource(snapshotFile)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
 	cmdCtx := &command.Context{
 		Client:       ctx1,
 		Op:           "SNAPSHOT",
 		Engine:       e1,
 		Cache:        c1,
 		SnapshotFile: snapshotFile,
+		Snapshotter:  coord,
 	}
 	res = handler.HandleSnapshot(cmdCtx)
 	if res.Value != "OK" {

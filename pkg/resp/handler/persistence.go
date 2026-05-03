@@ -12,7 +12,10 @@ import (
 
 func HandleSnapshot(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
-		if err := persistence.SaveSnapshot(cmdCtx.Context(), cmdCtx.SnapshotFile, cmdCtx.Cache); err != nil {
+		if cmdCtx.Snapshotter == nil {
+			return fmt.Errorf("snapshot: no snapshotter registered")
+		}
+		if err := cmdCtx.Snapshotter.Snapshot(cmdCtx.Context(), cmdCtx.Cache); err != nil {
 			return err
 		}
 		return "OK"

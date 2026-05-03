@@ -4,6 +4,7 @@ import (
 	"context"
 	"gocache/pkg/cache"
 	"gocache/pkg/engine"
+	"gocache/pkg/persistence"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,7 +31,12 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test_snapshot.dat")
 
+	gob := persistence.NewGobSource(file)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file)
+	w.SetSnapshotInvoker(coord)
 	w.Start(context.Background())
 	defer w.Stop()
 
@@ -110,11 +116,19 @@ func TestSnapshotWorker_UpdateFile(t *testing.T) {
 	file1 := filepath.Join(dir, "snap1.dat")
 	file2 := filepath.Join(dir, "snap2.dat")
 
+	gob := persistence.NewGobSource(file1)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file1)
+	w.SetSnapshotInvoker(coord)
 	w.Start(context.Background())
 
-	// Switch to file2.
+	// Switch to file2 — both the worker (for op-enrichment) and the gob
+	// shim (for the actual on-disk path) need to be told. main.go does
+	// the same dual update on config reload.
 	w.UpdateFile(file2)
+	gob.SetFilename(file2)
 	time.Sleep(200 * time.Millisecond)
 
 	// Stop before TempDir cleanup to avoid race on directory removal.

@@ -85,6 +85,7 @@ type BaseEvaluator struct {
 	tracker            *serverOps.Tracker
 	opHookExecutor     OpHookExecutor
 	persistenceFeed    command.MutationEmitter
+	snapshotInvoker    command.SnapshotInvoker
 }
 
 func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *BaseEvaluator {
@@ -139,6 +140,16 @@ func (b *BaseEvaluator) SetTracker(t *serverOps.Tracker) {
 // emission (the default — no coordinator means no mutation feed).
 func (b *BaseEvaluator) SetPersistenceFeed(f command.MutationEmitter) {
 	b.persistenceFeed = f
+}
+
+// SetSnapshotInvoker wires the persistence coordinator's SAVE/BGSAVE
+// entry point into the evaluator. fillCmdCtx threads it onto each
+// *command.Context so the snapshot handler doesn't have to import
+// pkg/persistence directly. Pass nil to disable snapshot commands —
+// the handler returns an error to the client when invoked without a
+// registered snapshotter.
+func (b *BaseEvaluator) SetSnapshotInvoker(s command.SnapshotInvoker) {
+	b.snapshotInvoker = s
 }
 
 func (b *BaseEvaluator) SetOpHookExecutor(e OpHookExecutor) {
@@ -380,6 +391,7 @@ func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientCont
 	c.EvalFn = b.evaluateInternal
 	c.Spec = spec
 	c.Coordinator = b.persistenceFeed
+	c.Snapshotter = b.snapshotInvoker
 }
 
 // routeToPlugin dispatches a command to a plugin via the router. The per-call
