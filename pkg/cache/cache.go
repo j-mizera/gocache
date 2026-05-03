@@ -215,8 +215,14 @@ func newCache(shards int, maxBytes int64, policy EvictionPolicy) *Cache {
 	if shards > 1 && maxBytes > 0 {
 		perShardBytes = maxBytes / int64(shards)
 	}
+	// Scale each shard's slab target so the total slab capacity across
+	// all shards stays roughly constant rather than growing linearly with
+	// N. At N=1 each shard gets the default 1 MiB; at N=16 each shard
+	// gets 64 KiB. The slab package floors at MinTargetSlabBytes (64 KiB)
+	// to keep the per-class entry count sensible.
+	slabTarget := slab.DefaultTargetSlabBytes / uint32(shards)
 	for i := range c.shards {
-		c.shards[i] = newShard(perShardBytes, policy)
+		c.shards[i] = newShard(perShardBytes, policy, slabTarget)
 	}
 	c.bindShardCallbacks()
 	return c
