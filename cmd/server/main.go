@@ -257,7 +257,12 @@ func main() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
 		}
 		eventBus.Emit(events.NewOperationStart(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
-		if err := persistence.LoadSnapshot(snapCtx, cfg.Persistence.SnapshotFile, cacheInstance); err != nil {
+		// Boot via the persistence coordinator. The coordinator dispatches
+		// to the registered Source (here: GobSource over the configured
+		// snapshot file); future PRs replace this with the new on-disk
+		// format and add Sink dispatch for the runtime mutation feed.
+		coordinator := persistence.New(persistence.NewGobSource(cfg.Persistence.SnapshotFile))
+		if _, err := coordinator.BootInto(snapCtx, cacheInstance); err != nil {
 			logger.Warn(snapCtx).Err(err).Msg("failed to load snapshot")
 			snapOp.Fail(err.Error())
 			if opHookExec != nil {
