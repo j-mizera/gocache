@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"gocache/pkg/config"
+	"gocache/api/config"
 )
 
 type recordingPlugin struct {

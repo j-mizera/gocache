@@ -17,9 +17,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"gocache/api/config"
+	"gocache/api/embedded"
 	"gocache/api/logger"
-	"gocache/pkg/config"
-	"gocache/pkg/embedded"
 )
 
 // Env var overrides. Plugin reads them in BootInit, before config.Load.

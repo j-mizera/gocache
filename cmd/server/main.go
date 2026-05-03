@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gocache/api/command"
+	"gocache/api/crashdump"
+	"gocache/api/embedded"
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
@@ -19,8 +21,6 @@ import (
 	"gocache/pkg/bootstate"
 	"gocache/pkg/cache"
 	"gocache/pkg/config"
-	"gocache/pkg/crashdump"
-	"gocache/pkg/embedded"
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logcollector"

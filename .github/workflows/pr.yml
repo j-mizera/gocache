@@ -24,6 +24,9 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      - name: Plugin isolation (no pkg/* imports under plugins/)
+        run: bash scripts/check-plugin-isolation.sh
+
       - name: Staticcheck
         uses: dominikh/staticcheck-action@v1
         with:
