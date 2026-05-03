@@ -173,6 +173,49 @@ func (s *Shard) rawLoad(key string, value any, expiration int64) {
 	s.setInternal(key, value, expiration, true)
 }
 
+// BulkPair is one key/value entry for Shard.BulkSetBytes.
+type BulkPair struct {
+	Key   string
+	Value []byte
+}
+
+// BulkSetBytes writes a batch of byte-valued entries to this shard
+// under the caller-held write lock. All keys MUST hash to this shard;
+// callers (e.g. HandleMset's per-shard batch loop) compute the
+// grouping upfront via Cache.TouchedShards / Cache.ShardIndexOf and
+// only call this for the keys belonging here.
+//
+// The point of the batched primitive is cache locality: the per-key
+// hot path (Cache.RawSet → c.Shard(key) → s.rawSet → s.setInternal →
+// s.setPackedInternal) re-fetches the same shard struct, slab
+// allocator state, and items map for every key. Writing N keys to one
+// shard in a single call lets those data structures stay hot in L1/L2
+// across all N writes.
+//
+// Memory-limit enforcement still runs per-pair so a single oversize
+// value can't bypass eviction; the loop terminates early on
+// ErrOutOfMemory under EvictionNone.
+func (s *Shard) BulkSetBytes(ctx context.Context, pairs []BulkPair, expiration int64) error {
+	for _, p := range pairs {
+		if s.maxBytes > 0 {
+			newSize := estimateBytesSize(p.Key, p.Value)
+			oldSize := s.keySize(p.Key)
+			delta := newSize - oldSize
+			if delta > 0 && s.usedBytes+delta > s.maxBytes {
+				switch s.evictionPolicy {
+				case EvictionLRU:
+					s.evictLRU(ctx, delta)
+				case EvictionNone:
+					logger.Warn(ctx).Str("key", p.Key).Int64("usedBytes", s.usedBytes).Int64("maxBytes", s.maxBytes).Msg("write rejected, out of memory")
+					return ErrOutOfMemory
+				}
+			}
+		}
+		s.setPackedInternal(p.Key, ObjTypeBytes, p.Value, expiration, false)
+	}
+	return nil
+}
+
 // rawSetNativeWithSize stores a Go-native collection value at key using
 // a caller-supplied byteSize so we don't walk the value to compute it.
 // Must be called under the write lock.
