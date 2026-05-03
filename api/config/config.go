@@ -23,12 +23,17 @@ const (
 	DefaultSnapshotFile     = "snapshot.dat"
 	DefaultSnapshotInterval = 5 * time.Minute
 	DefaultLoadOnStartup    = true
-	// DefaultSnapshotFormat is the on-disk snapshot format. "gob" is the
-	// legacy Go gob-encoded format; "v1" is the custom binary format
-	// described in ADR-0005 (varint, magic header, CRC32, optional zstd).
-	// Default stays "gob" until the migration window for existing
-	// deployments closes — flip to "v1" in a follow-up release.
-	DefaultSnapshotFormat = "gob"
+	// DefaultSnapshotFormat is the on-disk snapshot format. "v1" is the
+	// custom binary format described in ADR-0005 (varint, magic header,
+	// CRC32, optional zstd). "gob" is the legacy Go gob-encoded format,
+	// kept readable for rollback paths but no longer the default.
+	//
+	// Existing deployments with on-disk gob snapshots: run
+	// `gocache-migrate -in old.dat -out new.dat` once before upgrading,
+	// or set persistence.snapshot_format: gob in config to stay on the
+	// legacy format. The runtime LOAD_SNAPSHOT command auto-detects
+	// either format regardless of the configured default.
+	DefaultSnapshotFormat = "v1"
 
 	// SnapshotFormatGob and SnapshotFormatV1 are the recognised values
 	// for PersistenceConfig.SnapshotFormat. Unknown values fall back

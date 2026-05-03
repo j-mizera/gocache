@@ -40,7 +40,10 @@ func HandleLoadSnapshot(cmdCtx *command.Context) command.Result {
 	}
 
 	executeFn := func() any {
-		if err := persistence.LoadSnapshot(cmdCtx.Context(), filename, cmdCtx.Cache); err != nil {
+		// Auto-detect format (gob or v1) so deployments can load either
+		// at runtime — e.g. inspecting an archived gob snapshot after
+		// flipping the default format to v1.
+		if err := persistence.LoadFrom(cmdCtx.Context(), filename, cmdCtx.Cache); err != nil {
 			return err
 		}
 		return "OK"

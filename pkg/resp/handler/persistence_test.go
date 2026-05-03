@@ -1,15 +1,19 @@
 package handler_test
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	apipersistence "gocache/api/persistence"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	"gocache/pkg/persistence"
+	"gocache/pkg/persistence/v1snap"
 	"gocache/pkg/resp/handler"
 )
 
@@ -112,4 +116,60 @@ func TestHandler_LoadSnapshot_PathTraversal(t *testing.T) {
 			t.Errorf("path %q should have been rejected, got OK", arg)
 		}
 	}
+}
+
+// TestHandler_LoadSnapshot_V1 verifies that LOAD_SNAPSHOT auto-detects
+// the v1 binary format and loads it correctly. The runtime command
+// path doesn't go through the coordinator's startup format selection,
+// so format detection has to live inside the handler — this test
+// guards the dual-format contract.
+func TestHandler_LoadSnapshot_V1(t *testing.T) {
+	dir := t.TempDir()
+	v1file := filepath.Join(dir, "v1.snap")
+
+	w := v1snap.NewSnapshotter(v1file)
+	src := &sliceSrcForTest{entries: []apipersistence.SnapshotEntry{
+		{Key: "v1key", ValueType: apipersistence.ValueTypeBytes, Encoding: apipersistence.EncodingNative, Value: []byte("v1val")},
+	}}
+	if err := w.SaveSnapshot(context.Background(), src); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	c := cache.New()
+	e := engine.New(c)
+	go e.Run()
+	t.Cleanup(func() { e.Stop() })
+
+	loadCtx := &command.Context{
+		Client:       clientctx.New(),
+		Op:           "LOAD_SNAPSHOT",
+		Args:         []string{filepath.Base(v1file)},
+		Engine:       e,
+		Cache:        c,
+		SnapshotFile: v1file,
+	}
+	res := handler.HandleLoadSnapshot(loadCtx)
+	if res.Value != "OK" {
+		t.Fatalf("LOAD_SNAPSHOT v1: %v / err=%v", res.Value, res.Err)
+	}
+
+	got := eval(t, c, e, clientctx.New(), "GET", []string{"v1key"})
+	if valueAsString(got.Value) != "v1val" {
+		t.Errorf("GET v1key after load: got %v, want v1val", got.Value)
+	}
+}
+
+// sliceSrcForTest is a minimal SnapshotSource for the v1 load test.
+type sliceSrcForTest struct {
+	entries []apipersistence.SnapshotEntry
+	cursor  int
+}
+
+func (s *sliceSrcForTest) Next(_ context.Context) (apipersistence.SnapshotEntry, error) {
+	if s.cursor >= len(s.entries) {
+		return apipersistence.SnapshotEntry{}, io.EOF
+	}
+	e := s.entries[s.cursor]
+	s.cursor++
+	return e, nil
 }
