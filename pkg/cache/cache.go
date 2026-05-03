@@ -442,6 +442,94 @@ func (c *Cache) RUnlock() {
 	}
 }
 
+// LockShards acquires the listed shards in ascending shard-id order;
+// the returned closure releases them in reverse order. Used by
+// multi-key handlers that touch a known subset of shards (MGET, MSET,
+// RENAME, etc.) to avoid the full bulk-lock cost.
+//
+// shardIDs must be a sorted slice of unique indices in [0, ShardCount).
+// Callers obtain a properly-shaped slice from TouchedShards. write
+// selects RWMutex.Lock vs RLock on every listed shard.
+//
+// The sorted-acquisition discipline prevents deadlock between concurrent
+// callers — any two LockShards calls acquire shared shards in the same
+// order, so no cycle can form.
+func (c *Cache) LockShards(shardIDs []int, write bool) func() {
+	if len(shardIDs) == 0 {
+		return func() {}
+	}
+	for _, id := range shardIDs {
+		s := c.shards[id]
+		if write {
+			s.Lock()
+		} else {
+			s.RLock()
+		}
+	}
+	if write {
+		return func() {
+			for i := len(shardIDs) - 1; i >= 0; i-- {
+				c.shards[shardIDs[i]].Unlock()
+			}
+		}
+	}
+	return func() {
+		for i := len(shardIDs) - 1; i >= 0; i-- {
+			c.shards[shardIDs[i]].RUnlock()
+		}
+	}
+}
+
+// TouchedShards returns the sorted unique shard indices for the given
+// keys. Allocation-light: uses a uint64 bitset for the dedup (works
+// for ShardCount ≤ 64, which covers the practical range up to and
+// well beyond the prototype's measured-optimum N=16) and allocates
+// one small result slice. Callers pass the slice straight to
+// LockShards or to command.Context.TouchedShards.
+func (c *Cache) TouchedShards(keys []string) []int {
+	if len(keys) == 0 {
+		return nil
+	}
+	if c.n <= 64 {
+		var mask uint64
+		for _, k := range keys {
+			mask |= 1 << uint(c.shardIndex(k))
+		}
+		out := make([]int, 0, popcount(mask))
+		for i := 0; mask != 0; i++ {
+			if mask&1 != 0 {
+				out = append(out, i)
+			}
+			mask >>= 1
+		}
+		return out
+	}
+	// N > 64 fallback: dedup via map. Not on the hot path today.
+	seen := make(map[int]struct{}, len(keys))
+	out := make([]int, 0, len(keys))
+	for _, k := range keys {
+		s := c.shardIndex(k)
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	// Insert sort — small N, allocation-free.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j] < out[j-1]; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+func popcount(x uint64) int {
+	x = x - ((x >> 1) & 0x5555555555555555)
+	x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333)
+	x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0f
+	return int((x * 0x0101010101010101) >> 56)
+}
+
 // Aggregates and config -----------------------------------------------------
 
 // Len returns the number of keys across every shard. Caller is

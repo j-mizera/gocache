@@ -1,0 +1,17 @@
+label=per-key-routing
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=05f637b9947d4e2cdc152fa0977bd702ef499774
+gocache_branch=arch/per-key-routing
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=9400483
+post_standard_rss_bytes=255223398
+final_rss_bytes=286366105
+delta_rss_bytes=276965622

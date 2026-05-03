@@ -192,6 +192,7 @@ func HandleStrlen(cmdCtx *command.Context) command.Result {
 // HandleMget returns the values for all specified keys (nil for absent/non-string).
 func HandleMget(cmdCtx *command.Context) command.Result {
 	keys := cmdCtx.Args
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	return command.Dispatch(cmdCtx, func() any {
 		result := make([]any, len(keys))
 		for i, key := range keys {
@@ -225,6 +226,11 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 	if len(cmdCtx.Args)%2 != 0 {
 		return command.Result{Value: resp.ErrArgs("mset")}
 	}
+	keys := make([]string, 0, len(cmdCtx.Args)/2)
+	for i := 0; i < len(cmdCtx.Args); i += 2 {
+		keys = append(keys, cmdCtx.Args[i])
+	}
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	return command.Dispatch(cmdCtx, func() any {
 		for i := 0; i < len(cmdCtx.Args); i += 2 {
 			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], []byte(cmdCtx.Args[i+1]), 0); setErr != nil {
@@ -427,6 +433,7 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 
 // HandleDelete implements DEL key [key ...].
 func HandleDelete(cmdCtx *command.Context) command.Result {
+	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(cmdCtx.Args)
 	executeFn := func() any {
 		count := 0
 		for _, key := range cmdCtx.Args {

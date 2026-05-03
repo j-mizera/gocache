@@ -1,0 +1,17 @@
+label=selective-locks
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=693e5c278b7bb39aeaee1743beeb4977de361f4e
+gocache_branch=perf/sharded-followups
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=23184015
+post_standard_rss_bytes=262668288
+final_rss_bytes=308281344
+delta_rss_bytes=285097329

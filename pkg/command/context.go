@@ -59,6 +59,17 @@ type Context struct {
 	Shard    int
 	MultiKey bool
 
+	// TouchedShards is the sorted unique shard set the multi-key handler
+	// will actually access. When non-empty, Dispatch acquires only those
+	// shards via Engine.DispatchToShards instead of the bulk lock.
+	// Multi-key handlers populate it before calling Dispatch — see
+	// pkg/resp/handler/basic.go::HandleMset for the canonical pattern.
+	// Empty (nil or len 0) means "lock everything", the safe default for
+	// commands that touch the entire keyspace (FLUSHDB, KEYS, EXEC,
+	// snapshot save/load) or where the touched set is dynamic enough
+	// that pre-computing it isn't worth the complexity.
+	TouchedShards []int
+
 	// EvalFn re-enters the evaluator pipeline. Used by EXEC to execute
 	// queued commands in a batch. parentCtx is the connection-scoped ctx
 	// from the outer Evaluate call.
@@ -108,6 +119,7 @@ func (c *Context) Reset() {
 	c.RequirePass = ""
 	c.Shard = 0
 	c.MultiKey = false
+	c.TouchedShards = nil
 	c.EvalFn = nil
 }
 
@@ -131,6 +143,14 @@ func Dispatch(ctx *Context, fn func() any) Result {
 		return wrapInline(fn)
 	}
 	if ctx.MultiKey {
+		if len(ctx.TouchedShards) > 0 {
+			// Selective lock — multi-key handler told us which shards it
+			// actually touches; lock only those instead of the bulk lock.
+			res, err := ctx.Engine.DispatchToShards(ctx.Context(), ctx.TouchedShards, fn)
+			return wrapDispatch(res, err)
+		}
+		// Bulk lock — multi-key handler touches every shard or didn't
+		// pre-compute its set (FLUSHDB, KEYS, SCAN, EXEC, snapshot, …).
 		res, err := ctx.Engine.DispatchWithResult(ctx.Context(), fn)
 		return wrapDispatch(res, err)
 	}
