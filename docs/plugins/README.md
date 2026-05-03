@@ -1,3 +1,14 @@
+---
+title: Plugins
+description: Embedded vs IPC plugin tiers, build-tag matrix, the api/-only contract surface, available plugins
+status: living
+last_updated: 2026-05-03
+related:
+  - Server
+  - GCPC
+  - Plugin-Gobservability
+---
+
 # Plugins
 
 GoCache extends a microkernel core with two kinds of plugin: **embedded** (compile-time-linked, in-process) and **IPC** (separate process over GCPC v1 protocol on a Unix domain socket). Both implement contracts in `gocache/api/*`. The choice is per-plugin and depends on what the plugin does.

@@ -1,3 +1,14 @@
+---
+title: Gobservability Architecture
+description: Design decisions for the metrics exporter — post-hook only, IPC plugin, in-memory aggregation, /metrics serve
+status: living
+last_updated: 2026-05-03
+related:
+  - Plugin-Gobservability
+  - Plugin-Gobservability-Components-Diagrams
+  - Plugin-Gobservability-Sequence-Diagrams
+---
+
 # Gobservability -- Solution Architecture
 
 ## Overview

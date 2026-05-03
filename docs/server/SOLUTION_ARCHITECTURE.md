@@ -1,3 +1,15 @@
+---
+title: Server Architecture
+description: Microkernel solution architecture — design principles, per-shard locking, dispatch model, plugin tiers
+status: living
+last_updated: 2026-05-03
+related:
+  - Server
+  - Server-Components-Diagrams
+  - Server-Sequence-Diagrams
+  - Performance
+---
+
 # Solution Architecture
 
 ## Overview

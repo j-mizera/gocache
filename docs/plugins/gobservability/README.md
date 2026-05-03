@@ -1,3 +1,15 @@
+---
+title: Gobservability Plugin
+description: Prometheus metrics exporter — per-command counters, latency histograms, /metrics endpoint
+status: living
+last_updated: 2026-05-03
+related:
+  - Plugins
+  - Plugin-Gobservability-Architecture
+  - Plugin-Gobservability-Roadmap
+  - Plugin-Gobservability-Components-Diagrams
+---
+
 # Gobservability Plugin
 
 Prometheus metrics exporter for GoCache. Hooks every command via a post-hook, tracks per-command counters and latency histograms, and serves a `/metrics` HTTP endpoint in Prometheus text exposition format.

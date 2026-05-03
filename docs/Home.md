@@ -1,3 +1,15 @@
+---
+title: Home
+description: GoCache wiki landing — entry point to server, plugins, GCPC, performance, audits, and design diagrams
+status: living
+last_updated: 2026-05-03
+related:
+  - Server
+  - Plugins
+  - GCPC
+  - Performance
+---
+
 # GoCache
 
 Redis-compatible in-memory cache server with a microkernel architecture. The core handles 75 commands across 5 data types over a per-shard locking design (default 8 shards, FNV-1a key routing). Everything else (Pub/Sub, Kafka, geospatial, auth, metrics, replication, persistence) runs as a plugin — most as separate processes via GCPC over Unix domain sockets, with a thin embedded-plugin tier for capabilities that must be active before config loads.
@@ -11,7 +23,8 @@ This wiki is **auto-generated** from `docs/` on every push to `main` via `script
 - **[Server](Server)** — Server overview, configuration, supported commands, env vars, embedded plugins.
 - **[Plugins](Plugins)** — Embedded vs IPC plugins, build-tag matrix, the `api/`-only import rule, available plugins.
 - **[GCPC protocol](GCPC)** — GCPC v1 specification (Protobuf over Unix domain sockets) — the contract IPC plugins implement.
-- Audits and thesis anchors:
+- **[Performance](Performance)** — Per-shard locking arc — shipped optimizations, measured deltas, structural caps, remaining levers.
+- Audits (cross-cutting — performance, design, races):
   - [Per-shard arc summary](Audit-per-shard-arc-summary)
   - [Go-vs-docker bench gap](Audit-go-bench-vs-docker-gap)
   - [clientctx cross-goroutine](Audit-clientctx-cross-goroutine)
@@ -36,8 +49,6 @@ This wiki is **auto-generated** from `docs/` on every push to `main` via `script
 | Phase 3 — REX metadata + Operations | ✅ Complete | Per-request metadata, server queries, operation tracker, replay-on-subscribe |
 | Phase 4 — Production hardening | 🔄 In progress | Memory optimization (slab + GC-opaque LRU) ✅; sink-aware fast path ✅; per-shard locking ✅; engine pooling ❌; read-lock bypass ❌; persistence-as-plugin ⏳ |
 | Phase 5 — Advanced plugins | ❌ Not started | OAuth2, Kafka, ratelimit, cluster |
-
-Detailed phase tracker: [`.claude/IMPLEMENTATION_STATUS.md`](https://github.com/j-mizera/gocache/blob/main/.claude/IMPLEMENTATION_STATUS.md) in the repo (not wiki — kept on `main` so it tracks merge state precisely).
 
 ## Project layout
 

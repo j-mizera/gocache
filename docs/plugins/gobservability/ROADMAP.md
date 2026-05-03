@@ -1,3 +1,13 @@
+---
+title: Gobservability Roadmap
+description: Phase tracker for the gobservability plugin — counters, histograms, info gauge, server-measured latency
+status: living
+last_updated: 2026-05-03
+related:
+  - Plugin-Gobservability
+  - Plugin-Gobservability-Architecture
+---
+
 # Gobservability Roadmap
 
 ## v0.1 -- COMPLETE

@@ -1,3 +1,14 @@
+---
+title: ClientContext cross-goroutine audit
+description: Race-detector audit of every ClientContext field — surfaced from #32, no new races found beyond the watchDirty fix
+status: stable
+last_updated: 2026-05-03
+related:
+  - Performance
+  - Audit-per-shard-arc-summary
+  - Server-Architecture
+---
+
 # ClientContext cross-goroutine race audit
 
 **Issue:** [#35](https://github.com/j-mizera/gocache/issues/35)

@@ -1,3 +1,16 @@
+---
+title: Server
+description: Server overview — RESP, command set, configuration, env vars, embedded plugin tier
+status: living
+last_updated: 2026-05-03
+related:
+  - Server-Architecture
+  - Server-Roadmap
+  - Server-Components-Diagrams
+  - Performance
+  - Plugins
+---
+
 # GoCache Server
 
 The server is the core component of GoCache -- a Redis-compatible in-memory cache with a microkernel architecture. It handles RESP protocol parsing, command evaluation, memory management, persistence, and plugin orchestration.
