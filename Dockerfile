@@ -41,10 +41,19 @@ COPY . .
 ARG PLUGINS=""
 ARG VERSION="dev"
 
+# PPROF=1 appends the `pprof` build tag, which compiles in cmd/server's
+# pprof_on.go (an init() that exposes net/http/pprof on
+# GOCACHE_PPROF_ADDR, default 0.0.0.0:6060). Used by bench/redis-benchmark
+# when investigating throughput attribution. Default off so production
+# images don't carry the http server overhead.
+ARG PPROF=""
+
 # Convert the comma-separated PLUGINS list to a space-separated -tags value.
+# Append `pprof` when PPROF=1.
 # -trimpath strips host filesystem paths from the binary.
 # -ldflags "-s -w" removes symbol + DWARF tables (~20% binary size cut).
 RUN TAGS=$(echo "$PLUGINS" | tr ',' ' ') && \
+    if [ "$PPROF" = "1" ]; then TAGS="$TAGS pprof"; fi && \
     echo "Building with tags: [$TAGS]" && \
     CGO_ENABLED=0 GOOS=linux go build \
         -tags "$TAGS" \

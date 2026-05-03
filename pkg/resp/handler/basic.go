@@ -222,19 +222,48 @@ func HandleMget(cmdCtx *command.Context) command.Result {
 }
 
 // HandleMset sets multiple key-value pairs in a single call.
+//
+// Hot-path optimization (#47): each MSET call groups its keys by their
+// owning shard upfront, then dispatches one batched write per touched
+// shard via Shard.BulkSetBytes. This keeps each shard's items map +
+// slab arena state hot in L1/L2 across every key in that shard's
+// batch. The pre-#47 path called Cache.RawSet per key, which re-fetched
+// the same shard struct, slab state, and items map cache lines on
+// every iteration — that cache-line churn was the dominant cost of
+// pipelined MSET at N>1, not lock acquisition (see #43/#46 for the
+// lock-cost finding).
 func HandleMset(cmdCtx *command.Context) command.Result {
 	if len(cmdCtx.Args)%2 != 0 {
 		return command.Result{Value: resp.ErrArgs("mset")}
 	}
-	keys := make([]string, 0, len(cmdCtx.Args)/2)
+	pairCount := len(cmdCtx.Args) / 2
+	// Group pairs by shard. perShard[i] holds the pairs whose keys hash
+	// to shard i. Pre-sized so we never grow during dispatch.
+	shardCount := cmdCtx.Cache.ShardCount()
+	perShard := make([][]cache.BulkPair, shardCount)
+	keys := make([]string, 0, pairCount)
 	for i := 0; i < len(cmdCtx.Args); i += 2 {
 		keys = append(keys, cmdCtx.Args[i])
 	}
+	for i := 0; i < len(cmdCtx.Args); i += 2 {
+		idx := cmdCtx.Cache.ShardIndexOf(cmdCtx.Args[i])
+		perShard[idx] = append(perShard[idx], cache.BulkPair{
+			Key:   cmdCtx.Args[i],
+			Value: []byte(cmdCtx.Args[i+1]),
+		})
+	}
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	return command.Dispatch(cmdCtx, func() any {
-		for i := 0; i < len(cmdCtx.Args); i += 2 {
-			if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), cmdCtx.Args[i], []byte(cmdCtx.Args[i+1]), 0); setErr != nil {
-				return setErr
+		for shardID, pairs := range perShard {
+			if len(pairs) == 0 {
+				continue
+			}
+			shard := cmdCtx.Cache.ShardByIndex(shardID)
+			if shard == nil {
+				continue
+			}
+			if err := shard.BulkSetBytes(cmdCtx.Context(), pairs, 0); err != nil {
+				return err
 			}
 		}
 		return "OK"

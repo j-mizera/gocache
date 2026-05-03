@@ -1,0 +1,17 @@
+label=mset-bulkset-r2
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=e0799796f5ce52135a7026d053d267f57929da9f
+gocache_branch=perf/mset-locality-and-bench-gap
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=7995392
+post_standard_rss_bytes=189897113
+final_rss_bytes=253335961
+delta_rss_bytes=245340569

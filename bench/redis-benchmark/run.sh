@@ -67,10 +67,18 @@ mkdir -p "$RESULTS_DIR"
 docker_cmd() { command docker "$@"; }
 
 # Build gocache image if missing or if --rebuild was requested via env.
+# PPROF=1 forces a separate image tagged :pprof so the production-shape
+# image cache isn't invalidated by toggling profiling on and off.
 if [[ "$TARGET" == "gocache" ]]; then
+    if [[ "${PPROF:-0}" == "1" ]]; then
+        GOCACHE_IMAGE="${GOCACHE_IMAGE%-*}:pprof"
+    fi
     if [[ "${REBUILD:-0}" == "1" ]] || ! docker_cmd image inspect "$GOCACHE_IMAGE" >/dev/null 2>&1; then
-        echo "Building $GOCACHE_IMAGE..."
-        (cd "$REPO_ROOT" && docker_cmd build --build-arg PLUGINS="" -t "$GOCACHE_IMAGE" .)
+        echo "Building $GOCACHE_IMAGE (PPROF=${PPROF:-0})..."
+        (cd "$REPO_ROOT" && docker_cmd build \
+            --build-arg PLUGINS="" \
+            --build-arg PPROF="${PPROF:-0}" \
+            -t "$GOCACHE_IMAGE" .)
     fi
 fi
 
@@ -93,12 +101,19 @@ trap cleanup EXIT
 
 if [[ "$TARGET" == "gocache" ]]; then
     echo "Starting gocache target ($GOCACHE_IMAGE, cpuset=$TARGET_CPUS, mem=$MEM_LIMIT)..."
+    # Publish 6060 to the host when PPROF=1 so the harness can curl
+    # /debug/pprof/* during the workload from outside the container.
+    PPROF_PUB=()
+    if [[ "${PPROF:-0}" == "1" ]]; then
+        PPROF_PUB=(-p 6060:6060)
+    fi
     docker_cmd run -d \
         --name "$TARGET_NAME" \
         --network "$NET" \
         --cpuset-cpus "$TARGET_CPUS" \
         --memory "$MEM_LIMIT" \
         --memory-swap "$MEM_LIMIT" \
+        "${PPROF_PUB[@]}" \
         "$GOCACHE_IMAGE" \
         --config= \
         --address 0.0.0.0 --port 6379 \
