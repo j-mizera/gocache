@@ -1,8 +1,8 @@
 # GoCache
 
-Redis-compatible in-memory cache server with a microkernel architecture. The core handles basic caching -- 69 commands across 5 data types. Everything else (Pub/Sub, Kafka, geospatial, auth, metrics, replication) runs as a plugin in a separate process. A crashing plugin cannot crash the core.
+Redis-compatible in-memory cache server with a microkernel architecture. The core handles basic caching — 75 commands across 5 data types over a per-shard locking design (default 8 shards, FNV-1a key routing). Everything else (Pub/Sub, Kafka, geospatial, auth, metrics, replication) runs as a plugin: most as separate processes via GCPC over Unix domain sockets, with a thin embedded-plugin tier (`-tags <name>`) for capabilities that must be active before config loads (crashdump, OTLP). A crashing IPC plugin cannot crash the core.
 
-> Bachelor's thesis project exploring whether safe extensibility and high performance can coexist.
+> Bachelor's thesis project exploring whether safe extensibility and high performance can coexist. See `docs/audits/per-shard-arc-summary.md` for the throughput/RSS deltas and `docs/plugins/README.md` for the plugin contract.
 
 ## Quick Start
 
@@ -51,3 +51,12 @@ task vet            # Static analysis
 task proto          # Regenerate protobuf code
 task version        # Print all artifact versions
 ```
+
+## Documentation
+
+- [docs/server/README.md](docs/server/README.md) — Server overview, configuration, supported commands, env vars.
+- [docs/plugins/README.md](docs/plugins/README.md) — Plugin system: embedded vs IPC, build-tag matrix, the `api/`-only import rule.
+- [docs/gcpc/README.md](docs/gcpc/README.md) — GCPC v1 protocol specification (Protobuf over Unix domain sockets).
+- [docs/server/design/](docs/server/design/) and [docs/gcpc/design/](docs/gcpc/design/) — PlantUML diagrams (component, sequence, state).
+- [docs/audits/](docs/audits/) — Performance audits and thesis anchors.
+- [.claude/IMPLEMENTATION_STATUS.md](.claude/IMPLEMENTATION_STATUS.md) — Phase-by-phase progress tracker.

@@ -53,6 +53,7 @@ persistence:
 memory:
   max_memory_mb: 1024
   eviction_policy: "lru"
+  cache_shards: 8                    # default; must be a positive power of two
 
 workers:
   cleanup_interval: 1m
@@ -80,7 +81,7 @@ Configuration is hot-reloadable via fsnotify. Changes to memory limits, eviction
 
 ### Embedded plugins (compile-time-linked)
 
-A narrow set of capabilities must be active before config loads or before any IPC plugin can connect — crashdump collection, OTLP emission from t=0. These ship as **embedded plugins** linked in via build tags:
+A narrow set of capabilities must be active before config loads or before any IPC plugin can connect — crashdump collection, OTLP emission from t=0, pprof endpoint for production-shape profiling. These ship as **embedded plugins** linked in via build tags. See [docs/plugins/README.md](../plugins/README.md) for the full embedded-vs-IPC story and the api/-only import rule.
 
 ```bash
 # Default: no embedded plugins (15 MB).
@@ -88,6 +89,9 @@ go build ./cmd/server
 
 # With embedded crashdump scanner and OTLP exporter (~24 MB).
 go build -tags "crashdump otlp" ./cmd/server
+
+# With pprof endpoint enabled (binds 0.0.0.0:6060).
+go build -tags "crashdump otlp pprof" ./cmd/server
 
 # Docker: per-variant image matrix published to GHCR on every main push.
 docker pull ghcr.io/<org>/gocache:minimal   # no embedded
@@ -108,6 +112,7 @@ Embedded-plugin env vars (all optional):
 | `GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS` | `3000` | Export timeout |
 | `GOCACHE_EMBEDDED_OTLP_INSECURE` | auto | True for `http://` endpoints |
 | `GOCACHE_EMBEDDED_OTLP_DISABLED` | `false` | Hard off-switch |
+| `GOCACHE_PPROF_ADDR` | `0.0.0.0:6060` | pprof bind address (only with `-tags pprof`) |
 
 ## Supported Commands
 
@@ -199,7 +204,10 @@ task test
 
 ## Design Documentation
 
-- Server diagrams: `docs/server/design/` — components, sequences, state machines (including `state_embedded_plugin_lifecycle.puml`, `components_event_bus_ring.puml`, `sequence_boot_crash_survivability.puml`)
+- Server diagrams: `docs/server/design/` — components, sequences, state machines (including `components_core.puml` for the multi-shard architecture, `state_embedded_plugin_lifecycle.puml`, `components_event_bus_ring.puml`, `sequence_boot_crash_survivability.puml`)
 - GCPC protocol diagrams: `docs/gcpc/design/` (including `sequence_ophook_replay_on_subscribe.puml`, `state_ophook_replay_suppression.puml`)
 - Full diagram index with links: [SOLUTION_ARCHITECTURE.md](SOLUTION_ARCHITECTURE.md#design-diagrams)
 - GCPC protocol specification: [docs/gcpc/README.md](../gcpc/README.md)
+- Plugin overview (embedded vs IPC, build tags, layering rule): [docs/plugins/README.md](../plugins/README.md)
+- Per-shard locking arc summary (thesis anchor): [docs/audits/per-shard-arc-summary.md](../audits/per-shard-arc-summary.md)
+- Go-vs-docker bench gap audit: [docs/audits/go-bench-vs-docker-gap.md](../audits/go-bench-vs-docker-gap.md)

@@ -269,25 +269,58 @@ jobs:
   wiki:
     name: Sync Wiki
     runs-on: ubuntu-latest
+    # Skip cleanly when the PAT is not configured. The first time this runs
+    # after WIKI_SYNC_TOKEN is added the step will pick it up automatically.
+    if: ${{ github.event_name == 'push' }}
     steps:
-      - name: Generate app token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.RELEASER_APP_ID }}
-          private-key: ${{ secrets.RELEASER_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ steps.app-token.outputs.token }}
 
-      - name: Pull latest
-        run: git pull origin main
+      - name: Sync docs/ to wiki
+        env:
+          # Classic PAT with public_repo scope. GitHub App tokens cannot push
+          # to wikis (no Wiki permission exists for Apps); this PAT is the
+          # only path. Add it as a repository secret named WIKI_SYNC_TOKEN.
+          WIKI_SYNC_TOKEN: ${{ secrets.WIKI_SYNC_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
 
-      - name: Sync to wiki
-        uses: newrelic/wiki-sync-action@main
-        with:
-          source: docs/
-          destination: wiki
-          token: ${{ steps.app-token.outputs.token }}
+          if [[ -z "${WIKI_SYNC_TOKEN:-}" ]]; then
+            echo "::warning::WIKI_SYNC_TOKEN not set — skipping wiki sync."
+            echo "::warning::See docs/plugins/README.md or release.yml header for setup steps."
+            exit 0
+          fi
+
+          if [[ ! -d docs ]]; then
+            echo "::error::docs/ directory missing — nothing to sync."
+            exit 1
+          fi
+
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+
+          echo "Cloning wiki repo..."
+          git clone "https://x-access-token:${WIKI_SYNC_TOKEN}@github.com/${REPO}.wiki.git" "$tmp"
+
+          echo "Mirroring docs/ -> wiki (preserving .git)..."
+          rsync -a --delete --exclude='.git/' docs/ "$tmp/"
+
+          cd "$tmp"
+          git config user.name "gocache-wiki-sync[bot]"
+          git config user.email "actions@users.noreply.github.com"
+
+          if git diff --quiet && git diff --cached --quiet && [[ -z "$(git status --porcelain)" ]]; then
+            echo "No wiki changes to commit."
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "docs: sync from docs/ @ ${GITHUB_SHA::7} [skip ci]"
+          # Push fails fast if the PAT is rejected, so this catches every
+          # auth/perms regression instead of swallowing them like the prior
+          # newrelic/wiki-sync-action did.
+          git push origin master
+
+          echo "Wiki sync complete."

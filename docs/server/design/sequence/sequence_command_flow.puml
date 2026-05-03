@@ -1,7 +1,7 @@
 @startuml sequence_command_flow
 !include ../../../design/theme.iuml
 
-mainframe **sd** Core Command Flow (Hot Path)
+mainframe **sd** Core Command Flow (Hot Path, per-shard locking)
 
 actor Client
     participant "TCP Listener\n(net.Listener)" as Listener
@@ -10,8 +10,9 @@ actor Client
     participant "Evaluator\n(BaseEvaluator)" as Evaluator
     participant "Hook Executor" as HookExec
     participant "Command Router\n(plugin fallback)" as CmdRouter
-    participant "Engine\n(serial dispatch loop)" as Engine
-    participant "Cache\n(in-memory maps)" as Cache
+    participant "Engine\n(per-shard goroutines)" as Engine
+    participant "Cache Router\n(shardIndexOf)" as Router
+    participant "Shard(s)\n(write lock held)" as Shards
     participant "RESP Writer\n(resp.NewWriter)" as Writer
 
     Client -> Listener : TCP connect
@@ -45,8 +46,11 @@ actor Client
             ConnHandler -> Evaluator : Evaluate(ctx, op, args)
 
             hnote over Evaluator
-              Lookup handler in map
-              Validate arg count via commandSpecs
+              Lookup handler in map.
+              Validate arg count via commandSpecs.
+              Classify by sharding behavior:
+              KeyArgIndex (single-key) or
+              MultiKey (touched-shard set).
             end note
 
             alt Unknown command (not in core handlers)
@@ -70,16 +74,38 @@ actor Client
                 else Pre-hook allows (or no hooks)
                     HookExec --> Evaluator : OK
 
-                    Evaluator -> Engine : DispatchWithResult(fn)
-
-                    hnote over Engine : cmdChan <- Command{Execute, ResChan}
-
-                    Engine -> Cache : cache.Lock()
-                    activate Cache
-                    Engine -> Cache : fn() executes handler logic
-                    Cache --> Engine : result
-                    Engine -> Cache : cache.Unlock()
-                    deactivate Cache
+                    alt Single-key handler (most common)
+                        Evaluator -> Engine : DispatchToShard(ctx, shardIdx, fn)
+                        Engine -> Router : forward to shard goroutine
+                        Router -> Shards : shard.Lock()
+                        activate Shards
+                        Router -> Shards : fn() reads/mutates shard state
+                        Shards --> Router : result
+                        Router -> Shards : shard.Unlock()
+                        deactivate Shards
+                        Router --> Engine : result
+                    else Multi-key handler (MGET / MSET / SINTER ...)
+                        Evaluator -> Evaluator : touched := cache.TouchedShards(keys)
+                        Evaluator -> Engine : DispatchToShards(ctx, touched, fn)
+                        Engine -> Router : acquire touched shards in sorted order
+                        Router -> Shards : Lock all in touched set
+                        activate Shards
+                        Router -> Shards : fn() runs across the locked subset
+                        Shards --> Router : result
+                        Router -> Shards : Unlock in reverse
+                        deactivate Shards
+                        Router --> Engine : result
+                    else Full-bulk handler (KEYS / FLUSHDB / SAVE)
+                        Evaluator -> Engine : DispatchWithResult(ctx, fn)
+                        Engine -> Router : acquire ALL shards
+                        Router -> Shards : Lock(0..N-1)
+                        activate Shards
+                        Router -> Shards : fn() across the whole keyspace
+                        Shards --> Router : result
+                        Router -> Shards : Unlock all
+                        deactivate Shards
+                        Router --> Engine : result
+                    end
 
                     Engine --> Evaluator : result via ResChan
 
@@ -95,5 +121,14 @@ actor Client
             Writer --> Client : RESP-encoded response
         end
     end
+
+note right of Engine
+  **Sharding tax**: cross-shard handlers
+  (MSET, SINTER, MGET) pay a structural
+  cache-line bounce per shard touched.
+  Audit at docs/audits/per-shard-arc-summary.md
+  measures the residual MSET regression
+  vs the single-mutex baseline.
+end note
 
 @enduml
