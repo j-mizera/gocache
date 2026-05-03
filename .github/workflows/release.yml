@@ -277,10 +277,25 @@ jobs:
         with:
           ref: main
 
-      - name: Install plantuml
+      - name: Install plantuml + graphviz
         run: |
+          set -euo pipefail
+          # graphviz provides `dot`, which plantuml needs to lay out
+          # component / state / class diagrams. apt's `plantuml` package
+          # ships an outdated jar (mishandles some state-diagram syntax
+          # newer plantuml parses fine), so we pull a current jar from
+          # upstream and wrap it as a `plantuml` command on PATH.
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends plantuml
+          sudo apt-get install -y --no-install-recommends graphviz default-jre-headless
+          PLANTUML_JAR=/usr/local/lib/plantuml.jar
+          sudo curl -fsSL -o "$PLANTUML_JAR" \
+            https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar
+          sudo tee /usr/local/bin/plantuml > /dev/null <<'WRAPPER'
+          #!/bin/sh
+          exec java -jar /usr/local/lib/plantuml.jar "$@"
+          WRAPPER
+          sudo chmod +x /usr/local/bin/plantuml
+          plantuml -version
 
       - name: Build flat wiki layout (renders .puml -> .svg)
         run: bash scripts/build-wiki.sh wiki-staging
