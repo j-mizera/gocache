@@ -1,7 +1,7 @@
 ---
 title: ADR-0001 Persistence as pluggable log+snapshot+LSN
 description: Persistence moves from in-tree gob snapshot worker to a pluggable log+snapshot model with monotonic LSNs, allowing built-in and third-party providers
-status: proposed
+status: accepted
 date: 2026-05-03
 deciders: [witherxse]
 related:

@@ -1,7 +1,7 @@
 ---
 title: ADR-0002 Source/Sink contract with BootMode trichotomy
 description: Persistence contract splits into Source (recovery-side, supplies state on boot) and Sink (mutation-side, consumes ongoing writes), with a BootMode trichotomy of Snapshot/Replay/Initial
-status: proposed
+status: accepted
 date: 2026-05-03
 deciders: [witherxse]
 related:
