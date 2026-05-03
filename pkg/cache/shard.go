@@ -40,12 +40,12 @@ type Shard struct {
 	onMutateAll func()
 }
 
-func newShard(maxBytes int64, policy EvictionPolicy) *Shard {
+func newShard(maxBytes int64, policy EvictionPolicy, slabTargetBytes uint32) *Shard {
 	return &Shard{
 		items:          make(map[string]slab.SlabPointer),
 		nativeValues:   make(map[slab.SlabPointer]any),
 		keysBySlot:     make(map[slab.SlabPointer]string),
-		slabs:          slab.NewAllocator(),
+		slabs:          slab.NewAllocatorWithTargetBytes(slabTargetBytes),
 		maxBytes:       maxBytes,
 		evictionPolicy: policy,
 	}

@@ -14,10 +14,20 @@ const (
 	numClasses          = 11 // 64, 128, 256, ..., 65536
 	hugeClassID  uint8  = 255
 
-	// targetSlabBytes is the nominal per-slab allocation. Each class sizes
-	// its entriesPerSlab to approach this budget. 1 MiB keeps the freeList
-	// bookkeeping cheap and the GC-visible surface small.
-	targetSlabBytes uint32 = 1 << 20
+	// DefaultTargetSlabBytes is the per-slab allocation budget callers get
+	// when they construct via NewAllocator. Each class sizes its
+	// entriesPerSlab to approach this budget. 1 MiB keeps the freeList
+	// bookkeeping cheap and the GC-visible surface small. Sharded callers
+	// (pkg/cache.Cache at N>1) should use NewAllocatorWithTargetBytes with
+	// DefaultTargetSlabBytes / N so the total slab capacity across all
+	// shards stays roughly constant rather than growing linearly with N.
+	DefaultTargetSlabBytes uint32 = 1 << 20
+
+	// MinTargetSlabBytes floors the per-slab budget so that even at high
+	// shard counts each slab can still hold a sensible number of small
+	// entries. 64 KiB / 64 B = 1024 entries for class 0, which keeps slab
+	// boundaries from churning during typical workloads.
+	MinTargetSlabBytes uint32 = 64 * 1024
 )
 
 // Allocator hands out SlabPointers. It is not internally synchronized; the
@@ -25,7 +35,8 @@ const (
 // the cache RLock may call Read safely because slab data regions are
 // allocated once and never moved.
 type Allocator struct {
-	classes []*slabClass
+	classes         []*slabClass
+	targetSlabBytes uint32 // per-slab budget; see NewAllocatorWithTargetBytes
 
 	// huge stores one entry per key for values exceeding maxClassSize.
 	// hugeNext is the next assignable id; freed ids are pushed onto
@@ -41,20 +52,37 @@ type Allocator struct {
 }
 
 // NewAllocator constructs a slab Allocator with the standard 11 regular
-// classes plus the huge class for oversize values. Classes start empty; the
-// first Alloc in a class creates its first slab.
+// classes plus the huge class for oversize values. Each class's first slab
+// is sized to approach DefaultTargetSlabBytes (1 MiB). Classes start empty
+// except for class 0 — see the NilPointer reservation note below.
 //
-// To keep SlabPointer(0) reserved as NilPointer, class 0's slab 0 entry 0 is
-// pre-allocated and leaked at startup — a 64-byte sunk cost.
+// To keep SlabPointer(0) reserved as NilPointer, class 0's slab 0 entry 0
+// is pre-allocated and leaked at startup. The pre-allocation forces one
+// class-0 slab to exist; at the default target this costs ~1 MiB of
+// pre-reserved memory per allocator. Sharded callers that have many
+// allocators should construct via NewAllocatorWithTargetBytes with a
+// per-shard scaled budget.
 func NewAllocator() *Allocator {
+	return NewAllocatorWithTargetBytes(DefaultTargetSlabBytes)
+}
+
+// NewAllocatorWithTargetBytes constructs a slab Allocator whose per-slab
+// budget is targetBytes (clamped to MinTargetSlabBytes). Used by sharded
+// callers (pkg/cache.Cache at N>1) so the total slab capacity across N
+// shards stays roughly constant rather than growing linearly with N.
+func NewAllocatorWithTargetBytes(targetBytes uint32) *Allocator {
+	if targetBytes < MinTargetSlabBytes {
+		targetBytes = MinTargetSlabBytes
+	}
 	a := &Allocator{
-		classes:  make([]*slabClass, numClasses),
-		huge:     make(map[uint32][]byte),
-		hugeMeta: make(map[uint32]*SlotMeta),
+		classes:         make([]*slabClass, numClasses),
+		targetSlabBytes: targetBytes,
+		huge:            make(map[uint32][]byte),
+		hugeMeta:        make(map[uint32]*SlotMeta),
 	}
 	for i := 0; i < numClasses; i++ {
 		classSize := minClassSize << i
-		entries := targetSlabBytes / classSize
+		entries := targetBytes / classSize
 		if entries == 0 {
 			entries = 1
 		}
