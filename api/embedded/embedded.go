@@ -23,8 +23,8 @@ import (
 	"context"
 	"fmt"
 
+	"gocache/api/config"
 	"gocache/api/logger"
-	"gocache/pkg/config"
 )
 
 // Plugin is the interface an embedded plugin implements.

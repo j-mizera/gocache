@@ -18,10 +18,10 @@ import (
 	"os"
 	"strconv"
 
+	"gocache/api/config"
+	"gocache/api/crashdump"
+	"gocache/api/embedded"
 	"gocache/api/logger"
-	"gocache/pkg/config"
-	"gocache/pkg/crashdump"
-	"gocache/pkg/embedded"
 )
 
 // Env var overrides. Evaluated in BootInit so they take effect even when

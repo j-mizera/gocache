@@ -1,3 +1,8 @@
+// Package config wires the runtime configuration loader (viper, pflag,
+// env vars) onto the data types defined in api/config. The data
+// definitions live in api/config so plugins can read them without
+// depending on internal server packages; this package owns only the
+// loading pipeline.
 package config
 
 import (
@@ -6,150 +11,46 @@ import (
 	"strings"
 	"time"
 
-	"gocache/pkg/plugin"
+	apiconfig "gocache/api/config"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
-// Default values shared between DefaultConfig and viper.SetDefault. Keeping
-// them as named constants guarantees the struct-literal defaults and the
-// viper-registered defaults never drift out of sync.
-const (
-	defaultAddress           = "0.0.0.0"
-	defaultPort              = 6379
-	defaultLogLevel          = "info"
-	defaultSnapshotFile      = "snapshot.dat"
-	defaultSnapshotInterval  = 5 * time.Minute
-	defaultLoadOnStartup     = true
-	defaultMaxMemoryMB       = int64(1024)
-	defaultEvictionPolicy    = "lru"
-	defaultCacheShards       = 8
+// Re-exports of the api/config data types. Internal callers continue to
+// use the unqualified config.X names via these aliases.
+type (
+	Config            = apiconfig.Config
+	ServerConfig      = apiconfig.ServerConfig
+	PersistenceConfig = apiconfig.PersistenceConfig
+	MemoryConfig      = apiconfig.MemoryConfig
+	WorkersConfig     = apiconfig.WorkersConfig
+	EventsConfig      = apiconfig.EventsConfig
+)
 
-	// Hybrid-encoding thresholds. Defaults match Valkey 8 (src/config.c).
-	// Collections that exceed either threshold (count or per-item length)
-	// are promoted from the byte-packed encoding to native Go shapes.
-	defaultHashMaxPackedEntries = 512
-	defaultHashMaxPackedValue   = 64
-	defaultSetMaxPackedEntries  = 128
-	defaultSetMaxPackedValue    = 64
-	defaultZSetMaxPackedEntries = 128
-	defaultZSetMaxPackedValue   = 64
-	defaultListMaxPackedSize    = 8192 // bytes, not entries
-	defaultCleanupInterval   = time.Minute
-	defaultEventsReplayCapacity = 10_000
-	defaultPluginsEnabled    = false
-	defaultPluginsDir        = "plugins"
-	defaultPluginsSocketPath = "/tmp/gocache-plugins.sock"
-	defaultHealthInterval    = 10 * time.Second
-	defaultShutdownTimeout   = 5 * time.Second
-	defaultMaxRestarts       = 3
-	defaultConnectTimeout    = 10 * time.Second
+// DefaultConfig returns a configuration with sensible defaults.
+// Forwarder to api/config.DefaultConfig — kept for back-compat with any
+// internal caller that imports pkg/config.
+func DefaultConfig() *Config { return apiconfig.DefaultConfig() }
+
+// Default values used by viper.SetDefault below. Mirrored from
+// api/config.Default* so the loader and the struct-literal constructor
+// agree on numeric defaults. Plugin-specific defaults (not exposed via
+// api) are kept here.
+const (
+	defaultPluginsEnabled     = false
+	defaultPluginsDir         = "plugins"
+	defaultPluginsSocketPath  = "/tmp/gocache-plugins.sock"
+	defaultHealthInterval     = 10 * time.Second
+	defaultShutdownTimeout    = 5 * time.Second
+	defaultMaxRestarts        = 3
+	defaultConnectTimeout     = 10 * time.Second
 	defaultMinRestartInterval = 30 * time.Second
 
 	envPrefix         = "GOCACHE"
 	defaultConfigName = "gocache"
 )
-
-// Config holds all configuration for the GoCache server
-type Config struct {
-	Server      ServerConfig         `yaml:"server"      mapstructure:"server"`
-	Persistence PersistenceConfig    `yaml:"persistence" mapstructure:"persistence"`
-	Memory      MemoryConfig         `yaml:"memory"      mapstructure:"memory"`
-	Workers     WorkersConfig        `yaml:"workers"     mapstructure:"workers"`
-	Events      EventsConfig         `yaml:"events"      mapstructure:"events"`
-	Plugins     plugin.PluginsConfig `yaml:"plugins"     mapstructure:"plugins"`
-}
-
-// ServerConfig holds server-specific configuration
-type ServerConfig struct {
-	Address     string `yaml:"address"      mapstructure:"address"`
-	Port        int    `yaml:"port"         mapstructure:"port"`
-	LogLevel    string `yaml:"log_level"    mapstructure:"log_level"`
-	RequirePass string `yaml:"require_pass" mapstructure:"require_pass"`
-}
-
-// PersistenceConfig holds persistence configuration
-type PersistenceConfig struct {
-	SnapshotFile     string        `yaml:"snapshot_file"     mapstructure:"snapshot_file"`
-	SnapshotInterval time.Duration `yaml:"snapshot_interval" mapstructure:"snapshot_interval"`
-	LoadOnStartup    bool          `yaml:"load_on_startup"   mapstructure:"load_on_startup"`
-}
-
-// MemoryConfig holds memory management configuration.
-//
-// The HashMaxPacked*, SetMaxPacked*, ZSetMaxPacked*, and ListMaxPackedSize
-// fields govern hybrid collection encoding. Small collections are stored as
-// a flat byte buffer (Packed) and mutated in place; when a collection
-// exceeds one of the thresholds it is promoted to a native Go map/slice
-// (Native). Defaults mirror Valkey 8.
-type MemoryConfig struct {
-	MaxMemoryMB    int64  `yaml:"max_memory_mb"    mapstructure:"max_memory_mb"`
-	EvictionPolicy string `yaml:"eviction_policy"  mapstructure:"eviction_policy"`
-
-	// CacheShards is the number of cache shards (and engine goroutines).
-	// Must be a positive power of two. Default 16 — validated by issue
-	// #34's prototype as the throughput sweet spot. Lower values save a
-	// little memory; higher values stop helping (#39 N-sweep).
-	CacheShards int `yaml:"cache_shards" mapstructure:"cache_shards"`
-
-	HashMaxPackedEntries int `yaml:"hash_max_packed_entries" mapstructure:"hash_max_packed_entries"`
-	HashMaxPackedValue   int `yaml:"hash_max_packed_value"   mapstructure:"hash_max_packed_value"`
-	SetMaxPackedEntries  int `yaml:"set_max_packed_entries"  mapstructure:"set_max_packed_entries"`
-	SetMaxPackedValue    int `yaml:"set_max_packed_value"    mapstructure:"set_max_packed_value"`
-	ZSetMaxPackedEntries int `yaml:"zset_max_packed_entries" mapstructure:"zset_max_packed_entries"`
-	ZSetMaxPackedValue   int `yaml:"zset_max_packed_value"   mapstructure:"zset_max_packed_value"`
-	ListMaxPackedSize    int `yaml:"list_max_packed_size"    mapstructure:"list_max_packed_size"`
-}
-
-// WorkersConfig holds background worker configuration
-type WorkersConfig struct {
-	CleanupInterval time.Duration `yaml:"cleanup_interval" mapstructure:"cleanup_interval"`
-}
-
-// EventsConfig holds event bus configuration.
-//
-// ReplayCapacity bounds the ring of retained events used to catch up
-// subscribers that connect after boot. 0 disables replay; the bus then
-// only forwards live events, mirroring pre-ring behaviour.
-type EventsConfig struct {
-	ReplayCapacity int `yaml:"replay_capacity" mapstructure:"replay_capacity"`
-}
-
-// DefaultConfig returns a configuration with sensible defaults
-func DefaultConfig() *Config {
-	return &Config{
-		Server: ServerConfig{
-			Address:  defaultAddress,
-			Port:     defaultPort,
-			LogLevel: defaultLogLevel,
-		},
-		Persistence: PersistenceConfig{
-			SnapshotFile:     defaultSnapshotFile,
-			SnapshotInterval: defaultSnapshotInterval,
-			LoadOnStartup:    defaultLoadOnStartup,
-		},
-		Memory: MemoryConfig{
-			MaxMemoryMB:          defaultMaxMemoryMB,
-			EvictionPolicy:       defaultEvictionPolicy,
-			CacheShards:          defaultCacheShards,
-			HashMaxPackedEntries: defaultHashMaxPackedEntries,
-			HashMaxPackedValue:   defaultHashMaxPackedValue,
-			SetMaxPackedEntries:  defaultSetMaxPackedEntries,
-			SetMaxPackedValue:    defaultSetMaxPackedValue,
-			ZSetMaxPackedEntries: defaultZSetMaxPackedEntries,
-			ZSetMaxPackedValue:   defaultZSetMaxPackedValue,
-			ListMaxPackedSize:    defaultListMaxPackedSize,
-		},
-		Workers: WorkersConfig{
-			CleanupInterval: defaultCleanupInterval,
-		},
-		Events: EventsConfig{
-			ReplayCapacity: defaultEventsReplayCapacity,
-		},
-	}
-}
 
 // bindFlag wraps viper.BindPFlag. Callers that register a subset of flags
 // (e.g., integration tests with only `--config`) are tolerated: a missing
@@ -172,25 +73,25 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v := viper.New()
 
 	// Defaults
-	v.SetDefault("server.address", defaultAddress)
-	v.SetDefault("server.port", defaultPort)
-	v.SetDefault("server.log_level", defaultLogLevel)
+	v.SetDefault("server.address", apiconfig.DefaultAddress)
+	v.SetDefault("server.port", apiconfig.DefaultPort)
+	v.SetDefault("server.log_level", apiconfig.DefaultLogLevel)
 	v.SetDefault("server.require_pass", "")
-	v.SetDefault("persistence.snapshot_file", defaultSnapshotFile)
-	v.SetDefault("persistence.snapshot_interval", defaultSnapshotInterval)
-	v.SetDefault("persistence.load_on_startup", defaultLoadOnStartup)
-	v.SetDefault("memory.max_memory_mb", defaultMaxMemoryMB)
-	v.SetDefault("memory.eviction_policy", defaultEvictionPolicy)
-	v.SetDefault("memory.cache_shards", defaultCacheShards)
-	v.SetDefault("memory.hash_max_packed_entries", defaultHashMaxPackedEntries)
-	v.SetDefault("memory.hash_max_packed_value", defaultHashMaxPackedValue)
-	v.SetDefault("memory.set_max_packed_entries", defaultSetMaxPackedEntries)
-	v.SetDefault("memory.set_max_packed_value", defaultSetMaxPackedValue)
-	v.SetDefault("memory.zset_max_packed_entries", defaultZSetMaxPackedEntries)
-	v.SetDefault("memory.zset_max_packed_value", defaultZSetMaxPackedValue)
-	v.SetDefault("memory.list_max_packed_size", defaultListMaxPackedSize)
-	v.SetDefault("workers.cleanup_interval", defaultCleanupInterval)
-	v.SetDefault("events.replay_capacity", defaultEventsReplayCapacity)
+	v.SetDefault("persistence.snapshot_file", apiconfig.DefaultSnapshotFile)
+	v.SetDefault("persistence.snapshot_interval", apiconfig.DefaultSnapshotInterval)
+	v.SetDefault("persistence.load_on_startup", apiconfig.DefaultLoadOnStartup)
+	v.SetDefault("memory.max_memory_mb", apiconfig.DefaultMaxMemoryMB)
+	v.SetDefault("memory.eviction_policy", apiconfig.DefaultEvictionPolicy)
+	v.SetDefault("memory.cache_shards", apiconfig.DefaultCacheShards)
+	v.SetDefault("memory.hash_max_packed_entries", apiconfig.DefaultHashMaxPackedEntries)
+	v.SetDefault("memory.hash_max_packed_value", apiconfig.DefaultHashMaxPackedValue)
+	v.SetDefault("memory.set_max_packed_entries", apiconfig.DefaultSetMaxPackedEntries)
+	v.SetDefault("memory.set_max_packed_value", apiconfig.DefaultSetMaxPackedValue)
+	v.SetDefault("memory.zset_max_packed_entries", apiconfig.DefaultZSetMaxPackedEntries)
+	v.SetDefault("memory.zset_max_packed_value", apiconfig.DefaultZSetMaxPackedValue)
+	v.SetDefault("memory.list_max_packed_size", apiconfig.DefaultListMaxPackedSize)
+	v.SetDefault("workers.cleanup_interval", apiconfig.DefaultCleanupInterval)
+	v.SetDefault("events.replay_capacity", apiconfig.DefaultEventsReplayCapacity)
 
 	// Plugin defaults
 	v.SetDefault("plugins.enabled", defaultPluginsEnabled)
@@ -255,18 +156,4 @@ func Unmarshal(v *viper.Viper) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 	return &cfg, nil
-}
-
-// GetAddr returns the full address string (host:port). It is a pure formatter
-// and does not mutate the receiver; defaults are applied via DefaultConfig/Load.
-func (c *ServerConfig) GetAddr() string {
-	port := c.Port
-	if port == 0 {
-		port = defaultPort
-	}
-	addr := c.Address
-	if addr == "" {
-		addr = defaultAddress
-	}
-	return fmt.Sprintf("%s:%d", addr, port)
 }

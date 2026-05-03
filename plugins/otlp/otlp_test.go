@@ -6,7 +6,7 @@ import (
 	"context"
 	"testing"
 
-	"gocache/pkg/config"
+	"gocache/api/config"
 )
 
 // TestBootInit_DisabledNoEndpoint verifies the common case: user built
