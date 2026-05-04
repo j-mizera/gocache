@@ -75,7 +75,6 @@ type BaseEvaluator struct {
 	transactionManager *transaction.Manager
 	handlers           map[string]command.Handler
 	specs              map[string]command.Spec
-	snapshotFile       string
 	requirePass        string
 	blockingRegistry   *blocking.Registry
 	watchManager       *watch.Manager
@@ -88,14 +87,13 @@ type BaseEvaluator struct {
 	snapshotInvoker    command.SnapshotInvoker
 }
 
-func New(c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *BaseEvaluator {
+func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *BaseEvaluator {
 	b := &BaseEvaluator{
 		cache:              c,
 		engine:             e,
 		transactionManager: transaction.NewManager(),
 		handlers:           make(map[string]command.Handler),
 		specs:              make(map[string]command.Spec),
-		snapshotFile:       snapshotFile,
 		requirePass:        requirePass,
 		blockingRegistry:   br,
 		watchManager:       wm,
@@ -372,7 +370,6 @@ func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientCont
 	c.Transaction = b.transactionManager
 	c.BlockingRegistry = b.blockingRegistry
 	c.WatchManager = b.watchManager
-	c.SnapshotFile = b.snapshotFile
 	c.RequirePass = b.requirePass
 	c.MultiKey = spec.MultiKey
 	switch {

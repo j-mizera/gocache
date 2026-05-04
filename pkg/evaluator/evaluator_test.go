@@ -25,7 +25,7 @@ func newTestEvaluator() (*BaseEvaluator, *engine.Engine, *serverOps.Tracker) {
 	go e.Run()
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	eval := New(c, e, "test.dat", "", br, wm)
+	eval := New(c, e, "", br, wm)
 	tracker := serverOps.NewTracker()
 	eval.SetTracker(tracker)
 	return eval, e, tracker

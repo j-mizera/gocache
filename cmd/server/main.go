@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"gocache/api/command"
-	apiconfig "gocache/api/config"
 	"gocache/api/crashdump"
 	"gocache/api/embedded"
 	"gocache/api/events"
@@ -28,7 +27,6 @@ import (
 	"gocache/pkg/logcollector"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
-	"gocache/pkg/persistence/v1snap"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/plugin/ophooks"
@@ -36,6 +34,13 @@ import (
 	"gocache/pkg/version"
 	"gocache/pkg/watch"
 	"gocache/pkg/workers"
+
+	// Embedded persistence plugin — registers itself via init() per
+	// ADR-0007. Selecting a different snapshot backend = swap this
+	// import for the new plugin's package. The plugin reads its own
+	// config from the server's viper (see pkg/config.Viper) so main.go
+	// stays plugin-agnostic.
+	_ "gocache/pkg/persistence/v1snap"
 
 	// Embedded plugins — compile-time-linked observability hooks that run
 	// before config.Load and survive panics. See pkg/embedded for details.
@@ -47,8 +52,8 @@ import (
 	_ "gocache/plugins/crashdump"
 	_ "gocache/plugins/otlp"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // Entry-point defaults.
@@ -86,7 +91,6 @@ func main() {
 	pflag.String("config", defaultConfigFile, "path to config file (.yaml or .json)")
 	pflag.String("address", "", "server listen address (overrides config)")
 	pflag.Int("port", 0, "server listen port (overrides config)")
-	pflag.String("snapshot-file", "", "snapshot file path (overrides config)")
 	pflag.Duration("snapshot-interval", 0, "snapshot save interval (overrides config)")
 	pflag.Bool("load-on-startup", true, "load snapshot on startup (overrides config)")
 	pflag.Int64("max-memory-mb", 0, "max memory in MB (overrides config)")
@@ -211,7 +215,7 @@ func main() {
 	logCollector.AddSource("server", logPipeR)
 
 	// Initialize the server (before plugins so we have CoreCommandNames).
-	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Persistence.SnapshotFile, cfg.Server.RequirePass, blockingRegistry, watchManager)
+	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Server.RequirePass, blockingRegistry, watchManager)
 	srv.SetEmitter(eventBus)
 	srv.SetTracker(tracker)
 
@@ -254,13 +258,11 @@ func main() {
 	// coordinator runs in pass-through mode (no sinks registered) until
 	// a future PR adds the AOF / snapshot sink plugins.
 	//
-	// The snapshot format is selected by config: "gob" (legacy) or
-	// "v1" (ADR-0005 binary format with optional zstd). Both backends
-	// implement Source + Snapshotter, so SAVE, scheduled snapshots,
-	// and shutdown final-snapshot all run through the coordinator.
-	// snapSetFilename collects the per-backend hot-reload knobs so
-	// OnConfigChange can update both halves atomically.
-	snapSource, snapSnapshotter, snapSetFilename := buildSnapshotBackend(ctx, cfg.Persistence.SnapshotFormat, cfg.Persistence.SnapshotFile)
+	// The active snapshot backend comes from whichever embedded plugin
+	// was blank-imported above (ADR-0007). The plugin self-configures
+	// from the server's viper instance; main.go knows nothing about
+	// formats, files, or per-plugin tunables.
+	snapSource, snapSnapshotter := buildSnapshotBackend(ctx)
 	coordinator := persistence.New(snapSource)
 	coordinator.RegisterSnapshotter(snapSnapshotter)
 	srv.SetPersistenceFeed(coordinator)
@@ -270,7 +272,6 @@ func main() {
 	_ = bootstate.Write(bootStateFile, stageSnapshotLoad)
 	if cfg.Persistence.LoadOnStartup {
 		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
-		snapOp.Enrich(command.FileKey, cfg.Persistence.SnapshotFile)
 		snapOp.Enrich(command.TriggerKey, "startup")
 		snapCtx := ops.WithContext(ctx, snapOp)
 		if opHookExec != nil && opHookExec.HasAny() {
@@ -286,7 +287,7 @@ func main() {
 			eventBus.Emit(events.NewOperationComplete(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "failed", err.Error(), snapOp.ContextSnapshot(false)))
 			tracker.Fail(snapOp.ID, err.Error())
 		} else {
-			logger.Info(snapCtx).Str("file", cfg.Persistence.SnapshotFile).Msg("snapshot loaded")
+			logger.Info(snapCtx).Msg("snapshot loaded")
 			snapOp.Complete()
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
@@ -311,7 +312,6 @@ func main() {
 	snapshotWorker := workers.NewSnapshotWorker(
 		cacheInstance, engineInstance,
 		cfg.Persistence.SnapshotInterval,
-		cfg.Persistence.SnapshotFile,
 	)
 	cleanupWorker := workers.NewCleanupWorker(cacheInstance, engineInstance, cfg.Workers.CleanupInterval)
 	cleanupWorker.SetPersistenceFeed(coordinator)
@@ -327,11 +327,13 @@ func main() {
 	snapshotWorker.Start(ctx)
 	cleanupWorker.Start(ctx)
 
-	// Hot reload: config changes create config_reload operations.
-	v.WatchConfig()
-	v.OnConfigChange(func(e fsnotify.Event) {
+	// Hot reload: server-orchestration knobs only. Plugins subscribe
+	// to config.OnReload independently (per ADR-0007) and handle their
+	// own re-config there. Viper.WatchConfig + viper.OnConfigChange are
+	// installed by config.Load — this callback is one of many that the
+	// multiplexer fans out to.
+	config.OnReload(func(_ *viper.Viper) {
 		reloadOp := tracker.Start(ops.TypeConfigReload, "")
-		reloadOp.Enrich(command.FileKey, e.Name)
 		reloadCtx := ops.WithContext(context.Background(), reloadOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(reloadCtx, reloadOp)
@@ -348,7 +350,7 @@ func main() {
 			tracker.Fail(reloadOp.ID, err.Error())
 			return
 		}
-		logger.Info(reloadCtx).Str("file", e.Name).Msg("config reloaded")
+		logger.Info(reloadCtx).Msg("config reloaded")
 
 		prev := cfgPtr.Load()
 		if newCfg.Server.GetAddr() != prev.Server.GetAddr() {
@@ -356,8 +358,6 @@ func main() {
 		}
 
 		snapshotWorker.UpdateInterval(newCfg.Persistence.SnapshotInterval)
-		snapshotWorker.UpdateFile(newCfg.Persistence.SnapshotFile)
-		snapSetFilename(newCfg.Persistence.SnapshotFile)
 		cleanupWorker.UpdateInterval(newCfg.Workers.CleanupInterval)
 		cacheInstance.SetMemoryLimit(
 			reloadCtx,
@@ -481,7 +481,7 @@ func handleShutdown(
 	// sink's flush goroutine drains its buffer and Sink.Close returns.
 	coordinator.Stop(shutdownCtx)
 
-	logger.Info(shutdownCtx).Str("step", "4/6").Str("file", cfg.Persistence.SnapshotFile).Msg("saving final snapshot")
+	logger.Info(shutdownCtx).Str("step", "4/6").Msg("saving final snapshot")
 	if err := coordinator.Snapshot(shutdownCtx, cacheInstance); err != nil {
 		logger.Warn(shutdownCtx).Err(err).Msg("failed to save final snapshot")
 	} else {
@@ -502,34 +502,26 @@ func handleShutdown(
 	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
 }
 
-// buildSnapshotBackend selects the on-disk format dictated by config
-// and returns Source + Snapshotter implementing it, plus a setter that
-// propagates a new filename to whichever backend is in use. Unknown
-// format strings fall back to the gob shim with a warning so a typo in
-// snapshot_format doesn't take the server offline at boot.
-func buildSnapshotBackend(ctx context.Context, format, filename string) (apipersistence.Source, apipersistence.Snapshotter, func(string)) {
-	switch format {
-	case apiconfig.SnapshotFormatV1:
-		src := v1snap.NewSource(filename)
-		snap := v1snap.NewSnapshotter(filename)
-		setBoth := func(f string) {
-			src.SetFilename(f)
-			snap.SetFilename(f)
-		}
-		logger.Info(ctx).Str("format", format).Msg("persistence: snapshot backend selected")
-		return src, snap, setBoth
-
-	case apiconfig.SnapshotFormatGob, "":
-		shim := persistence.NewGobSource(filename)
-		logger.Info(ctx).Str("format", apiconfig.SnapshotFormatGob).Msg("persistence: snapshot backend selected")
-		return shim, shim, shim.SetFilename
-
-	default:
-		shim := persistence.NewGobSource(filename)
-		logger.Warn(ctx).
-			Str("requested", format).
-			Str("fallback", apiconfig.SnapshotFormatGob).
-			Msg("persistence: unknown snapshot_format, falling back to gob")
-		return shim, shim, shim.SetFilename
+// buildSnapshotBackend resolves the registered embedded snapshot
+// plugin (ADR-0007) and asks it to build the Source + Snapshotter
+// pair. The plugin owns its own configuration: where to read/write,
+// what format, what tunables. main.go knows nothing about any of it.
+//
+// Returns nil source + snapshotter when no plugin was compiled in;
+// the Coordinator handles nil gracefully (no recovery + ErrNoSnapshotter
+// from save calls). A warning surfaces the misbuild so it doesn't
+// pass silently.
+func buildSnapshotBackend(ctx context.Context) (apipersistence.Source, apipersistence.Snapshotter) {
+	provider := apipersistence.SnapshotProviderRegistered()
+	if provider == nil {
+		logger.Warn(ctx).Msg("persistence: no snapshot plugin compiled in; snapshots disabled")
+		return nil, nil
 	}
+	src, snap, err := provider.Build()
+	if err != nil {
+		logger.Error(ctx).Err(err).Str("plugin", provider.Name()).Msg("persistence: snapshot plugin Build failed; snapshots disabled")
+		return nil, nil
+	}
+	logger.Info(ctx).Str("plugin", provider.Name()).Msg("persistence: snapshot backend selected")
+	return src, snap
 }

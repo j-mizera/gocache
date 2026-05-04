@@ -51,9 +51,9 @@ type Server struct {
 	opHookExecutor   evaluator.OpHookExecutor
 }
 
-func New(addr string, c *cache.Cache, e *engine.Engine, snapshotFile, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
+func New(addr string, c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
 	tracker := serverOps.NewTracker()
-	ev := evaluator.New(c, e, snapshotFile, requirePass, br, wm)
+	ev := evaluator.New(c, e, requirePass, br, wm)
 	ev.SetTracker(tracker)
 	return &Server{
 		addr:             addr,

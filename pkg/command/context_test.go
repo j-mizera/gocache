@@ -32,7 +32,6 @@ func TestContext_Reset(t *testing.T) {
 		Transaction:      transaction.NewManager(),
 		BlockingRegistry: blocking.NewRegistry(),
 		WatchManager:     watch.NewManager(),
-		SnapshotFile:     "/tmp/snap.dat",
 		RequirePass:      "secret",
 		EvalFn: func(_ context.Context, _ *clientctx.ClientContext, _ string, _ []string, _ bool) Result {
 			return Result{}
@@ -57,7 +56,6 @@ func TestContext_Reset(t *testing.T) {
 		{"Transaction", ctx.Transaction == nil},
 		{"BlockingRegistry", ctx.BlockingRegistry == nil},
 		{"WatchManager", ctx.WatchManager == nil},
-		{"SnapshotFile", ctx.SnapshotFile == ""},
 		{"RequirePass", ctx.RequirePass == ""},
 		{"EvalFn", ctx.EvalFn == nil},
 	}

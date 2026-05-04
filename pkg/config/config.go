@@ -13,6 +13,7 @@ import (
 
 	apiconfig "gocache/api/config"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -77,10 +78,8 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	v.SetDefault("server.port", apiconfig.DefaultPort)
 	v.SetDefault("server.log_level", apiconfig.DefaultLogLevel)
 	v.SetDefault("server.require_pass", "")
-	v.SetDefault("persistence.snapshot_file", apiconfig.DefaultSnapshotFile)
 	v.SetDefault("persistence.snapshot_interval", apiconfig.DefaultSnapshotInterval)
 	v.SetDefault("persistence.load_on_startup", apiconfig.DefaultLoadOnStartup)
-	v.SetDefault("persistence.snapshot_format", apiconfig.DefaultSnapshotFormat)
 	v.SetDefault("memory.max_memory_mb", apiconfig.DefaultMaxMemoryMB)
 	v.SetDefault("memory.eviction_policy", apiconfig.DefaultEvictionPolicy)
 	v.SetDefault("memory.cache_shards", apiconfig.DefaultCacheShards)
@@ -127,7 +126,6 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	bindFlag(v, "server.address", flags, "address")
 	bindFlag(v, "server.port", flags, "port")
 	bindFlag(v, "server.log_level", flags, "log-level")
-	bindFlag(v, "persistence.snapshot_file", flags, "snapshot-file")
 	bindFlag(v, "persistence.snapshot_interval", flags, "snapshot-interval")
 	bindFlag(v, "persistence.load_on_startup", flags, "load-on-startup")
 	bindFlag(v, "memory.max_memory_mb", flags, "max-memory-mb")
@@ -135,7 +133,22 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	bindFlag(v, "workers.cleanup_interval", flags, "cleanup-interval")
 
 	cfg, err := Unmarshal(v)
-	return cfg, v, err
+	if err != nil {
+		return nil, v, err
+	}
+
+	// Wire viper to the global handle and the reload multiplexer so
+	// embedded plugins (and other callers) can subscribe to config
+	// reloads via OnReload. Viper's native OnConfigChange is
+	// single-callback; we install one fan-out handler here and let
+	// callers register independent callbacks against it.
+	setServerViper(v)
+	v.OnConfigChange(func(_ fsnotify.Event) {
+		fireReload(v)
+	})
+	v.WatchConfig()
+
+	return cfg, v, nil
 }
 
 // Reload re-reads the current Viper state into a fresh Config struct.

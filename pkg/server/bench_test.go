@@ -56,7 +56,7 @@ func newInProcRig(b *testing.B) *inProcRig {
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
 
-	ev := evaluator.New(c, e, "", "", br, wm)
+	ev := evaluator.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	// Match production: cmd/server/main.go always wires the event bus, even
 	// when no plugins are loaded. Without this, the evaluator's emitter
@@ -104,7 +104,7 @@ func newTCPRig(b *testing.B) *tcpRig {
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
 
-	srv := New("127.0.0.1:0", c, e, "", "", br, wm)
+	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	srv.SetTracker(serverOps.NewTracker())
 	srv.SetEmitter(events.NewBus())
 
@@ -198,7 +198,7 @@ func TestHSET_PromotedHash_O1(t *testing.T) {
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
-	ev := evaluator.New(c, e, "", "", br, wm)
+	ev := evaluator.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
 
@@ -240,7 +240,7 @@ func runPromotedCollectionO1(t *testing.T, deadline time.Duration, n int, makeAr
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
-	ev := evaluator.New(c, e, "", "", br, wm)
+	ev := evaluator.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
 

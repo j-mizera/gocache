@@ -69,8 +69,7 @@ type Context struct {
 	WatchManager     *watch.Manager
 
 	// Evaluator-level config, set by the pipeline before dispatch.
-	SnapshotFile string
-	RequirePass  string
+	RequirePass string
 
 	// Sharding routing — set by the evaluator before invoking the handler
 	// based on the command's Spec.KeyArgIndex / Spec.MultiKey.
@@ -159,7 +158,6 @@ func (c *Context) Reset() {
 	c.Transaction = nil
 	c.BlockingRegistry = nil
 	c.WatchManager = nil
-	c.SnapshotFile = ""
 	c.RequirePass = ""
 	c.Shard = 0
 	c.MultiKey = false
