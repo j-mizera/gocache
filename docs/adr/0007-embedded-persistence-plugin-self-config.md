@@ -1,7 +1,7 @@
 ---
 title: ADR-0007 Embedded persistence plugins self-configure via viper
 description: Embedded persistence plugins register at init time, read their own configuration from the server's viper, and handle their own hot reload — server config and the api/persistence surface stay free of plugin-internal keys
-status: accepted
+status: superseded by ADR-0008
 date: 2026-05-04
 deciders: [witherxse]
 related:
@@ -9,7 +9,10 @@ related:
   - ADR-0002-source-sink-contract
   - ADR-0005-snapshot-wire-and-file-format
   - ADR-0006-builtin-vs-third-party-transport
+superseded_by: ADR-0008-plugin-config-and-reload-contract
 ---
+
+> **Superseded by [ADR-0008](0008-plugin-config-and-reload-contract.md)**: this ADR's premise — *"plugins use viper natively"* — leaks the server's choice of config library across the `api/` boundary. ADR-0008 keeps the self-configuration model but defines a typed `PluginConfig` view and `ReloadHandler` capability in `api/config`, hiding viper inside `pkg/config`. The registration mechanism (compile-time blank import + `init()` + `RegisterSnapshotProvider`) and the server-orchestration scope of `api/config.PersistenceConfig` are both preserved.
 
 # ADR-0007: Embedded persistence plugins self-configure via viper
 

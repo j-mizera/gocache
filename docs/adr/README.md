@@ -36,7 +36,8 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0004](0004-command-namespacing.md) | Persistence command namespacing | proposed | 2026-05-03 |
 | [0005](0005-snapshot-wire-and-file-format.md) | Snapshot wire and file format | accepted | 2026-05-03 |
 | [0006](0006-builtin-vs-third-party-transport.md) | Built-in vs third-party plugin transport | proposed | 2026-05-03 |
-| [0007](0007-embedded-persistence-plugin-self-config.md) | Embedded persistence plugins self-configure via viper | accepted | 2026-05-04 |
+| [0007](0007-embedded-persistence-plugin-self-config.md) | Embedded persistence plugins self-configure via viper | superseded by ADR-0008 | 2026-05-04 |
+| [0008](0008-plugin-config-and-reload-contract.md) | Plugin config and reload contract is library-agnostic | proposed | 2026-05-04 |
 
 ## Writing a new ADR
 
