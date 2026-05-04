@@ -1,12 +1,13 @@
 ---
 title: ADR-0006 Built-in vs third-party plugin transport
 description: Built-in persistence plugins (snapshot, AOF) ship as embedded plugins (in-process, build-tag-gated); third-party providers run via IPC over GCPC
-status: proposed
+status: accepted
 date: 2026-05-03
 deciders: [witherxse]
 related:
   - ADR-0001-persistence-as-pluggable-log-snapshot
   - ADR-0002-source-sink-contract
+  - ADR-0008-plugin-config-and-reload-contract
   - Plugins
   - GCPC
 ---

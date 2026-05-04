@@ -62,11 +62,12 @@ type ServerConfig struct {
 // PersistenceConfig holds the server-orchestration knobs for the
 // persistence subsystem. Plugin-specific keys (filenames, formats,
 // per-plugin tunables) live under plugins.config.<plugin-name> in
-// the YAML and are read by each plugin via pkg/config.Viper. The
-// server only owns the orchestration policy: whether to recover at
-// startup and how often to schedule periodic snapshot saves.
+// the YAML and are read by each plugin through the typed
+// apiconfig.PluginConfig view it receives in Build. The server only
+// owns the orchestration policy: whether to recover at startup and
+// how often to schedule periodic snapshot saves.
 //
-// See ADR-0007 for the rationale.
+// See ADR-0008 for the rationale.
 type PersistenceConfig struct {
 	SnapshotInterval time.Duration `yaml:"snapshot_interval" mapstructure:"snapshot_interval"`
 	LoadOnStartup    bool          `yaml:"load_on_startup"   mapstructure:"load_on_startup"`

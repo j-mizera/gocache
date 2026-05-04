@@ -1,4 +1,4 @@
-package v1snap
+package snapshot
 
 import (
 	"bufio"
@@ -36,7 +36,7 @@ func NewSource(filename string) *Source {
 }
 
 // Name implements api/persistence.Source.
-func (s *Source) Name() string { return "v1-snapshot" }
+func (s *Source) Name() string { return "snapshot" }
 
 // SetFilename swaps the on-disk path. Only observable on the next
 // Boot call (Boot is one-shot per server lifetime, so this is mostly
@@ -61,13 +61,13 @@ func (s *Source) Boot(_ context.Context) (apipersistence.BootResult, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return apipersistence.BootResult{Mode: apipersistence.BootModeInitial}, nil
 		}
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: open %s: %w", filename, err)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: open %s: %w", filename, err)
 	}
 
 	stat, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: stat %s: %w", filename, err)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: stat %s: %w", filename, err)
 	}
 	if stat.Size() == 0 {
 		_ = file.Close()
@@ -75,22 +75,22 @@ func (s *Source) Boot(_ context.Context) (apipersistence.BootResult, error) {
 	}
 	if stat.Size() < int64(headerLen+footerLen) {
 		_ = file.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: %s too small (%d bytes)", filename, stat.Size())
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: %s too small (%d bytes)", filename, stat.Size())
 	}
 
 	// Read and validate header.
 	hdr := make([]byte, headerLen)
 	if _, err := io.ReadFull(file, hdr); err != nil {
 		_ = file.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: read header %s: %w", filename, err)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: read header %s: %w", filename, err)
 	}
 	if hdr[0] != magic0 || hdr[1] != magic1 || hdr[2] != magic2 || hdr[3] != magic3 {
 		_ = file.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: bad magic in %s", filename)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: bad magic in %s", filename)
 	}
 	if hdr[4] != formatVersion {
 		_ = file.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: unsupported format version %d in %s (this build expects %d)", hdr[4], filename, formatVersion)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: unsupported format version %d in %s (this build expects %d)", hdr[4], filename, formatVersion)
 	}
 
 	// Body extends from the end of the header to the start of the
@@ -105,7 +105,7 @@ func (s *Source) Boot(_ context.Context) (apipersistence.BootResult, error) {
 	dec, err := zstd.NewReader(nil)
 	if err != nil {
 		_ = file.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: zstd reader init: %w", err)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: zstd reader init: %w", err)
 	}
 
 	it := &iterator{
@@ -122,7 +122,7 @@ func (s *Source) Boot(_ context.Context) (apipersistence.BootResult, error) {
 	consumed, lsnVal, err := it.peekMetaLSN()
 	if err != nil {
 		it.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("v1snap: META: %w", err)
+		return apipersistence.BootResult{}, fmt.Errorf("snapshot: META: %w", err)
 	}
 	if consumed {
 		lsn = lsnVal
@@ -280,13 +280,13 @@ func (it *iterator) Close() error {
 	footer := make([]byte, footerLen)
 	if _, err := io.ReadFull(it.file, footer); err != nil {
 		_ = it.file.Close()
-		return fmt.Errorf("v1snap: read footer: %w", err)
+		return fmt.Errorf("snapshot: read footer: %w", err)
 	}
 	got := binary.LittleEndian.Uint32(footer)
 	want := it.hasher.Sum32()
 	if got != want {
 		_ = it.file.Close()
-		return fmt.Errorf("v1snap: CRC mismatch (file=%08x computed=%08x)", got, want)
+		return fmt.Errorf("snapshot: CRC mismatch (file=%08x computed=%08x)", got, want)
 	}
 	return it.file.Close()
 }

@@ -27,7 +27,7 @@ func newFlagSet(args ...string) *pflag.FlagSet {
 
 func TestLoad_Defaults(t *testing.T) {
 	fs := newFlagSet()
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestLoad_Defaults(t *testing.T) {
 
 func TestLoad_YAML(t *testing.T) {
 	fs := newFlagSet("--config=testdata/config.yaml")
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestLoad_YAML(t *testing.T) {
 
 func TestLoad_JSON(t *testing.T) {
 	fs := newFlagSet("--config=testdata/config.json")
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestLoad_ExplicitMissingFile(t *testing.T) {
 	// When --config points to a file that doesn't exist, Load should return an error.
 	// Silent fallback only applies when no --config flag is given (auto-discovery).
 	fs := newFlagSet("--config=testdata/nonexistent.yaml")
-	_, _, err := config.Load(fs)
+	_, err := config.Load(fs)
 	if err == nil {
 		t.Error("expected error when explicitly specified config file is missing, got nil")
 	}
@@ -129,7 +129,7 @@ func TestLoad_NoFileUsesDefaults(t *testing.T) {
 	// When no --config flag is given and no gocache.yaml exists in the working
 	// directory, Load should silently fall back to defaults.
 	fs := newFlagSet() // no --config flag; pkg/config/ has no gocache.yaml
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("expected no error when config file is absent, got: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestLoad_NoFileUsesDefaults(t *testing.T) {
 
 func TestLoad_InvalidFile(t *testing.T) {
 	fs := newFlagSet("--config=testdata/invalid.yaml")
-	_, _, err := config.Load(fs)
+	_, err := config.Load(fs)
 	if err == nil {
 		t.Error("expected error for invalid YAML, got nil")
 	}
@@ -152,7 +152,7 @@ func TestLoad_EnvVars(t *testing.T) {
 	t.Setenv("GOCACHE_WORKERS_CLEANUP_INTERVAL", "2m")
 
 	fs := newFlagSet()
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestLoad_EnvOverridesFile(t *testing.T) {
 	t.Setenv("GOCACHE_SERVER_PORT", "9999")
 
 	fs := newFlagSet("--config=testdata/config.yaml")
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestLoad_EnvOverridesFile(t *testing.T) {
 
 func TestLoad_FlagOverridesFile(t *testing.T) {
 	fs := newFlagSet("--config=testdata/config.yaml", "--port=8080")
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestLoad_FlagOverridesEnv(t *testing.T) {
 	t.Setenv("GOCACHE_SERVER_PORT", "9000")
 
 	fs := newFlagSet("--port=8080")
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestLoad_PriorityChain(t *testing.T) {
 	t.Setenv("GOCACHE_SERVER_PORT", "9000")
 
 	fs := newFlagSet("--config=testdata/config.yaml", "--port=8080")
-	cfg, _, err := config.Load(fs)
+	cfg, err := config.Load(fs)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -259,12 +259,11 @@ func TestLoad_GetAddr(t *testing.T) {
 
 func TestReload(t *testing.T) {
 	fs := newFlagSet("--config=testdata/config.yaml")
-	_, v, err := config.Load(fs)
-	if err != nil {
+	if _, err := config.Load(fs); err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cfg, err := config.Reload(v)
+	cfg, err := config.Reload()
 	if err != nil {
 		t.Fatalf("Reload failed: %v", err)
 	}

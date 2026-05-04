@@ -1,4 +1,4 @@
-package v1snap
+package snapshot
 
 import (
 	"encoding/binary"
@@ -6,7 +6,6 @@ import (
 	"math"
 
 	apipersistence "gocache/api/persistence"
-	"gocache/pkg/cache"
 )
 
 // decodeNativeValue is the inverse of encodeNativeValue. Returns the
@@ -30,7 +29,7 @@ func decodeNativeValue(vt apipersistence.ValueType, blob []byte) (any, error) {
 	case apipersistence.ValueTypeSortedSet:
 		return decodeSortedSet(blob)
 	default:
-		return nil, fmt.Errorf("v1snap: unknown ValueType %d", vt)
+		return nil, fmt.Errorf("snapshot: unknown ValueType %d", vt)
 	}
 }
 
@@ -93,13 +92,13 @@ func decodeStringSet(blob []byte) (map[string]struct{}, error) {
 	return out, nil
 }
 
-func decodeSortedSet(blob []byte) (*cache.SortedSet, error) {
+func decodeSortedSet(blob []byte) (map[string]float64, error) {
 	count, n, err := readUvarint(blob)
 	if err != nil {
 		return nil, fmt.Errorf("zset count: %w", err)
 	}
 	rest := blob[n:]
-	z := cache.NewSortedSet()
+	out := make(map[string]float64, count)
 	for i := uint64(0); i < count; i++ {
 		member, advance, err := readLengthPrefixedString(rest)
 		if err != nil {
@@ -111,9 +110,9 @@ func decodeSortedSet(blob []byte) (*cache.SortedSet, error) {
 		}
 		score := math.Float64frombits(binary.BigEndian.Uint64(rest[:8]))
 		rest = rest[8:]
-		z.Add(member, score)
+		out[member] = score
 	}
-	return z, nil
+	return out, nil
 }
 
 // readUvarint pulls a varint off the front of b. Returns (value, bytes

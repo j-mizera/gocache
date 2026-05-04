@@ -107,10 +107,10 @@ func TestWorker_UpdateInterval(t *testing.T) {
 }
 
 // Hot-reload of the snapshot file path is now the plugin's
-// responsibility — it watches its own viper subsection (see
-// pkg/persistence/v1snap/init.go). The worker no longer holds the
-// filename, so there's no SnapshotWorker-side hot-reload path to
-// test here.
+// responsibility — it implements apiconfig.ReloadHandler and the
+// server routes reload events via pkg/config.OnPluginReload (see
+// plugins/snapshot/init.go). The worker no longer holds the filename,
+// so there's no SnapshotWorker-side hot-reload path to test here.
 
 func TestSafeInterval_ZeroDefault(t *testing.T) {
 	d := safeInterval(0)

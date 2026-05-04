@@ -202,16 +202,28 @@ func (c *Coordinator) Snapshot(ctx context.Context, target *cache.Cache) error {
 // slab lifecycle. ValueType and Encoding cast directly from the cache
 // enums to the api enums — the values are aligned by construction (see
 // type comments in api/persistence/types.go).
+//
+// SortedSet values are flattened to map[string]float64 here so the api
+// boundary stays free of pkg/cache types — plugins receive only generic
+// Go primitives (see ADR-0008). The conversion is the same shape as
+// hash/list/set already use.
 func captureSnapshotEntries(target *cache.Cache) []apipersistence.SnapshotEntry {
 	var entries []apipersistence.SnapshotEntry
 	target.Range(func(key string, entry cache.Entry, expiration int64) bool {
 		var v any
-		if entry.Encoding == cache.EncPacked {
+		switch {
+		case entry.Encoding == cache.EncPacked:
 			src := target.ResolvePacked(entry)
 			buf := make([]byte, len(src))
 			copy(buf, src)
 			v = buf
-		} else {
+		case entry.ValueType == cache.ObjTypeSortedSet:
+			if z, ok := entry.Value.(*cache.SortedSet); ok {
+				v = z.Members()
+			} else {
+				v = entry.Value
+			}
+		default:
 			v = entry.Value
 		}
 		entries = append(entries, apipersistence.SnapshotEntry{
@@ -370,6 +382,11 @@ func replayInto(ctx context.Context, it apipersistence.ReplayIterator, _ *cache.
 // instead of pkg/persistence's internal struct. Conversion between the
 // api enums and pkg/cache enums is a numeric cast (the values are aligned
 // — see the type comments in api/persistence/types.go).
+//
+// SortedSet values cross the api boundary as map[string]float64 (per
+// ADR-0008); reconstruct the cache-internal *SortedSet here before
+// handing to RawLoad. Other native types (list, hash, set, bytes) flow
+// through unchanged because they're already generic Go primitives.
 func applyEntry(_ context.Context, e apipersistence.SnapshotEntry, target *cache.Cache) error {
 	if e.Encoding == apipersistence.EncodingPacked {
 		var buf []byte
@@ -384,6 +401,18 @@ func applyEntry(_ context.Context, e apipersistence.SnapshotEntry, target *cache
 		target.RawLoadPacked(e.Key, cache.ValueType(e.ValueType), buf, e.Expiration)
 		return nil
 	}
-	target.RawLoad(e.Key, e.Value, e.Expiration)
+	value := e.Value
+	if e.ValueType == apipersistence.ValueTypeSortedSet {
+		members, ok := value.(map[string]float64)
+		if !ok {
+			return fmt.Errorf("sorted-set entry has non-map payload: %T", e.Value)
+		}
+		z := cache.NewSortedSet()
+		for member, score := range members {
+			z.Add(member, score)
+		}
+		value = z
+	}
+	target.RawLoad(e.Key, value, e.Expiration)
 	return nil
 }

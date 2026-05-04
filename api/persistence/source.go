@@ -75,8 +75,10 @@ type SnapshotIterator interface {
 	Close() error
 }
 
-// SnapshotEntry is one key-value tuple in a snapshot. The Value field's
-// concrete type depends on (ValueType, Encoding):
+// SnapshotEntry is one key-value tuple in a snapshot. Plugins read and
+// write only generic Go primitives — no pkg/cache types ever cross the
+// boundary (see ADR-0008). The Value field's concrete type depends on
+// (ValueType, Encoding):
 //
 //   - EncodingPacked: Value is []byte — the packed byte buffer the cache
 //     can hand straight to its slab allocator.
@@ -85,9 +87,10 @@ type SnapshotIterator interface {
 //   - EncodingNative + ValueTypeList: Value is []string.
 //   - EncodingNative + ValueTypeHash: Value is map[string]string.
 //   - EncodingNative + ValueTypeSet: Value is map[string]struct{}.
-//   - EncodingNative + ValueTypeSortedSet: Value is provider-specific
-//     (built-in encoder produces a serialisable form documented alongside
-//     the format spec in ADR-0005).
+//   - EncodingNative + ValueTypeSortedSet: Value is map[string]float64
+//     (member → score). Conversion to/from the cache-internal sorted-set
+//     type happens in pkg/persistence at the boundary so the api stays
+//     library-agnostic.
 //
 // Expiration is the absolute Unix-nanosecond deadline; 0 means no expiry.
 // The loader skips entries whose Expiration is in the past at load time.

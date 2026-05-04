@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
 )
 
@@ -18,13 +20,26 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) Name() string { return f.name }
-func (f *fakeProvider) Build() (apipersistence.Source, apipersistence.Snapshotter, error) {
+func (f *fakeProvider) Build(_ apiconfig.PluginConfig) (apipersistence.Source, apipersistence.Snapshotter, error) {
 	f.buildCall++
 	if f.buildErr != nil {
 		return nil, nil, f.buildErr
 	}
 	return &fakeSource{}, &fakeSnap{}, nil
 }
+
+// noopConfig is a stand-in PluginConfig for registry tests — they
+// don't exercise key reads, just routing.
+type noopConfig struct{}
+
+func (noopConfig) GetString(string) string          { return "" }
+func (noopConfig) GetInt(string) int                { return 0 }
+func (noopConfig) GetInt64(string) int64            { return 0 }
+func (noopConfig) GetBool(string) bool              { return false }
+func (noopConfig) GetDuration(string) time.Duration { return 0 }
+func (noopConfig) GetStringSlice(string) []string   { return nil }
+func (noopConfig) IsSet(string) bool                { return false }
+func (noopConfig) SetDefault(string, any)           {}
 
 type fakeSource struct{}
 
@@ -62,7 +77,7 @@ func TestRegistry_Register_RoundTrip(t *testing.T) {
 		t.Errorf("name = %q, want test-provider", got.Name())
 	}
 
-	src, snap, err := got.Build()
+	src, snap, err := got.Build(noopConfig{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
