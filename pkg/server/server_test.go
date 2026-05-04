@@ -28,7 +28,7 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
 
-	srv := New("127.0.0.1:0", c, e, "", requirePass, br, wm)
+	srv := New("127.0.0.1:0", c, e, requirePass, br, wm)
 	srv.SetTracker(serverOps.NewTracker())
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -159,7 +159,7 @@ func TestServer_Shutdown(t *testing.T) {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	srv := New("127.0.0.1:0", c, e, "", "", br, wm)
+	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	srv.SetTracker(serverOps.NewTracker())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -216,7 +216,7 @@ func TestServer_TCPNoDelay(t *testing.T) {
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
 
-	srv := New("127.0.0.1:0", c, e, "", "", br, wm)
+	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	srv.SetTracker(serverOps.NewTracker())
 
 	inner, err := net.Listen("tcp", "127.0.0.1:0")

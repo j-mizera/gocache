@@ -38,9 +38,6 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Server.Port != 6379 {
 		t.Errorf("expected port 6379, got %d", cfg.Server.Port)
 	}
-	if cfg.Persistence.SnapshotFile != "snapshot.dat" {
-		t.Errorf("expected snapshot.dat, got %s", cfg.Persistence.SnapshotFile)
-	}
 	if cfg.Persistence.SnapshotInterval != 5*time.Minute {
 		t.Errorf("expected 5m, got %v", cfg.Persistence.SnapshotInterval)
 	}
@@ -71,9 +68,6 @@ func TestLoad_YAML(t *testing.T) {
 	if cfg.Server.Port != 7379 {
 		t.Errorf("expected 7379, got %d", cfg.Server.Port)
 	}
-	if cfg.Persistence.SnapshotFile != "yaml_test.dat" {
-		t.Errorf("expected yaml_test.dat, got %s", cfg.Persistence.SnapshotFile)
-	}
 	if cfg.Persistence.SnapshotInterval != 10*time.Minute {
 		t.Errorf("expected 10m, got %v", cfg.Persistence.SnapshotInterval)
 	}
@@ -103,9 +97,6 @@ func TestLoad_JSON(t *testing.T) {
 	}
 	if cfg.Server.Port != 7379 {
 		t.Errorf("expected 7379, got %d", cfg.Server.Port)
-	}
-	if cfg.Persistence.SnapshotFile != "json_test.dat" {
-		t.Errorf("expected json_test.dat, got %s", cfg.Persistence.SnapshotFile)
 	}
 	if cfg.Persistence.SnapshotInterval != 10*time.Minute {
 		t.Errorf("expected 10m, got %v", cfg.Persistence.SnapshotInterval)

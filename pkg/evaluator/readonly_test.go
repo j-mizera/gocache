@@ -84,8 +84,7 @@ func TestSpec_ReadOnly_Classification(t *testing.T) {
 		resp.CmdMulti:        false,
 		resp.CmdDiscard:      false,
 		resp.CmdExec:         false,
-		resp.CmdSnapshot:     false,
-		resp.CmdLoadSnapshot: false,
+		resp.CmdSnapshot: false,
 
 		// Server
 		resp.CmdDBSize:   true,

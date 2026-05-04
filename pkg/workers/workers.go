@@ -117,19 +117,15 @@ func safeInterval(d time.Duration) time.Duration {
 	return d
 }
 
-// SnapshotWorker periodically saves a snapshot of the cache to disk.
+// SnapshotWorker periodically calls the persistence coordinator's
+// snapshot entry point. The worker owns scheduling (interval ticker)
+// and operation lifecycle; the plugin owns where the snapshot lands.
 type SnapshotWorker struct {
 	baseWorker
-	// file is retained for op-enrichment and log correlation only — the
-	// snapshotter owns the durable path. Hot-reload updates both via
-	// UpdateFile (worker copy) + the wired SnapshotInvoker (the actual
-	// path the on-disk write hits).
-	file        string
-	fileChan    chan string
 	snapshotter pkgcommand.SnapshotInvoker
 }
 
-func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration, file string) *SnapshotWorker {
+func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration) *SnapshotWorker {
 	return &SnapshotWorker{
 		baseWorker: baseWorker{
 			cache:        c,
@@ -138,8 +134,6 @@ func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration,
 			stopChan:     make(chan struct{}),
 			intervalChan: make(chan time.Duration, 1),
 		},
-		file:     file,
-		fileChan: make(chan string, 1),
 	}
 }
 
@@ -151,14 +145,6 @@ func (w *SnapshotWorker) SetSnapshotInvoker(s pkgcommand.SnapshotInvoker) {
 	w.snapshotter = s
 }
 
-// UpdateFile updates the snapshot file path at runtime. The worker copy
-// is used only for log/op enrichment — the actual durable path lives on
-// the registered Snapshotter and must be updated independently (config
-// reload calls both in main.go).
-func (w *SnapshotWorker) UpdateFile(file string) {
-	w.fileChan <- file
-}
-
 func (w *SnapshotWorker) Start(parentCtx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	w.wg.Add(1)
@@ -167,11 +153,7 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				file := w.file
 				op, opCtx := w.startOp(parentCtx, ops.TypeSnapshot)
-				if op != nil {
-					op.Enrich(command.FileKey, file)
-				}
 				if w.snapshotter == nil {
 					logger.Warn(opCtx).Msg("snapshot scheduled but no snapshotter registered")
 					w.failOp(op, "no snapshotter registered")
@@ -182,7 +164,7 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 						logger.Warn(opCtx).Err(err).Msg("snapshot save failed")
 						w.failOp(op, err.Error())
 					} else {
-						logger.Debug(opCtx).Str("file", file).Msg("snapshot saved")
+						logger.Debug(opCtx).Msg("snapshot saved")
 						w.completeOp(op)
 					}
 				}); err != nil {
@@ -191,8 +173,6 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 				}
 			case d := <-w.intervalChan:
 				ticker.Reset(safeInterval(d))
-			case f := <-w.fileChan:
-				w.file = f
 			case <-w.stopChan:
 				ticker.Stop()
 				return

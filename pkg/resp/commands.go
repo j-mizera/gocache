@@ -45,8 +45,7 @@ const (
 	CmdExec    = "EXEC"
 	CmdDiscard = "DISCARD"
 
-	CmdSnapshot     = "SNAPSHOT"
-	CmdLoadSnapshot = "LOAD_SNAPSHOT"
+	CmdSnapshot = "SNAPSHOT"
 
 	CmdDBSize = "DBSIZE"
 	CmdInfo   = "INFO"

@@ -35,7 +35,7 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 	coord := persistence.New(gob)
 	coord.RegisterSnapshotter(gob)
 
-	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file)
+	w := NewSnapshotWorker(c, e, 50*time.Millisecond)
 	w.SetSnapshotInvoker(coord)
 	w.Start(context.Background())
 	defer w.Stop()
@@ -106,38 +106,11 @@ func TestWorker_UpdateInterval(t *testing.T) {
 	w.UpdateInterval(50 * time.Millisecond)
 }
 
-func TestSnapshotWorker_UpdateFile(t *testing.T) {
-	c, e := setup(t)
-	e.Dispatch(context.Background(), func() {
-		_ = c.RawSet(context.Background(), "k", "v", 0)
-	})
-
-	dir := t.TempDir()
-	file1 := filepath.Join(dir, "snap1.dat")
-	file2 := filepath.Join(dir, "snap2.dat")
-
-	gob := persistence.NewGobSource(file1)
-	coord := persistence.New(gob)
-	coord.RegisterSnapshotter(gob)
-
-	w := NewSnapshotWorker(c, e, 50*time.Millisecond, file1)
-	w.SetSnapshotInvoker(coord)
-	w.Start(context.Background())
-
-	// Switch to file2 — both the worker (for op-enrichment) and the gob
-	// shim (for the actual on-disk path) need to be told. main.go does
-	// the same dual update on config reload.
-	w.UpdateFile(file2)
-	gob.SetFilename(file2)
-	time.Sleep(200 * time.Millisecond)
-
-	// Stop before TempDir cleanup to avoid race on directory removal.
-	w.Stop()
-
-	if _, err := os.Stat(file2); os.IsNotExist(err) {
-		t.Error("expected snapshot at updated file path")
-	}
-}
+// Hot-reload of the snapshot file path is now the plugin's
+// responsibility — it watches its own viper subsection (see
+// pkg/persistence/v1snap/init.go). The worker no longer holds the
+// filename, so there's no SnapshotWorker-side hot-reload path to
+// test here.
 
 func TestSafeInterval_ZeroDefault(t *testing.T) {
 	d := safeInterval(0)

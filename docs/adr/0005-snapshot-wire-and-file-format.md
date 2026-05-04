@@ -1,7 +1,7 @@
 ---
 title: ADR-0005 Snapshot wire and file format
 description: Snapshots use a custom binary format (varint, magic header, CRC32, optional zstd) replacing Go's gob encoder
-status: proposed
+status: accepted
 date: 2026-05-03
 deciders: [witherxse]
 related:
