@@ -3,10 +3,11 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"testing"
+
 	"gocache/pkg/cache"
 	"gocache/pkg/persistence"
-	"os"
-	"testing"
 )
 
 func TestCache_Basic(t *testing.T) {
@@ -31,30 +32,32 @@ func TestCache_Basic(t *testing.T) {
 }
 
 func TestCache_Snapshot(t *testing.T) {
-	filename := "test_cache_snapshot.dat"
-	defer os.Remove(filename)
+	file := filepath.Join(t.TempDir(), "test_cache_snapshot.dat")
 
 	c := cache.New()
 	if err := c.RawSet(context.Background(), "snap", "data", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	err := persistence.SaveSnapshot(context.Background(), filename, c)
-	if err != nil {
-		t.Fatalf("failed to save snapshot: %v", err)
+	gob := persistence.NewGobSource(file)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
+	if err := coord.Snapshot(context.Background(), c); err != nil {
+		t.Fatalf("save: %v", err)
 	}
 
-	cacheInstance2 := cache.New()
-	err = persistence.LoadSnapshot(context.Background(), filename, cacheInstance2)
-	if err != nil {
-		t.Fatalf("failed to load snapshot: %v", err)
+	c2 := cache.New()
+	coord2 := persistence.New(persistence.NewGobSource(file))
+	if _, err := coord2.BootInto(context.Background(), c2); err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
-	val, found := cacheInstance2.RawGet("snap")
+	val, found := c2.RawGet("snap")
 	if !found {
 		t.Fatal("snap key not loaded")
 	}
-	if got := string(cacheInstance2.ResolvePacked(val)); got != "data" {
+	if got := string(c2.ResolvePacked(val)); got != "data" {
 		t.Errorf("expected %q, got %q", "data", got)
 	}
 }

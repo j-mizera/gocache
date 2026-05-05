@@ -80,11 +80,14 @@ func TestSpec_ReadOnly_Classification(t *testing.T) {
 		resp.CmdZRank:  true,
 		resp.CmdZCount: true,
 
-		// Transactions / persistence — never ReadOnly
-		resp.CmdMulti:        false,
-		resp.CmdDiscard:      false,
-		resp.CmdExec:         false,
+		// Transactions / persistence
+		resp.CmdMulti:    false,
+		resp.CmdDiscard:  false,
+		resp.CmdExec:     false,
 		resp.CmdSnapshot: false,
+		resp.CmdSave:     false,
+		resp.CmdBgsave:   false,
+		resp.CmdLastsave: true,
 
 		// Server
 		resp.CmdDBSize:   true,

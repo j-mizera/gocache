@@ -40,6 +40,7 @@ type MutationEmitter interface {
 // client rather than silently no-oping a SAVE command.
 type SnapshotInvoker interface {
 	Snapshot(ctx context.Context, target *cache.Cache) error
+	LastSaveUnix() int64
 }
 
 // Re-export shared types from api/command so existing importers don't break.
