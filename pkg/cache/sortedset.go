@@ -49,6 +49,19 @@ func (z *SortedSet) Card() int {
 	return len(z.members)
 }
 
+// Members returns a copy of the member→score map. Used at the
+// persistence boundary (pkg/persistence) to flatten the sorted set
+// into a generic Go shape so plugins never see the concrete
+// SortedSet type — see ADR-0008. The copy keeps callers from
+// mutating the internal map.
+func (z *SortedSet) Members() map[string]float64 {
+	out := make(map[string]float64, len(z.members))
+	for k, v := range z.members {
+		out[k] = v
+	}
+	return out
+}
+
 // ScoredMember represents a member with its score
 type ScoredMember struct {
 	Member string

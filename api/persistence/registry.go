@@ -3,10 +3,12 @@ package persistence
 import (
 	"fmt"
 	"sync"
+
+	apiconfig "gocache/api/config"
 )
 
 // SnapshotProvider is the registration handle for an embedded snapshot
-// plugin (ADR-0007). Each plugin's init() calls RegisterSnapshotProvider
+// plugin (ADR-0008). Each plugin's init() calls RegisterSnapshotProvider
 // with a value of this type; cmd/server/main.go resolves the registered
 // provider via SnapshotProviderRegistered.
 //
@@ -15,34 +17,33 @@ import (
 // backend is a new package + a new blank import, with no change to the
 // core surface.
 //
-// The provider is responsible for its own configuration, including hot
-// reload. Plugins typically read their config via the server's viper
-// instance (see pkg/config.Viper / pkg/config.OnReload) — that gives
-// each plugin its own subsection and watcher without dragging
-// plugin-specific keys into api/config. The server only knows that
-// "there is a snapshot provider"; it doesn't know what file format,
-// what filename, or what tuning knobs the plugin uses.
+// The provider is responsible for its own configuration. The server
+// hands a typed apiconfig.PluginConfig view to Build; the plugin reads
+// scoped keys ("file", "flush") and never names the underlying
+// configuration library. Plugins that want hot reload implement
+// apiconfig.ReloadHandler — the server type-asserts after Build
+// returns and registers the handler on the plugin's behalf.
 //
 // AOF and replication will get parallel registration interfaces
 // (RegisterAOFProvider, RegisterReplicationSink) when those plugins
 // land — same pattern, different capability.
 type SnapshotProvider interface {
 	// Name identifies the provider for logs and diagnostics. Should
-	// be a stable plugin identifier (e.g. "v1-snapshot"), not a
-	// format string.
+	// be a stable plugin identifier (e.g. "snapshot"), not a format
+	// string.
 	Name() string
 
 	// Build constructs the Source / Snapshotter pair for this provider.
-	// The plugin reads its own configuration before constructing,
-	// typically from the server's viper instance (see pkg/config.Viper).
-	// Build is called exactly once per server lifetime, after config
-	// load, before any cache traffic.
+	// The plugin reads its own configuration via cfg — keys are scoped
+	// to the plugin's own subsection so the plugin reads "file" rather
+	// than the full path. Build is called exactly once per server
+	// lifetime, after config load, before any cache traffic.
 	//
 	// Returns a non-nil error if the plugin cannot configure itself
 	// (e.g., required keys missing, file unwritable). The server
 	// surfaces the error and may continue without persistence
 	// depending on policy.
-	Build() (Source, Snapshotter, error)
+	Build(cfg apiconfig.PluginConfig) (Source, Snapshotter, error)
 }
 
 var (

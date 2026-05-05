@@ -68,9 +68,14 @@ func bindFlag(v *viper.Viper, key string, flags *pflag.FlagSet, flagName string)
 	}
 }
 
-// Load builds a Viper instance from flags, env vars, and config file, then returns the parsed Config.
+// Load assembles configuration from flags, env vars, and the config
+// file, returning the parsed Config. The underlying configuration
+// store is captured in pkg/config's package-private handle so Reload,
+// ConfigFileUsed, PluginConfigFor, and the reload multiplexer can use
+// it without exposing the implementation library across the boundary.
+//
 // Priority: CLI flags > env vars (GOCACHE_*) > config file > defaults
-func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
+func Load(flags *pflag.FlagSet) (*Config, error) {
 	v := viper.New()
 
 	// Defaults
@@ -113,7 +118,7 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			return nil, nil, fmt.Errorf("failed to read config file: %w", err)
+			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 	}
 
@@ -134,26 +139,32 @@ func Load(flags *pflag.FlagSet) (*Config, *viper.Viper, error) {
 
 	cfg, err := Unmarshal(v)
 	if err != nil {
-		return nil, v, err
+		return nil, err
 	}
 
-	// Wire viper to the global handle and the reload multiplexer so
-	// embedded plugins (and other callers) can subscribe to config
-	// reloads via OnReload. Viper's native OnConfigChange is
-	// single-callback; we install one fan-out handler here and let
-	// callers register independent callbacks against it.
-	setServerViper(v)
+	// Install the package-private handle so Reload, ConfigFileUsed,
+	// PluginConfigFor, and the reload multiplexer can read from it
+	// without re-exporting the underlying config library. Then wire
+	// the file watcher: the underlying single-callback hook is
+	// intercepted here so OnReload / OnPluginReload subscribers can
+	// fan out independently.
+	installHandle(v)
 	v.OnConfigChange(func(_ fsnotify.Event) {
-		fireReload(v)
+		fireReload()
 	})
 	v.WatchConfig()
 
-	return cfg, v, nil
+	return cfg, nil
 }
 
-// Reload re-reads the current Viper state into a fresh Config struct.
-// Used by the hot-reload callback after a config file change.
-func Reload(v *viper.Viper) (*Config, error) {
+// Reload re-reads the current configuration store into a fresh Config
+// struct. Used by the hot-reload callback after a config file change.
+// Returns an error if Load has not yet run.
+func Reload() (*Config, error) {
+	v := serverConfig.Load()
+	if v == nil {
+		return nil, fmt.Errorf("config: Reload called before Load")
+	}
 	return Unmarshal(v)
 }
 

@@ -1,4 +1,4 @@
-package v1snap
+package snapshot
 
 import (
 	"bufio"
@@ -59,7 +59,7 @@ func NewSnapshotter(filename string) *Snapshotter {
 }
 
 // Name implements api/persistence.Snapshotter.
-func (s *Snapshotter) Name() string { return "v1-snapshot" }
+func (s *Snapshotter) Name() string { return "snapshot" }
 
 // SetFilename swaps the on-disk path. Concurrent with in-flight
 // SaveSnapshot — the path-read inside SaveSnapshot grabs an RLock so
@@ -94,13 +94,13 @@ func (s *Snapshotter) currentLSN() apipersistence.LSN {
 func (s *Snapshotter) SaveSnapshot(ctx context.Context, src apipersistence.SnapshotSource) error {
 	filename := s.currentFilename()
 	if filename == "" {
-		return errors.New("v1snap: empty filename")
+		return errors.New("snapshot: empty filename")
 	}
 
 	dir := filepath.Dir(filename)
-	tmp, err := os.CreateTemp(dir, ".v1snap-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".snapshot-*.tmp")
 	if err != nil {
-		return fmt.Errorf("v1snap: create temp %s: %w", filename, err)
+		return fmt.Errorf("snapshot: create temp %s: %w", filename, err)
 	}
 	tmpName := tmp.Name()
 	// Best-effort cleanup on every failure path; a successful rename
@@ -113,14 +113,14 @@ func (s *Snapshotter) SaveSnapshot(ctx context.Context, src apipersistence.Snaps
 
 	if err := writeHeader(w); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("v1snap: write header: %w", err)
+		return fmt.Errorf("snapshot: write header: %w", err)
 	}
 
 	// Optional META(LSN) record up front.
 	if lsn := s.currentLSN(); lsn != apipersistence.ZeroLSN {
 		if err := writeMetaLSN(w, lsn); err != nil {
 			_ = tmp.Close()
-			return fmt.Errorf("v1snap: write META(LSN): %w", err)
+			return fmt.Errorf("snapshot: write META(LSN): %w", err)
 		}
 	}
 
@@ -129,7 +129,7 @@ func (s *Snapshotter) SaveSnapshot(ctx context.Context, src apipersistence.Snaps
 	enc, err := zstd.NewWriter(nil) // nil writer; we use EncodeAll
 	if err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("v1snap: zstd encoder init: %w", err)
+		return fmt.Errorf("snapshot: zstd encoder init: %w", err)
 	}
 	defer enc.Close()
 
@@ -141,11 +141,11 @@ func (s *Snapshotter) SaveSnapshot(ctx context.Context, src apipersistence.Snaps
 		}
 		if err != nil {
 			_ = tmp.Close()
-			return fmt.Errorf("v1snap: read entry %d: %w", count, err)
+			return fmt.Errorf("snapshot: read entry %d: %w", count, err)
 		}
 		if err := writeDataRecord(w, e, enc); err != nil {
 			_ = tmp.Close()
-			return fmt.Errorf("v1snap: write entry %d (key=%q): %w", count, e.Key, err)
+			return fmt.Errorf("snapshot: write entry %d (key=%q): %w", count, e.Key, err)
 		}
 		count++
 	}
@@ -154,27 +154,27 @@ func (s *Snapshotter) SaveSnapshot(ctx context.Context, src apipersistence.Snaps
 	// only — we don't fold the CRC bytes back into the hasher.
 	if err := bw.Flush(); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("v1snap: flush: %w", err)
+		return fmt.Errorf("snapshot: flush: %w", err)
 	}
 	footer := make([]byte, footerLen)
 	binary.LittleEndian.PutUint32(footer, hasher.Sum32())
 	if _, err := tmp.Write(footer); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("v1snap: write footer: %w", err)
+		return fmt.Errorf("snapshot: write footer: %w", err)
 	}
 
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("v1snap: sync %s: %w", filename, err)
+		return fmt.Errorf("snapshot: sync %s: %w", filename, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("v1snap: close %s: %w", filename, err)
+		return fmt.Errorf("snapshot: close %s: %w", filename, err)
 	}
 	if err := os.Rename(tmpName, filename); err != nil {
-		return fmt.Errorf("v1snap: rename %s: %w", filename, err)
+		return fmt.Errorf("snapshot: rename %s: %w", filename, err)
 	}
 
-	logger.Info(ctx).Str("file", filename).Int("entries", count).Msg("v1snap: snapshot saved")
+	logger.Info(ctx).Str("file", filename).Int("entries", count).Msg("snapshot: snapshot saved")
 	return nil
 }
 
@@ -278,7 +278,7 @@ func encodingTag(enc apipersistence.Encoding) (byte, error) {
 	case apipersistence.EncodingPacked:
 		return encPacked, nil
 	default:
-		return 0, fmt.Errorf("v1snap: unknown Encoding %d", enc)
+		return 0, fmt.Errorf("snapshot: unknown Encoding %d", enc)
 	}
 }
 
@@ -299,7 +299,7 @@ func valueTypeTag(vt apipersistence.ValueType) byte {
 	case apipersistence.ValueTypeSortedSet:
 		return typeZSet
 	default:
-		panic(fmt.Sprintf("v1snap: unknown ValueType %d", vt))
+		panic(fmt.Sprintf("snapshot: unknown ValueType %d", vt))
 	}
 }
 

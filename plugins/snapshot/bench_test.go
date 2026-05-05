@@ -1,4 +1,4 @@
-package v1snap
+package snapshot
 
 import (
 	"context"

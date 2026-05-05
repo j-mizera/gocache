@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	apiconfig "gocache/api/config"
 	"gocache/api/command"
 	"gocache/api/crashdump"
 	"gocache/api/embedded"
@@ -36,11 +37,11 @@ import (
 	"gocache/pkg/workers"
 
 	// Embedded persistence plugin — registers itself via init() per
-	// ADR-0007. Selecting a different snapshot backend = swap this
-	// import for the new plugin's package. The plugin reads its own
-	// config from the server's viper (see pkg/config.Viper) so main.go
-	// stays plugin-agnostic.
-	_ "gocache/pkg/persistence/v1snap"
+	// ADR-0008 (config contract) and ADR-0006 (physical location under
+	// plugins/). Selecting a different snapshot backend is a swap of
+	// this import line. The plugin receives a typed apiconfig.PluginConfig
+	// view and never imports pkg/* — the layering rule stays mechanical.
+	_ "gocache/plugins/snapshot"
 
 	// Embedded plugins — compile-time-linked observability hooks that run
 	// before config.Load and survive panics. See pkg/embedded for details.
@@ -53,7 +54,6 @@ import (
 	_ "gocache/plugins/otlp"
 
 	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 )
 
 // Entry-point defaults.
@@ -151,7 +151,7 @@ func main() {
 
 	// Load configuration: CLI flags > env vars (GOCACHE_*) > config file > defaults
 	_ = bootstate.Write(bootStateFile, stageConfigLoad)
-	initialCfg, v, err := config.Load(pflag.CommandLine)
+	initialCfg, err := config.Load(pflag.CommandLine)
 	if err != nil {
 		// Initialize logger with default level for fatal message
 		logger.Init("info")
@@ -182,7 +182,7 @@ func main() {
 	if n := embedded.Count(); n > 0 {
 		logger.InfoNoCtx().Int("count", n).Strs("names", embedded.Names()).Msg("embedded plugins loaded")
 	}
-	if cfgFile := v.ConfigFileUsed(); cfgFile != "" {
+	if cfgFile := config.ConfigFileUsed(); cfgFile != "" {
 		logger.InfoNoCtx().Str("file", cfgFile).Msg("config loaded")
 	}
 	logger.InfoNoCtx().Str("addr", cfg.Server.GetAddr()).Msg("listening on")
@@ -260,7 +260,7 @@ func main() {
 	//
 	// The active snapshot backend comes from whichever embedded plugin
 	// was blank-imported above (ADR-0007). The plugin self-configures
-	// from the server's viper instance; main.go knows nothing about
+	// from the typed PluginConfig view; main.go knows nothing about
 	// formats, files, or per-plugin tunables.
 	snapSource, snapSnapshotter := buildSnapshotBackend(ctx)
 	coordinator := persistence.New(snapSource)
@@ -328,18 +328,17 @@ func main() {
 	cleanupWorker.Start(ctx)
 
 	// Hot reload: server-orchestration knobs only. Plugins subscribe
-	// to config.OnReload independently (per ADR-0007) and handle their
-	// own re-config there. Viper.WatchConfig + viper.OnConfigChange are
-	// installed by config.Load — this callback is one of many that the
-	// multiplexer fans out to.
-	config.OnReload(func(_ *viper.Viper) {
+	// to config.OnPluginReload independently (per ADR-0008) and handle
+	// their own re-config there. The fsnotify watcher + fan-out
+	// multiplexer are installed inside config.Load.
+	config.OnReload(func() {
 		reloadOp := tracker.Start(ops.TypeConfigReload, "")
 		reloadCtx := ops.WithContext(context.Background(), reloadOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(reloadCtx, reloadOp)
 		}
 
-		newCfg, err := config.Reload(v)
+		newCfg, err := config.Reload()
 		if err != nil {
 			logger.Warn(reloadCtx).Err(err).Msg("failed to parse updated config")
 			reloadOp.Fail(err.Error())
@@ -503,24 +502,32 @@ func handleShutdown(
 }
 
 // buildSnapshotBackend resolves the registered embedded snapshot
-// plugin (ADR-0007) and asks it to build the Source + Snapshotter
-// pair. The plugin owns its own configuration: where to read/write,
-// what format, what tunables. main.go knows nothing about any of it.
+// plugin (ADR-0008) and asks it to build the Source + Snapshotter pair.
+// The plugin owns its own configuration: where to read/write, what
+// format, what tunables. main.go knows nothing about any of it.
 //
 // Returns nil source + snapshotter when no plugin was compiled in;
 // the Coordinator handles nil gracefully (no recovery + ErrNoSnapshotter
 // from save calls). A warning surfaces the misbuild so it doesn't
 // pass silently.
+//
+// Plugins that want hot reload implement apiconfig.ReloadHandler — the
+// server type-asserts here and registers OnPluginReload on the plugin's
+// behalf. Plugins with no runtime-tunable knobs simply skip the
+// interface and the assertion fails cleanly.
 func buildSnapshotBackend(ctx context.Context) (apipersistence.Source, apipersistence.Snapshotter) {
 	provider := apipersistence.SnapshotProviderRegistered()
 	if provider == nil {
 		logger.Warn(ctx).Msg("persistence: no snapshot plugin compiled in; snapshots disabled")
 		return nil, nil
 	}
-	src, snap, err := provider.Build()
+	src, snap, err := provider.Build(config.PluginConfigFor(provider.Name()))
 	if err != nil {
 		logger.Error(ctx).Err(err).Str("plugin", provider.Name()).Msg("persistence: snapshot plugin Build failed; snapshots disabled")
 		return nil, nil
+	}
+	if rh, ok := provider.(apiconfig.ReloadHandler); ok {
+		config.OnPluginReload(provider.Name(), rh.OnConfigReload)
 	}
 	logger.Info(ctx).Str("plugin", provider.Name()).Msg("persistence: snapshot backend selected")
 	return src, snap

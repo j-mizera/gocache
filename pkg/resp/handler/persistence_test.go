@@ -16,7 +16,7 @@ import (
 // TestHandler_Snapshot exercises SAVE through the coordinator + a
 // registered snapshotter. The plugin owns format/filename — we use the
 // gob shim here as a stand-in for the registered persistence plugin so
-// the test stays plugin-agnostic. (The real binary uses v1snap; the
+// the test stays plugin-agnostic. (The real binary uses the snapshot plugin; the
 // gob shim still implements both Source and Snapshotter for tests.)
 func TestHandler_Snapshot(t *testing.T) {
 	dir := t.TempDir()

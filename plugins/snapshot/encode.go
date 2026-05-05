@@ -1,4 +1,4 @@
-package v1snap
+package snapshot
 
 import (
 	"encoding/binary"
@@ -7,18 +7,18 @@ import (
 	"sort"
 
 	apipersistence "gocache/api/persistence"
-	"gocache/pkg/cache"
 )
 
 // encodeNativeValue serialises the EncNative shape of a SnapshotEntry's
-// Value into the v1 wire blob. The concrete type expected for each
-// ValueType matches what the cache's Range yields:
+// Value into the v1 wire blob. Per ADR-0008, plugins receive only
+// generic Go primitives at this boundary — no pkg/cache types — so the
+// concrete type expected for each ValueType is:
 //
 //   - Bytes:     []byte (or string for legacy snapshots)
 //   - List:      []string
 //   - Hash:      map[string]string
 //   - Set:       map[string]struct{}
-//   - SortedSet: *cache.SortedSet
+//   - SortedSet: map[string]float64 (member → score)
 //
 // Encoded forms are documented in format.go. Native encodings for
 // collections sort their entries to make the output byte-deterministic.
@@ -29,29 +29,29 @@ func encodeNativeValue(vt apipersistence.ValueType, value any) ([]byte, error) {
 	case apipersistence.ValueTypeList:
 		v, ok := value.([]string)
 		if !ok {
-			return nil, fmt.Errorf("v1snap: list native value: want []string, got %T", value)
+			return nil, fmt.Errorf("snapshot: list native value: want []string, got %T", value)
 		}
 		return encodeStringSlice(v), nil
 	case apipersistence.ValueTypeHash:
 		v, ok := value.(map[string]string)
 		if !ok {
-			return nil, fmt.Errorf("v1snap: hash native value: want map[string]string, got %T", value)
+			return nil, fmt.Errorf("snapshot: hash native value: want map[string]string, got %T", value)
 		}
 		return encodeStringMap(v), nil
 	case apipersistence.ValueTypeSet:
 		v, ok := value.(map[string]struct{})
 		if !ok {
-			return nil, fmt.Errorf("v1snap: set native value: want map[string]struct{}, got %T", value)
+			return nil, fmt.Errorf("snapshot: set native value: want map[string]struct{}, got %T", value)
 		}
 		return encodeStringSet(v), nil
 	case apipersistence.ValueTypeSortedSet:
-		v, ok := value.(*cache.SortedSet)
+		v, ok := value.(map[string]float64)
 		if !ok {
-			return nil, fmt.Errorf("v1snap: zset native value: want *cache.SortedSet, got %T", value)
+			return nil, fmt.Errorf("snapshot: zset native value: want map[string]float64, got %T", value)
 		}
 		return encodeSortedSet(v), nil
 	default:
-		return nil, fmt.Errorf("v1snap: unknown ValueType %d", vt)
+		return nil, fmt.Errorf("snapshot: unknown ValueType %d", vt)
 	}
 }
 
@@ -65,7 +65,7 @@ func encodeBytes(value any) ([]byte, error) {
 	case string:
 		return []byte(v), nil
 	default:
-		return nil, fmt.Errorf("v1snap: string native value: want []byte or string, got %T", value)
+		return nil, fmt.Errorf("snapshot: string native value: want []byte or string, got %T", value)
 	}
 }
 
@@ -112,25 +112,35 @@ func encodeStringSet(s map[string]struct{}) []byte {
 
 // encodeSortedSet writes: varint count + count×(varint member-len +
 // member + 8B big-endian uint64 score-bits). Sorted by (score, member)
-// so the output matches cache.SortedSet.GetSortedMembers ordering.
-func encodeSortedSet(z *cache.SortedSet) []byte {
-	if z == nil {
-		out := make([]byte, 0, 1)
-		return binary.AppendUvarint(out, 0)
+// for byte-deterministic output — same ordering the cache exposes via
+// its sorted-set range methods.
+func encodeSortedSet(members map[string]float64) []byte {
+	type pair struct {
+		member string
+		score  float64
 	}
-	pairs := z.GetSortedMembers()
-	// Preallocate: 1 byte varint count (typical) + per-pair size.
+	pairs := make([]pair, 0, len(members))
+	for m, s := range members {
+		pairs = append(pairs, pair{member: m, score: s})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].score != pairs[j].score {
+			return pairs[i].score < pairs[j].score
+		}
+		return pairs[i].member < pairs[j].member
+	})
+
 	size := 1
 	for _, p := range pairs {
-		size += binary.MaxVarintLen64 + len(p.Member) + 8
+		size += binary.MaxVarintLen64 + len(p.member) + 8
 	}
 	out := make([]byte, 0, size)
 	out = binary.AppendUvarint(out, uint64(len(pairs)))
 	scoreBuf := make([]byte, 8)
 	for _, p := range pairs {
-		out = binary.AppendUvarint(out, uint64(len(p.Member)))
-		out = append(out, p.Member...)
-		binary.BigEndian.PutUint64(scoreBuf, math.Float64bits(p.Score))
+		out = binary.AppendUvarint(out, uint64(len(p.member)))
+		out = append(out, p.member...)
+		binary.BigEndian.PutUint64(scoreBuf, math.Float64bits(p.score))
 		out = append(out, scoreBuf...)
 	}
 	return out

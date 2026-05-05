@@ -1,7 +1,7 @@
 ---
 title: ADR-0008 Plugin config and reload contract is library-agnostic
 description: Embedded plugins receive a typed PluginConfig view and an optional ReloadHandler — the server's choice of config library (viper) is fully internal and never leaks across the api/ boundary
-status: proposed
+status: accepted
 date: 2026-05-04
 deciders: [witherxse]
 related:

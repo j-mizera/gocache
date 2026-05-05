@@ -1,4 +1,4 @@
-// Package v1snap implements the v1 snapshot wire and file format
+// Package snapshot implements the v1 snapshot wire and file format
 // described in ADR-0005. It is the successor to the legacy gob-encoded
 // snapshot (pkg/persistence.GobSource) and ships behind a config flag
 // (persistence.format: v1) so deployments can opt in independently of
@@ -38,11 +38,11 @@
 // The first byte of every body is the type tag. Defined values:
 //
 //   - 0x00  TypeMeta    — stream metadata (LSN cursor, future flags)
-//   - 0x01  TypeString  — cache.ValueType.Bytes
-//   - 0x02  TypeList    — cache.ValueType.List
-//   - 0x03  TypeHash    — cache.ValueType.Hash
-//   - 0x04  TypeSet     — cache.ValueType.Set
-//   - 0x05  TypeZSet    — cache.ValueType.SortedSet
+//   - 0x01  TypeString  — apipersistence.ValueTypeBytes
+//   - 0x02  TypeList    — apipersistence.ValueTypeList
+//   - 0x03  TypeHash    — apipersistence.ValueTypeHash
+//   - 0x04  TypeSet     — apipersistence.ValueTypeSet
+//   - 0x05  TypeZSet    — apipersistence.ValueTypeSortedSet
 //
 // Unknown type tags are not silently skipped — the reader returns an
 // error so a forward-compatible stream consumed by an older binary
@@ -103,7 +103,7 @@
 // stats) lives in additional sub-tags. Unknown sub-tags are tolerated:
 // the reader skips them via the outer record's varint length so older
 // readers stay forward-compatible with new META variants.
-package v1snap
+package snapshot
 
 // File-format constants. Not exported as "FormatV1" wraps everything:
 // callers don't construct format bytes themselves, they go through
@@ -148,8 +148,8 @@ const (
 	flagZstd byte = 1 << 0
 )
 
-// Encoding wire values. These mirror api/persistence.Encoding /
-// pkg/cache.Encoding so the cast is a numeric round-trip.
+// Encoding wire values. These mirror api/persistence.Encoding so the
+// cast at the boundary is a numeric round-trip.
 const (
 	encNative byte = 0x00
 	encPacked byte = 0x01

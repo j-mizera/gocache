@@ -1,4 +1,4 @@
-package v1snap
+package snapshot
 
 import (
 	"bytes"
@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	apipersistence "gocache/api/persistence"
-	"gocache/pkg/cache"
 )
 
 // sliceSrc is a SnapshotSource backed by an in-memory slice. Used by
@@ -138,23 +137,27 @@ func TestRoundTrip_Set(t *testing.T) {
 }
 
 func TestRoundTrip_SortedSet(t *testing.T) {
-	z := cache.NewSortedSet()
-	z.Add("alpha", 1.5)
-	z.Add("beta", 2.0)
-	z.Add("gamma", 0.5)
+	members := map[string]float64{
+		"alpha": 1.5,
+		"beta":  2.0,
+		"gamma": 0.5,
+	}
 	entries := []apipersistence.SnapshotEntry{
-		{Key: "zset", ValueType: apipersistence.ValueTypeSortedSet, Encoding: apipersistence.EncodingNative, Value: z},
+		{Key: "zset", ValueType: apipersistence.ValueTypeSortedSet, Encoding: apipersistence.EncodingNative, Value: members},
 	}
 	got := roundTrip(t, entries)
-	v, ok := got[0].Value.(*cache.SortedSet)
+	v, ok := got[0].Value.(map[string]float64)
 	if !ok {
 		t.Fatalf("Value type = %T", got[0].Value)
 	}
-	if score, has := v.Score("alpha"); !has || score != 1.5 {
-		t.Errorf("alpha score = %v has=%v", score, has)
+	if score := v["alpha"]; score != 1.5 {
+		t.Errorf("alpha score = %v, want 1.5", score)
 	}
-	if score, has := v.Score("gamma"); !has || score != 0.5 {
-		t.Errorf("gamma score = %v has=%v", score, has)
+	if score := v["gamma"]; score != 0.5 {
+		t.Errorf("gamma score = %v, want 0.5", score)
+	}
+	if len(v) != 3 {
+		t.Errorf("len = %d, want 3", len(v))
 	}
 }
 
