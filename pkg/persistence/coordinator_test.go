@@ -40,8 +40,11 @@ func TestCoordinator_BootInto_GobRoundTrip(t *testing.T) {
 	_ = src.RawSet(context.Background(), "hash", map[string]string{"k": "v"}, 0)
 	src.Unlock()
 
-	if err := SaveSnapshot(context.Background(), file, src); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
+	gob := NewGobSource(file)
+	writer := New(gob)
+	writer.RegisterSnapshotter(gob)
+	if err := writer.Snapshot(context.Background(), src); err != nil {
+		t.Fatalf("Snapshot: %v", err)
 	}
 
 	target := cache.New()
@@ -52,7 +55,6 @@ func TestCoordinator_BootInto_GobRoundTrip(t *testing.T) {
 		t.Fatalf("BootInto: %v", err)
 	}
 	if lsn != apipersistence.ZeroLSN {
-		// Gob shim has no LSN concept, so the recovered LSN is zero.
 		t.Errorf("BootInto: lsn = %d, want %d (gob shim is LSN-naive)", lsn, apipersistence.ZeroLSN)
 	}
 	if got := target.Len(); got != 3 {
@@ -97,8 +99,11 @@ func TestCoordinator_BootInto_SkipsExpired(t *testing.T) {
 	_ = src.RawSet(context.Background(), "alive", "val", 0)
 	src.Unlock()
 
-	if err := SaveSnapshot(context.Background(), file, src); err != nil {
-		t.Fatalf("SaveSnapshot: %v", err)
+	gob := NewGobSource(file)
+	writer := New(gob)
+	writer.RegisterSnapshotter(gob)
+	if err := writer.Snapshot(context.Background(), src); err != nil {
+		t.Fatalf("Snapshot: %v", err)
 	}
 
 	target := cache.New()
@@ -263,6 +268,30 @@ func (r *sliceReplay) Next(_ context.Context) (apipersistence.Mutation, error) {
 func (r *sliceReplay) Close() error {
 	r.closed = true
 	return nil
+}
+
+func TestCoordinator_LastSaveUnix(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "snapshot.dat")
+
+	gob := NewGobSource(file)
+	co := New(gob)
+	co.RegisterSnapshotter(gob)
+
+	if got := co.LastSaveUnix(); got != 0 {
+		t.Errorf("LastSaveUnix before any save = %d, want 0", got)
+	}
+
+	before := time.Now().Unix()
+	if err := co.Snapshot(context.Background(), cache.New()); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	after := time.Now().Unix()
+
+	got := co.LastSaveUnix()
+	if got < before || got > after {
+		t.Errorf("LastSaveUnix = %d, want in [%d, %d]", got, before, after)
+	}
 }
 
 func TestGobSource_Name(t *testing.T) {

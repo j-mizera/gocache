@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -13,11 +14,6 @@ import (
 	"gocache/pkg/resp/handler"
 )
 
-// TestHandler_Snapshot exercises SAVE through the coordinator + a
-// registered snapshotter. The plugin owns format/filename — we use the
-// gob shim here as a stand-in for the registered persistence plugin so
-// the test stays plugin-agnostic. (The real binary uses the snapshot plugin; the
-// gob shim still implements both Source and Snapshotter for tests.)
 func TestHandler_Snapshot(t *testing.T) {
 	dir := t.TempDir()
 	snapshotFile := filepath.Join(dir, "test_handler_snapshot.dat")
@@ -51,5 +47,165 @@ func TestHandler_Snapshot(t *testing.T) {
 
 	if _, err := os.Stat(snapshotFile); os.IsNotExist(err) {
 		t.Fatalf("%s was not created", snapshotFile)
+	}
+}
+
+func TestHandler_Save(t *testing.T) {
+	dir := t.TempDir()
+	snapshotFile := filepath.Join(dir, "save.dat")
+
+	c, e, ctx := setup(t)
+	_ = eval(t, c, e, ctx, "SET", []string{"k", "v"})
+
+	gob := persistence.NewGobSource(snapshotFile)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
+	cmdCtx := &command.Context{
+		Client:      ctx,
+		Op:          "SAVE",
+		Engine:      e,
+		Cache:       c,
+		Snapshotter: coord,
+	}
+	res := handler.HandleSave(cmdCtx)
+	if res.Value != "OK" {
+		t.Fatalf("SAVE: expected OK, got %v (err=%v)", res.Value, res.Err)
+	}
+}
+
+func TestHandler_Save_NoSnapshotter(t *testing.T) {
+	c, e, ctx := setup(t)
+
+	cmdCtx := &command.Context{
+		Client: ctx,
+		Op:     "SAVE",
+		Engine: e,
+		Cache:  c,
+	}
+	res := handler.HandleSave(cmdCtx)
+	if res.Err == nil {
+		t.Fatal("SAVE with nil snapshotter: expected error")
+	}
+}
+
+func TestHandler_Bgsave(t *testing.T) {
+	dir := t.TempDir()
+	snapshotFile := filepath.Join(dir, "bgsave.dat")
+
+	c, e, ctx := setup(t)
+	_ = eval(t, c, e, ctx, "SET", []string{"k", "v"})
+
+	gob := persistence.NewGobSource(snapshotFile)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
+	cmdCtx := &command.Context{
+		Client:      ctx,
+		Op:          "BGSAVE",
+		Engine:      e,
+		Cache:       c,
+		Snapshotter: coord,
+	}
+	res := handler.HandleBgsave(cmdCtx)
+	if res.Err != nil {
+		t.Fatalf("BGSAVE: unexpected error: %v", res.Err)
+	}
+	if res.Value != "Background saving started" {
+		t.Errorf("BGSAVE: got %v, want %q", res.Value, "Background saving started")
+	}
+
+	// Wait for background goroutine to finish writing.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(snapshotFile); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("BGSAVE did not create snapshot file within 2s")
+}
+
+func TestHandler_Bgsave_NoSnapshotter(t *testing.T) {
+	_, e, ctx := setup(t)
+
+	cmdCtx := &command.Context{
+		Client: ctx,
+		Op:     "BGSAVE",
+		Engine: e,
+		Cache:  cache.New(),
+	}
+	res := handler.HandleBgsave(cmdCtx)
+	if res.Err == nil {
+		t.Fatal("BGSAVE with nil snapshotter: expected error")
+	}
+}
+
+func TestHandler_Lastsave(t *testing.T) {
+	dir := t.TempDir()
+	snapshotFile := filepath.Join(dir, "lastsave.dat")
+
+	c, e, ctx := setup(t)
+
+	gob := persistence.NewGobSource(snapshotFile)
+	coord := persistence.New(gob)
+	coord.RegisterSnapshotter(gob)
+
+	// Before any save, LASTSAVE should return 0.
+	cmdCtx := &command.Context{
+		Client:      ctx,
+		Op:          "LASTSAVE",
+		Engine:      e,
+		Cache:       c,
+		Snapshotter: coord,
+	}
+	res := handler.HandleLastsave(cmdCtx)
+	if res.Err != nil {
+		t.Fatalf("LASTSAVE: unexpected error: %v", res.Err)
+	}
+	if res.Value != int64(0) {
+		t.Errorf("LASTSAVE before save = %v, want 0", res.Value)
+	}
+
+	// Do a save.
+	before := time.Now().Unix()
+	saveCmdCtx := &command.Context{
+		Client:      ctx,
+		Op:          "SAVE",
+		Engine:      e,
+		Cache:       c,
+		Snapshotter: coord,
+	}
+	if r := handler.HandleSave(saveCmdCtx); r.Err != nil {
+		t.Fatalf("SAVE: %v", r.Err)
+	}
+	after := time.Now().Unix()
+
+	// LASTSAVE should now return a timestamp in [before, after].
+	res = handler.HandleLastsave(cmdCtx)
+	if res.Err != nil {
+		t.Fatalf("LASTSAVE after save: %v", res.Err)
+	}
+	ts, ok := res.Value.(int64)
+	if !ok {
+		t.Fatalf("LASTSAVE value type = %T, want int64", res.Value)
+	}
+	if ts < before || ts > after {
+		t.Errorf("LASTSAVE = %d, want in [%d, %d]", ts, before, after)
+	}
+}
+
+func TestHandler_Lastsave_NoSnapshotter(t *testing.T) {
+	_, e, ctx := setup(t)
+
+	cmdCtx := &command.Context{
+		Client: ctx,
+		Op:     "LASTSAVE",
+		Engine: e,
+		Cache:  cache.New(),
+	}
+	res := handler.HandleLastsave(cmdCtx)
+	if res.Err == nil {
+		t.Fatal("LASTSAVE with nil snapshotter: expected error")
 	}
 }

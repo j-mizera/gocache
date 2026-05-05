@@ -82,7 +82,7 @@ The format is documented in `api/persistence/format.md` and exercised by the bui
 ### Negative
 
 - A custom format means we own format compatibility forever. A bug in the version-1 reader is on us, not on a vendor.
-- Migration from gob requires a one-time tool (`gocache-migrate gob-to-v1`) that ships with the first release of the new format. Users with existing gob snapshots have to run it once.
+- Migration from gob is not needed — the server boots via the Source contract and the GobSource shim remains available as a fallback reader. Users upgrading simply let the next SAVE write a v1 file; the old gob file can be deleted manually.
 - Documentation cost: `api/persistence/format.md` becomes a living spec that must stay in sync with the implementation.
 
 ### Risks

@@ -49,6 +49,10 @@ type Coordinator struct {
 	// feed holds one sinkChannel per registered Sink. Populated in Start.
 	feed []*sinkChannel
 
+	// lastSaveUnix records the Unix timestamp (seconds) of the most recent
+	// successful Snapshot() call. Exposed via LastSaveUnix() for LASTSAVE.
+	lastSaveUnix atomic.Int64
+
 	// stop is closed by Stop to signal every per-sink flush loop to exit.
 	stop      chan struct{}
 	stopOnce  sync.Once
@@ -143,6 +147,10 @@ func (c *Coordinator) SetLSN(lsn apipersistence.LSN) {
 	c.lsn.Store(uint64(lsn))
 }
 
+// LastSaveUnix returns the Unix timestamp (seconds) of the most recent
+// successful Snapshot() call, or 0 if no save has completed.
+func (c *Coordinator) LastSaveUnix() int64 { return c.lastSaveUnix.Load() }
+
 // Source returns the registered source (may be nil).
 func (c *Coordinator) Source() apipersistence.Source { return c.source }
 
@@ -193,7 +201,11 @@ func (c *Coordinator) Snapshot(ctx context.Context, target *cache.Cache) error {
 	}
 	entries := captureSnapshotEntries(target)
 	src := &sliceSnapshotSource{entries: entries}
-	return s.SaveSnapshot(ctx, src)
+	if err := s.SaveSnapshot(ctx, src); err != nil {
+		return err
+	}
+	c.lastSaveUnix.Store(time.Now().Unix())
+	return nil
 }
 
 // captureSnapshotEntries walks the cache and returns every live entry as

@@ -44,15 +44,17 @@ func TestRegistrations_ShardingClassification(t *testing.T) {
 // the change so the sharded engine routing is reconsidered.
 func TestRegistrations_KeylessCommands(t *testing.T) {
 	expected := map[string]bool{
-		"MULTI":   true,
-		"DISCARD": true,
-		"AUTH":    true,
-		"HELLO":   true,
-		"PING":    true,
-		"ECHO":    true,
-		"SELECT":  true,
-		"INFO":    true,
-		"UNWATCH": true,
+		"MULTI":    true,
+		"DISCARD":  true,
+		"AUTH":     true,
+		"HELLO":    true,
+		"PING":     true,
+		"ECHO":     true,
+		"SELECT":   true,
+		"INFO":     true,
+		"UNWATCH":  true,
+		"BGSAVE":   true,
+		"LASTSAVE": true,
 	}
 	regs := Registrations()
 	for name, r := range regs {

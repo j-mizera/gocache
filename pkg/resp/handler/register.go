@@ -123,8 +123,11 @@ func Registrations() map[string]command.Registration {
 		resp.CmdDiscard: regKeyless(HandleDiscard, 0, 0),
 		resp.CmdExec:    regMulti(HandleExec, 0, 0),
 
-		// Persistence — touches the entire keyspace.
+		// Persistence.
 		resp.CmdSnapshot: regMulti(HandleSnapshot, 0, 0),
+		resp.CmdSave:     regMulti(HandleSave, 0, 0),
+		resp.CmdBgsave:   regKeyless(HandleBgsave, 0, 0),
+		resp.CmdLastsave: regKeylessRO(HandleLastsave, 0, 0),
 
 		// Server / client-state commands.
 		resp.CmdDBSize:   regMultiRO(HandleDBSize, 0, 0), // counts every key
