@@ -107,7 +107,10 @@ func (w *baseWorker) Stop() {
 }
 
 func (w *baseWorker) UpdateInterval(d time.Duration) {
-	w.intervalChan <- d
+	select {
+	case w.intervalChan <- d:
+	case <-w.stopChan:
+	}
 }
 
 func safeInterval(d time.Duration) time.Duration {

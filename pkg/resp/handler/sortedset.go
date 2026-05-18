@@ -10,11 +10,6 @@ import (
 	"gocache/pkg/resp"
 )
 
-// zsetMemberOverhead matches pkg/cache/sortedset.go's sortedSetMemberOverhead
-// constant. The value lives there for the EstimateSize() walk; we duplicate
-// it here so the incremental write path stays in lockstep without exposing
-// the internal constant cross-package.
-const zsetMemberOverhead = 24
 
 // Sorted-set commands operate on two encodings:
 //
@@ -67,6 +62,7 @@ func zaddStartPacked(cmdCtx *command.Context, key string, pairs []cache.ScoredMe
 
 func zaddPacked(cmdCtx *command.Context, key string, buf []byte, pairs []cache.ScoredMember) any {
 	t := cmdCtx.Cache.PackedThresholds()
+	ttl := cmdCtx.Cache.RawTTL(key)
 	added := 0
 	for i, p := range pairs {
 		var addedOne, promoted bool
@@ -83,20 +79,20 @@ func zaddPacked(cmdCtx *command.Context, key string, buf []byte, pairs []cache.S
 			if perr != nil {
 				return perr
 			}
-			// Walk once at the boundary; track size incrementally for the
-			// remaining pairs and any subsequent ZADDs.
 			size := z.EstimateSize()
 			for _, rest := range pairs[i+1:] {
 				if z.Add(rest.Member, rest.Score) {
 					added++
-					size += int64(len(rest.Member)) + zsetMemberOverhead
+					size += int64(len(rest.Member)) + cache.ZSetMemberOverhead
 				}
 			}
-			_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, 0)
+			if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, ttl); err != nil {
+				return err
+			}
 			return added
 		}
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSortedSet, buf, 0); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSortedSet, buf, ttl); err != nil {
 		return err
 	}
 	return added
@@ -104,14 +100,17 @@ func zaddPacked(cmdCtx *command.Context, key string, buf []byte, pairs []cache.S
 
 func zaddNative(cmdCtx *command.Context, key string, z *cache.SortedSet, pairs []cache.ScoredMember) any {
 	added := 0
+	ttl := cmdCtx.Cache.RawTTL(key)
 	size := cmdCtx.Cache.NativeSize(key)
 	for _, p := range pairs {
 		if z.Add(p.Member, p.Score) {
 			added++
-			size += int64(len(p.Member)) + zsetMemberOverhead
+			size += int64(len(p.Member)) + cache.ZSetMemberOverhead
 		}
 	}
-	_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, 0)
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, ttl); err != nil {
+		return err
+	}
 	return added
 }
 
@@ -148,7 +147,8 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 			if n == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSortedSet, buf, 0); err != nil {
+				ttl := cmdCtx.Cache.RawTTL(key)
+				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSortedSet, buf, ttl); err != nil {
 					return err
 				}
 			}
@@ -161,13 +161,16 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 			for _, m := range members {
 				if zset.Remove(m) {
 					removed++
-					size -= int64(len(m)) + zsetMemberOverhead
+					size -= int64(len(m)) + cache.ZSetMemberOverhead
 				}
 			}
 			if zset.Card() == 0 {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
-				_ = cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, zset, size, 0)
+				ttl := cmdCtx.Cache.RawTTL(key)
+				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, zset, size, ttl); err != nil {
+					return err
+				}
 			}
 			return removed
 		}

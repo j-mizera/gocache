@@ -29,7 +29,7 @@ import (
 const (
 	envDir      = "GOCACHE_CRASHDUMP_DIR"
 	envDisabled = "GOCACHE_CRASHDUMP_DISABLED"
-	defaultDir  = "crashes"
+	defaultDir  = crashdump.DefaultCrashdumpDir
 )
 
 type plugin struct {

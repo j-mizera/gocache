@@ -2,9 +2,9 @@ package handler
 
 import (
 	"context"
-	"fmt"
 
 	"gocache/api/logger"
+	apipersistence "gocache/api/persistence"
 	"gocache/pkg/command"
 )
 
@@ -15,7 +15,7 @@ import (
 func HandleSnapshot(cmdCtx *command.Context) command.Result {
 	executeFn := func() any {
 		if cmdCtx.Snapshotter == nil {
-			return fmt.Errorf("snapshot: no snapshotter registered")
+			return apipersistence.ErrNoSnapshotter
 		}
 		if err := cmdCtx.Snapshotter.Snapshot(cmdCtx.Context()); err != nil {
 			return err
@@ -40,13 +40,16 @@ func HandleSave(cmdCtx *command.Context) command.Result {
 // LASTSAVE.
 func HandleBgsave(cmdCtx *command.Context) command.Result {
 	if cmdCtx.Snapshotter == nil {
-		return command.Result{Err: fmt.Errorf("snapshot: no snapshotter registered")}
+		return command.Result{Err: apipersistence.ErrNoSnapshotter}
 	}
 	snapshotter := cmdCtx.Snapshotter
+	eng := cmdCtx.Engine
 	go func() {
-		if err := snapshotter.Snapshot(context.Background()); err != nil {
-			logger.ErrorNoCtx().Err(err).Msg("BGSAVE failed")
-		}
+		eng.Dispatch(context.Background(), func() {
+			if err := snapshotter.Snapshot(context.Background()); err != nil {
+				logger.ErrorNoCtx().Err(err).Msg("BGSAVE failed")
+			}
+		})
 	}()
 	return command.Result{Value: "Background saving started"}
 }
@@ -56,7 +59,7 @@ func HandleBgsave(cmdCtx *command.Context) command.Result {
 // server start.
 func HandleLastsave(cmdCtx *command.Context) command.Result {
 	if cmdCtx.Snapshotter == nil {
-		return command.Result{Err: fmt.Errorf("snapshot: no snapshotter registered")}
+		return command.Result{Err: apipersistence.ErrNoSnapshotter}
 	}
 	return command.Result{Value: cmdCtx.Snapshotter.LastSaveUnix()}
 }

@@ -19,6 +19,14 @@ const (
 	SecretPrefix = "secret."
 )
 
+// Shared context keys for cross-plugin interoperability. Any plugin
+// participating in W3C trace-context propagation should use these rather
+// than hardcoding the string values.
+const (
+	SharedTraceparent    = "shared.traceparent"
+	SharedRexTraceparent = "shared.rex.traceparent"
+)
+
 // IsSecret returns true if the key is marked as a secret.
 // A key is secret if any dot-separated segment is "secret":
 //

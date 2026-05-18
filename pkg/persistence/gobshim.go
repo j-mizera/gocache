@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"gocache/api/logger"
 	apipersistence "gocache/api/persistence"
@@ -189,14 +190,11 @@ type gobIterator struct {
 	file      *os.File
 	dec       *gob.Decoder
 	remaining int
-	closed    bool
+	closed    atomic.Bool
 }
 
-// Next yields the next SnapshotEntry, converting from the gob-internal
-// SnapshotEntry shape to the api type. The conversion is a per-field cast
-// because the enum values match by construction.
 func (it *gobIterator) Next(_ context.Context) (apipersistence.SnapshotEntry, error) {
-	if it.closed {
+	if it.closed.Load() {
 		return apipersistence.SnapshotEntry{}, io.EOF
 	}
 	if it.remaining == 0 {
@@ -222,10 +220,9 @@ func (it *gobIterator) Next(_ context.Context) (apipersistence.SnapshotEntry, er
 // Close releases the file handle. Idempotent — calling Close more than
 // once returns nil after the first call.
 func (it *gobIterator) Close() error {
-	if it.closed {
+	if !it.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	it.closed = true
 	return it.file.Close()
 }
 

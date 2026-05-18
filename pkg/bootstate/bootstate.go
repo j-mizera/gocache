@@ -12,6 +12,7 @@ package bootstate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,7 +87,7 @@ func Read(path string) (State, error) {
 // later diff shows the transition.
 func Clear(path string) error {
 	err := os.Remove(path)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil

@@ -29,9 +29,10 @@ type Shard struct {
 	slabs          *slab.Allocator
 	lruHead        slab.SlabPointer
 	lruTail        slab.SlabPointer
-	usedBytes      int64
-	maxBytes       int64
-	evictionPolicy EvictionPolicy
+	usedBytes       int64
+	maxBytes        int64
+	evictionPolicy  EvictionPolicy
+	slabTargetBytes uint32
 
 	// onMutate / onMutateAll are set by the Cache constructor and forward
 	// to the cache's external WATCH callbacks. Per-shard so the engine
@@ -42,12 +43,13 @@ type Shard struct {
 
 func newShard(maxBytes int64, policy EvictionPolicy, slabTargetBytes uint32) *Shard {
 	return &Shard{
-		items:          make(map[string]slab.SlabPointer),
-		nativeValues:   make(map[slab.SlabPointer]any),
-		keysBySlot:     make(map[slab.SlabPointer]string),
-		slabs:          slab.NewAllocatorWithTargetBytes(slabTargetBytes),
-		maxBytes:       maxBytes,
-		evictionPolicy: policy,
+		items:           make(map[string]slab.SlabPointer),
+		nativeValues:    make(map[slab.SlabPointer]any),
+		keysBySlot:      make(map[slab.SlabPointer]string),
+		slabs:           slab.NewAllocatorWithTargetBytes(slabTargetBytes),
+		maxBytes:        maxBytes,
+		evictionPolicy:  policy,
+		slabTargetBytes: slabTargetBytes,
 	}
 }
 
@@ -336,7 +338,7 @@ func (s *Shard) clear() {
 	s.lruHead = slab.NilPointer
 	s.lruTail = slab.NilPointer
 	s.usedBytes = 0
-	s.slabs = slab.NewAllocator()
+	s.slabs = slab.NewAllocatorWithTargetBytes(s.slabTargetBytes)
 }
 
 // LRU helpers (per-shard) ---------------------------------------------------

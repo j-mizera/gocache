@@ -71,7 +71,7 @@ const (
 	envCrashdumpDir = "GOCACHE_CRASHDUMP_DIR"
 	envBootState    = "GOCACHE_BOOT_STATE_FILE"
 
-	defaultCrashdumpDir = "crashes"
+	defaultCrashdumpDir = crashdump.DefaultCrashdumpDir
 	defaultBootState    = "boot.state"
 
 	// Named boot stages written to the boot.state marker. A previous-run
@@ -171,6 +171,7 @@ func main() {
 		logger.Init("info")
 		logger.FatalNoCtx().Err(err).Msg("failed to create log pipe")
 	}
+	defer logPipeR.Close()
 	logWriter := io.MultiWriter(logPipeW, os.Stderr)
 	logger.InitWithWriter(logWriter, cfg.Server.LogLevel)
 
@@ -383,7 +384,7 @@ func main() {
 	tracker.Complete(bootOp.ID)
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
 	// Start server in a goroutine.
 	_ = bootstate.Write(bootStateFile, stageListenerStart)

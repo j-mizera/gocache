@@ -13,14 +13,14 @@ import (
 	"sync"
 	"sync/atomic"
 
+	apiconfig "gocache/api/config"
 	apiEvents "gocache/api/events"
 	"gocache/api/logger"
 )
 
-// DefaultReplayCapacity is the ring size used when callers do not provide
-// one. Sized for ~5 MB at 500 B average event payload — enough to cover
-// the full boot sequence of a typical deployment without unbounded growth.
-const DefaultReplayCapacity = 10_000
+// DefaultReplayCapacity aliases the config-layer constant so callers of
+// NewBus() get the same default as the YAML config path.
+const DefaultReplayCapacity = apiconfig.DefaultEventsReplayCapacity
 
 // Handler is a function that processes an event. Must be non-blocking.
 type Handler func(apiEvents.Event)
