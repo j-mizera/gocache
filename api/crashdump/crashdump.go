@@ -29,8 +29,8 @@ import (
 	ops "gocache/api/operations"
 )
 
-// Default directory name appended to the configured base dir.
-const defaultSubdir = "crashes"
+// DefaultCrashdumpDir is the directory name appended to the configured base dir.
+const DefaultCrashdumpDir = "crashes"
 
 // Dump is the on-disk snapshot. Fields are intentionally flat + primitive
 // so the JSON survives a partial write and is still half-readable.
@@ -85,7 +85,7 @@ type Options struct {
 func Write(panicVal any, stack []byte, o Options) (string, error) {
 	dir := o.Dir
 	if dir == "" {
-		dir = defaultSubdir
+		dir = DefaultCrashdumpDir
 	}
 
 	now := time.Now()

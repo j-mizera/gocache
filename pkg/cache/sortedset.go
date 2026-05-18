@@ -2,10 +2,9 @@ package cache
 
 import "sort"
 
-// sortedSetMemberOverhead is the approximate per-member memory cost beyond
-// the member string itself: 8 bytes for the float64 score + ~16 bytes of
-// map bucket overhead.
-const sortedSetMemberOverhead = 24
+// Kept as a package-level alias so EstimateSize reads clearly without
+// a stutter-import (cache.ZSetMemberOverhead reads fine from outside).
+const sortedSetMemberOverhead = ZSetMemberOverhead
 
 // SortedSet represents a sorted set with members and scores
 type SortedSet struct {

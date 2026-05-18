@@ -45,7 +45,6 @@ var (
 	ErrCorruptEncoding = errors.New("cache/encoding: corrupt or truncated payload")
 	ErrTooManyItems    = errors.New("cache/encoding: collection has too many items")
 	ErrItemTooLarge    = errors.New("cache/encoding: collection item exceeds maximum length")
-	ErrOddHashFields   = errors.New("cache/encoding: hash payload has odd number of field/value halves")
 )
 
 // be is the canonical encoder — aliased for readability.

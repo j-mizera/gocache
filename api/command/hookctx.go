@@ -26,7 +26,8 @@ const (
 	FileKey    = "_file"    // File path associated with the operation
 
 	// Connection enrichment keys.
-	RemoteAddrKey = "_remote_addr" // Remote peer address for connection operations
+	RemoteAddrKey  = "_remote_addr" // Remote peer address for connection operations
+	PluginNameKey  = "_plugin"      // Plugin name for plugin-scoped operations
 
 	// Log collector field names.
 	CtxField = "_ctx" // Nested operation-context object in JSON log lines

@@ -45,10 +45,8 @@ const (
 	traceparentVersion = "00"
 
 	// Context keys where an incoming traceparent may be found.
-	// ctxKeyTraceparent is canonical; ctxKeyRexTraceparent is accepted as a
-	// fallback so REX-provided trace context still links client traces.
-	ctxKeyTraceparent    = "shared.traceparent"
-	ctxKeyRexTraceparent = "shared.rex.traceparent"
+	ctxKeyTraceparent    = opctx.SharedTraceparent
+	ctxKeyRexTraceparent = opctx.SharedRexTraceparent
 )
 
 // Tracer wraps an OTEL TracerProvider and manages operation-based spans.

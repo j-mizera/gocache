@@ -115,6 +115,10 @@ func (b *BaseEvaluator) RegisterHandler(op string, handler command.Handler) {
 	b.handlers[strings.ToUpper(op)] = handler
 }
 
+// The Set* methods below configure evaluator dependencies. They are NOT
+// safe for concurrent use — all must be called during server startup,
+// before any client connection is accepted.
+
 func (b *BaseEvaluator) SetPluginRouter(r *router.Router) {
 	b.pluginRouter = r
 }

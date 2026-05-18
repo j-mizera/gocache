@@ -2,7 +2,6 @@ package handler
 
 import (
 	"crypto/subtle"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,9 +17,6 @@ import (
 func constantTimeStringCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
-
-// ErrInvalidDuration is returned when a duration argument cannot be parsed.
-var ErrInvalidDuration = errors.New("invalid duration")
 
 // HandlePing returns PONG with no arguments, or echoes the first argument.
 func HandlePing(cmdCtx *command.Context) command.Result {
@@ -394,7 +390,7 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	ms, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return command.Result{Err: ErrInvalidDuration}
+		return command.Result{Err: resp.ErrInvalidExpireTime}
 	}
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -468,6 +464,9 @@ func HandleDelete(cmdCtx *command.Context) command.Result {
 		for _, key := range cmdCtx.Args {
 			_, found := cmdCtx.Cache.RawGet(key)
 			if found {
+				if lazyExpire(cmdCtx.Cache, key) {
+					continue
+				}
 				cmdCtx.Cache.RawDelete(key)
 				count++
 			}
@@ -497,24 +496,22 @@ func HandleExists(cmdCtx *command.Context) command.Result {
 func HandleExpire(cmdCtx *command.Context) command.Result {
 	key := cmdCtx.Args[0]
 	secs, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
-	if err != nil || secs <= 0 {
-		return command.Result{Err: ErrInvalidDuration}
+	if err != nil || secs < 0 {
+		return command.Result{Err: resp.ErrInvalidExpireTime}
 	}
-	ttl := time.Duration(secs) * time.Second
 	executeFn := func() any {
-		entry, found := cmdCtx.Cache.RawGet(key)
+		_, found := cmdCtx.Cache.RawGet(key)
 		if !found {
 			return 0
 		}
 		if lazyExpire(cmdCtx.Cache, key) {
 			return 0
 		}
-
-		_ = entry
-		var expiration int64
-		if ttl > 0 {
-			expiration = time.Now().Add(ttl).UnixNano()
+		if secs == 0 {
+			cmdCtx.Cache.RawDelete(key)
+			return 1
 		}
+		expiration := time.Now().Add(time.Duration(secs) * time.Second).UnixNano()
 		if !cmdCtx.Cache.SetExpiration(key, expiration) {
 			return 0
 		}
@@ -620,7 +617,7 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 		switch keyword {
 		case "AUTH":
 			if len(args) < 3 {
-				return command.Result{Value: resp.MarshalError("ERR syntax error")}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			// AUTH username password -- username is ignored for now (single-user)
 			if cmdCtx.RequirePass != "" && !constantTimeStringCompare(args[2], cmdCtx.RequirePass) {
@@ -630,13 +627,13 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 			args = args[3:]
 		case "SETNAME":
 			if len(args) < 2 {
-				return command.Result{Value: resp.MarshalError("ERR syntax error")}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			// Client name is informational; not stored yet.
 			args = args[2:]
 		case "REXV":
 			if len(args) < 2 {
-				return command.Result{Value: resp.MarshalError("ERR syntax error")}
+				return command.Result{Value: resp.ErrSyntax()}
 			}
 			rv, err := strconv.Atoi(args[1])
 			if err != nil || rv < 0 {
@@ -648,7 +645,7 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 			cmdCtx.Client.RexVersion = rv
 			args = args[2:]
 		default:
-			return command.Result{Value: resp.MarshalError("ERR syntax error")}
+			return command.Result{Value: resp.ErrSyntax()}
 		}
 	}
 

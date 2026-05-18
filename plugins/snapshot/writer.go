@@ -242,8 +242,12 @@ func writeDataRecord(w io.Writer, e apipersistence.SnapshotEntry, enc *zstd.Enco
 	if err != nil {
 		return err
 	}
+	vtTag, err := valueTypeTag(e.ValueType)
+	if err != nil {
+		return err
+	}
 	body := make([]byte, 0, 4+binary.MaxVarintLen64*3+len(e.Key)+len(valueBlob))
-	body = append(body, valueTypeTag(e.ValueType), flags, encodingByte)
+	body = append(body, vtTag, flags, encodingByte)
 	body = binary.AppendVarint(body, e.Expiration)
 	body = binary.AppendUvarint(body, uint64(len(e.Key)))
 	body = append(body, e.Key...)
@@ -286,20 +290,20 @@ func encodingTag(enc apipersistence.Encoding) (byte, error) {
 // type tag. Unknown types panic — they should have been caught earlier
 // by encodeNativeValue. Zero-tag (TypeMeta) is reserved and never
 // emitted from this path.
-func valueTypeTag(vt apipersistence.ValueType) byte {
+func valueTypeTag(vt apipersistence.ValueType) (byte, error) {
 	switch vt {
 	case apipersistence.ValueTypeBytes:
-		return typeString
+		return typeString, nil
 	case apipersistence.ValueTypeList:
-		return typeList
+		return typeList, nil
 	case apipersistence.ValueTypeHash:
-		return typeHash
+		return typeHash, nil
 	case apipersistence.ValueTypeSet:
-		return typeSet
+		return typeSet, nil
 	case apipersistence.ValueTypeSortedSet:
-		return typeZSet
+		return typeZSet, nil
 	default:
-		panic(fmt.Sprintf("snapshot: unknown ValueType %d", vt))
+		return 0, fmt.Errorf("snapshot: unknown ValueType %d", vt)
 	}
 }
 

@@ -116,11 +116,6 @@ func (srv *Server) SetSnapshotInvoker(s command.SnapshotInvoker) {
 	srv.evaluator.SetSnapshotInvoker(s)
 }
 
-// EmitEvent emits an event through the server's emitter.
-func (srv *Server) EmitEvent(evt events.Event) {
-	srv.emitter.Emit(evt)
-}
-
 // ServerStateProvider methods — used by the plugin manager for server query responses.
 
 func (srv *Server) IsShuttingDown() bool {
@@ -179,17 +174,14 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 	srv.shutdownOnce.Do(func() {
 		logger.InfoNoCtx().Msg("initiating graceful shutdown")
 
-		// Mark as shutting down
 		srv.isShuttingDown.Store(true)
 
-		// Stop accepting new connections
 		if srv.listener != nil {
-			if err := srv.listener.Close(); err != nil {
-				logger.WarnNoCtx().Err(err).Msg("listener close error")
+			if cerr := srv.listener.Close(); cerr != nil {
+				logger.WarnNoCtx().Err(cerr).Msg("listener close error")
 			}
 		}
 
-		// Wait for existing connections to finish with timeout
 		done := make(chan struct{})
 		go func() {
 			srv.connectionWg.Wait()
@@ -201,9 +193,9 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 			logger.InfoNoCtx().Msg("all connections closed gracefully")
 		case <-time.After(timeout):
 			logger.WarnNoCtx().Msg("shutdown timeout reached, forcing close")
+			err = fmt.Errorf("shutdown timed out after %v", timeout)
 		}
 
-		// Signal shutdown complete
 		close(srv.shutdownChan)
 	})
 	return err

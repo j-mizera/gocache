@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	apicommand "gocache/api/command"
 	opctx "gocache/api/context"
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
@@ -28,9 +29,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// pluginNameKey is the operation context key for the plugin name.
-// Underscore prefix marks it as server-owned (not filtered from plugin view).
-const pluginNameKey = "_plugin"
 
 // LogCollector is the interface for adding log sources.
 // Defined here to avoid importing pkg/logcollector from the manager.
@@ -135,7 +133,7 @@ func (m *Manager) startPluginLifecycleOp(inst *PluginInstance) {
 		return
 	}
 	op := m.tracker.Start(ops.TypePluginStart, "")
-	op.Enrich(pluginNameKey, inst.Name)
+	op.Enrich(apicommand.PluginNameKey, inst.Name)
 	inst.SetLifecycleOp(op)
 	if m.eventBus != nil {
 		m.eventBus.Emit(events.NewOperationStart(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
@@ -426,6 +424,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	// From here on we have an instance — derive a ctx that carries its
 	// lifecycle op so downstream logs carry operation_id.
 	pluginCtx := m.pluginCtx(ctx, inst)
+	inst.SetState(StateConnected)
 
 	// --- Scope validation ---
 	grantedScopes, err := m.validateScopes(reg.Name, reg.RequestedScopes)
@@ -453,15 +452,17 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 	}
 
-	// Register hooks, filtered by scope. Only register hooks the plugin has scope for.
+	// Resolve or create the PluginConn once — reused for hooks and op-hooks
+	// so a single readLoop serves all hook types. Creating two PluginConns
+	// on the same connection would spawn duplicate readLoop goroutines.
+	pc := m.router.GetPluginConn(reg.Name)
+	if pc == nil && (len(reg.Hooks) > 0 || len(reg.OperationHooks) > 0) {
+		pc = router.NewPluginConn(reg.Name, conn)
+	}
+
 	if len(reg.Hooks) > 0 {
 		filteredHooks := m.filterHooksByScope(reg.Name, reg.Hooks)
 		if len(filteredHooks) > 0 {
-			pc := m.router.GetPluginConn(reg.Name)
-			if pc == nil {
-				// Hook-only plugin — create a PluginConn for it.
-				pc = router.NewPluginConn(reg.Name, conn)
-			}
 			m.hookRegistry.Register(reg.Name, int(reg.Priority), inst.Critical(), pc, filteredHooks)
 		}
 		if dropped := len(reg.Hooks) - len(filteredHooks); dropped > 0 {
@@ -469,12 +470,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 	}
 
-	// Register operation hooks if the plugin has the operation:hook scope.
 	if len(reg.OperationHooks) > 0 && m.scopeRegistry.HasScope(reg.Name, permissions.ScopeOperationHook) {
-		pc := m.router.GetPluginConn(reg.Name)
-		if pc == nil {
-			pc = router.NewPluginConn(reg.Name, conn)
-		}
 		patterns := make([]string, len(reg.OperationHooks))
 		for i, oh := range reg.OperationHooks {
 			patterns[i] = oh.Type
@@ -555,10 +551,6 @@ func (m *Manager) validateScopes(pluginName string, requested []string) ([]permi
 
 	// Always return what was granted, even if some were denied.
 	// Plugins degrade gracefully at runtime when they hit a scope they don't have.
-	if len(granted) == 0 {
-		// Grant at least the defaults so the plugin can function minimally.
-		return allowed, nil
-	}
 	return granted, nil
 }
 

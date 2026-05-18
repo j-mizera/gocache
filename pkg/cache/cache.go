@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	apiconfig "gocache/api/config"
 	"gocache/api/logger"
 	"gocache/pkg/cache/slab"
 )
@@ -37,6 +38,15 @@ func ParseEvictionPolicy(s string) EvictionPolicy {
 // entryOverhead is a conservative per-entry constant (bytes) that accounts
 // for map bucket amortization + slab slot overhead.
 const entryOverhead = 128
+
+// Collection-element overhead constants. Single source of truth for both
+// estimateSize (full walk) and handler-side incremental tracking.
+const (
+	HashFieldOverhead   = 32 // per field: key + value pointer + map bucket
+	ListElementOverhead = 16 // per element: slice header amortisation
+	SetMemberOverhead   = 16 // per member: map bucket amortisation
+	ZSetMemberOverhead  = 24 // per member: float64 score + map bucket
+)
 
 // bytesPerMB converts a megabyte limit to bytes for the cache's byte budget.
 const bytesPerMB int64 = 1024 * 1024
@@ -140,14 +150,10 @@ type Cache struct {
 	OnMutateAll func()
 }
 
-// DefaultShards is the per-shard count used by constructors that don't
-// take an explicit shardCount. 8 is the chosen production default —
-// the prototype N-sweep in #39 showed N=8 within ~3% of N=16's
-// throughput optimum on mixed pipelined GetSet, while halving the
-// per-shard memory overhead (slab arenas, maps, channel pools, slab
-// metadata) per #49. Must be a positive power of two so the per-key
-// fast path can mask instead of mod.
-const DefaultShards = 8
+// DefaultShards aliases the config-layer default so cache constructors
+// that don't take an explicit shard count stay in sync with the YAML
+// config path. Must be a positive power of two.
+const DefaultShards = apiconfig.DefaultCacheShards
 
 // New constructs a Cache with the default shard count, no memory limit,
 // and LRU eviction.
@@ -175,7 +181,7 @@ func NewWithShards(shardCount int, maxMemoryMB int64, policy EvictionPolicy) *Ca
 
 // NewWithBytes creates a single-shard cache with a raw byte limit.
 // Intended for testing where the budget is tight (a few hundred bytes)
-// — at the production default shard count (16) the per-shard slice of
+// — at the production default shard count (8) the per-shard slice of
 // such a budget would round to zero and trip every write. Tests that
 // want sharded byte-precise behaviour can call newCache directly.
 func NewWithBytes(maxBytes int64, policy EvictionPolicy) *Cache {
@@ -204,13 +210,13 @@ func newCache(shards int, maxBytes int64, policy EvictionPolicy) *Cache {
 		maxBytes:       maxBytes,
 		evictionPolicy: policy,
 		packed: PackedThresholds{
-			HashMaxEntries: 512,
-			HashMaxValue:   64,
-			SetMaxEntries:  128,
-			SetMaxValue:    64,
-			ZSetMaxEntries: 128,
-			ZSetMaxValue:   64,
-			ListMaxBytes:   8192,
+			HashMaxEntries: apiconfig.DefaultHashMaxPackedEntries,
+			HashMaxValue:   apiconfig.DefaultHashMaxPackedValue,
+			SetMaxEntries:  apiconfig.DefaultSetMaxPackedEntries,
+			SetMaxValue:    apiconfig.DefaultSetMaxPackedValue,
+			ZSetMaxEntries: apiconfig.DefaultZSetMaxPackedEntries,
+			ZSetMaxValue:   apiconfig.DefaultZSetMaxPackedValue,
+			ListMaxBytes:   apiconfig.DefaultListMaxPackedSize,
 		},
 	}
 	// Each shard receives an equal slice of the memory budget.
@@ -582,11 +588,12 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 		c.maxBytes = 0
 	}
 	c.evictionPolicy = policy
+	maxBytes := c.maxBytes
 	c.configMu.Unlock()
 
-	perShard := c.maxBytes
-	if len(c.shards) > 1 && c.maxBytes > 0 {
-		perShard = c.maxBytes / int64(len(c.shards))
+	perShard := maxBytes
+	if len(c.shards) > 1 && maxBytes > 0 {
+		perShard = maxBytes / int64(len(c.shards))
 	}
 	for _, s := range c.shards {
 		s.Lock()
@@ -598,7 +605,7 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 		}
 		s.Unlock()
 	}
-	logger.Info(ctx).Int64("maxBytes", c.maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
+	logger.Info(ctx).Int64("maxBytes", maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
 }
 
 // EvictionPolicyString returns the eviction policy as a human-readable string.
@@ -690,15 +697,15 @@ func estimateSize(key string, value any) int64 {
 		size += int64(len(v))
 	case []string:
 		for _, s := range v {
-			size += int64(len(s)) + 16
+			size += int64(len(s)) + ListElementOverhead
 		}
 	case map[string]string:
 		for k, val := range v {
-			size += int64(len(k)) + int64(len(val)) + 32
+			size += int64(len(k)) + int64(len(val)) + HashFieldOverhead
 		}
 	case map[string]struct{}:
 		for k := range v {
-			size += int64(len(k)) + 16
+			size += int64(len(k)) + SetMemberOverhead
 		}
 	case *SortedSet:
 		size += v.EstimateSize()

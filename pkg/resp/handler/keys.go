@@ -59,14 +59,14 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards([]string{src, dst})
 	executeFn := func() any {
 		if _, found := cmdCtx.Cache.RawGet(src); !found {
-			return resp.MarshalError("ERR no such key")
+			return resp.ErrNoSuchKey()
 		}
 		if lazyExpire(cmdCtx.Cache, src) {
-			return resp.MarshalError("ERR no such key")
+			return resp.ErrNoSuchKey()
 		}
 		ttl := cmdCtx.Cache.RawTTL(src)
 		if !cmdCtx.Cache.Rename(src, dst, ttl) {
-			return resp.MarshalError("ERR no such key")
+			return resp.ErrNoSuchKey()
 		}
 		return "OK"
 	}
@@ -80,10 +80,10 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards([]string{src, dst})
 	executeFn := func() any {
 		if _, found := cmdCtx.Cache.RawGet(src); !found {
-			return resp.MarshalError("ERR no such key")
+			return resp.ErrNoSuchKey()
 		}
 		if lazyExpire(cmdCtx.Cache, src) {
-			return resp.MarshalError("ERR no such key")
+			return resp.ErrNoSuchKey()
 		}
 
 		// Check if destination already exists.
@@ -96,7 +96,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 
 		ttl := cmdCtx.Cache.RawTTL(src)
 		if !cmdCtx.Cache.Rename(src, dst, ttl) {
-			return resp.MarshalError("ERR no such key")
+			return resp.ErrNoSuchKey()
 		}
 		return 1
 	}

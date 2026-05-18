@@ -3,7 +3,7 @@ package shardproto
 import (
 	"context"
 	"errors"
-	"io"
+
 	"net"
 	"strings"
 	"sync"
@@ -211,8 +211,3 @@ func (s *Server) handleHset(ctx context.Context, w *resp.Writer, args []resp.Val
 	}
 	s.writeErr(w, "ERR internal: unexpected handler result")
 }
-
-// io.EOF and io.ErrUnexpectedEOF are not errors at the connection layer —
-// the client just closed. Reference here so the import survives in case
-// future handlers want to distinguish.
-var _ = io.EOF

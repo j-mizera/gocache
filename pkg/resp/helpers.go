@@ -1,12 +1,21 @@
 package resp
 
-import "errors"
+import (
+	"errors"
 
-// Sentinel errors for type-safe error handling via errors.Is.
+	apicommand "gocache/api/command"
+)
+
+// Sentinel errors aliased from api/command — the canonical definitions
+// live there so plugins can reference them without importing pkg/.
+// Aliases preserve errors.Is identity (same underlying pointer).
 var (
-	ErrWrongType   = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
-	ErrNotInteger  = errors.New("value is not an integer or out of range")
-	ErrNotFloat    = errors.New("value is not a valid float")
+	ErrWrongType         = apicommand.ErrWrongType
+	ErrNotInteger        = apicommand.ErrNotInteger
+	ErrNotFloat          = apicommand.ErrNotFloat
+	ErrInvalidExpireTime = apicommand.ErrInvalidExpireTime
+	ErrInvalidTimeout    = apicommand.ErrInvalidTimeout
+
 	ErrUnknownType = errors.New("unknown RESP value type")
 )
 
@@ -34,9 +43,8 @@ func ErrNotFloatValue() Value {
 	return MarshalError("ERR value is not a valid float")
 }
 
-func ErrSyntax() Value {
-	return MarshalError("ERR syntax error")
-}
+func ErrSyntax() Value    { return MarshalError("ERR syntax error") }
+func ErrNoSuchKey() Value { return MarshalError("ERR no such key") }
 
 // StringArray wraps a []string as a RESP array of bulk strings.
 func StringArray(values []string) Value {

@@ -197,7 +197,14 @@ func sizeOfMutation(m apipersistence.Mutation) int {
 // the `feedback-keep-work-out-of-locks` design rule.
 func (c *Coordinator) Emit(m apipersistence.Mutation) {
 	for _, sc := range c.feed {
-		sc.incoming <- m
+		select {
+		case sc.incoming <- m:
+		default:
+			logger.WarnNoCtx().
+				Str("sink", sc.sink.Name()).
+				Int64("lsn", int64(m.LSN)).
+				Msg("persistence: mutation dropped (sink buffer full)")
+		}
 	}
 }
 
