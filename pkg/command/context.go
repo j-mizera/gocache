@@ -39,7 +39,7 @@ type MutationEmitter interface {
 // Nil means "no snapshotter wired" — handler returns an error to the
 // client rather than silently no-oping a SAVE command.
 type SnapshotInvoker interface {
-	Snapshot(ctx context.Context, target *cache.Cache) error
+	Snapshot(ctx context.Context) error
 	LastSaveUnix() int64
 }
 

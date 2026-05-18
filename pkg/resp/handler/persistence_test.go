@@ -31,6 +31,7 @@ func TestHandler_Snapshot(t *testing.T) {
 
 	gob := persistence.NewGobSource(snapshotFile)
 	coord := persistence.New(gob)
+	coord.SetStore(c1)
 	coord.RegisterSnapshotter(gob)
 
 	cmdCtx := &command.Context{
@@ -59,6 +60,7 @@ func TestHandler_Save(t *testing.T) {
 
 	gob := persistence.NewGobSource(snapshotFile)
 	coord := persistence.New(gob)
+	coord.SetStore(c)
 	coord.RegisterSnapshotter(gob)
 
 	cmdCtx := &command.Context{
@@ -98,6 +100,7 @@ func TestHandler_Bgsave(t *testing.T) {
 
 	gob := persistence.NewGobSource(snapshotFile)
 	coord := persistence.New(gob)
+	coord.SetStore(c)
 	coord.RegisterSnapshotter(gob)
 
 	cmdCtx := &command.Context{
@@ -149,6 +152,7 @@ func TestHandler_Lastsave(t *testing.T) {
 
 	gob := persistence.NewGobSource(snapshotFile)
 	coord := persistence.New(gob)
+	coord.SetStore(c)
 	coord.RegisterSnapshotter(gob)
 
 	// Before any save, LASTSAVE should return 0.

@@ -264,6 +264,7 @@ func main() {
 	// formats, files, or per-plugin tunables.
 	snapSource, snapSnapshotter := buildSnapshotBackend(ctx)
 	coordinator := persistence.New(snapSource)
+	coordinator.SetStore(cacheInstance)
 	coordinator.RegisterSnapshotter(snapSnapshotter)
 	srv.SetPersistenceFeed(coordinator)
 	srv.SetSnapshotInvoker(coordinator)
@@ -278,7 +279,7 @@ func main() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
 		}
 		eventBus.Emit(events.NewOperationStart(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
-		if _, err := coordinator.BootInto(snapCtx, cacheInstance); err != nil {
+		if _, err := coordinator.BootInto(snapCtx); err != nil {
 			logger.Warn(snapCtx).Err(err).Msg("failed to load snapshot")
 			snapOp.Fail(err.Error())
 			if opHookExec != nil {
@@ -481,7 +482,7 @@ func handleShutdown(
 	coordinator.Stop(shutdownCtx)
 
 	logger.Info(shutdownCtx).Str("step", "4/6").Msg("saving final snapshot")
-	if err := coordinator.Snapshot(shutdownCtx, cacheInstance); err != nil {
+	if err := coordinator.Snapshot(shutdownCtx); err != nil {
 		logger.Warn(shutdownCtx).Err(err).Msg("failed to save final snapshot")
 	} else {
 		logger.Info(shutdownCtx).Msg("final snapshot saved successfully")

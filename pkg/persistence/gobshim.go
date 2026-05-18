@@ -12,7 +12,6 @@ import (
 
 	"gocache/api/logger"
 	apipersistence "gocache/api/persistence"
-	"gocache/pkg/cache"
 )
 
 // GobSource adapts the existing gob-encoded snapshot format to the
@@ -133,8 +132,8 @@ func (s *GobSource) SaveSnapshot(ctx context.Context, src apipersistence.Snapsho
 		}
 		entries = append(entries, SnapshotEntry{
 			Key:        e.Key,
-			ValueType:  cache.ValueType(e.ValueType),
-			Encoding:   cache.Encoding(e.Encoding),
+			ValueType:  int(e.ValueType),
+			Encoding:   int(e.Encoding),
 			Value:      e.Value,
 			Expiration: e.Expiration,
 		})
@@ -238,6 +237,3 @@ var _ apipersistence.Snapshotter = (*GobSource)(nil)
 // Compile-time assertion: gobIterator implements SnapshotIterator.
 var _ apipersistence.SnapshotIterator = (*gobIterator)(nil)
 
-// Sentinel — use cache.Cache only via this file's narrow surface so a
-// future refactor can swap the loader without re-grepping.
-var _ = (*cache.Cache)(nil)

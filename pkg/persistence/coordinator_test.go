@@ -16,8 +16,9 @@ import (
 func TestCoordinator_BootInto_NilSource(t *testing.T) {
 	c := New(nil)
 	target := cache.New()
+	c.SetStore(target)
 
-	lsn, err := c.BootInto(context.Background(), target)
+	lsn, err := c.BootInto(context.Background())
 	if err != nil {
 		t.Fatalf("BootInto with nil source: unexpected error: %v", err)
 	}
@@ -42,15 +43,17 @@ func TestCoordinator_BootInto_GobRoundTrip(t *testing.T) {
 
 	gob := NewGobSource(file)
 	writer := New(gob)
+	writer.SetStore(src)
 	writer.RegisterSnapshotter(gob)
-	if err := writer.Snapshot(context.Background(), src); err != nil {
+	if err := writer.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
 	target := cache.New()
 	co := New(NewGobSource(file))
+	co.SetStore(target)
 
-	lsn, err := co.BootInto(context.Background(), target)
+	lsn, err := co.BootInto(context.Background())
 	if err != nil {
 		t.Fatalf("BootInto: %v", err)
 	}
@@ -76,8 +79,9 @@ func TestCoordinator_BootInto_GobRoundTrip(t *testing.T) {
 func TestCoordinator_BootInto_MissingFileTreatedAsInitial(t *testing.T) {
 	target := cache.New()
 	co := New(NewGobSource("/nonexistent/path/snapshot.dat"))
+	co.SetStore(target)
 
-	lsn, err := co.BootInto(context.Background(), target)
+	lsn, err := co.BootInto(context.Background())
 	if err != nil {
 		t.Fatalf("BootInto on missing file: %v", err)
 	}
@@ -101,14 +105,16 @@ func TestCoordinator_BootInto_SkipsExpired(t *testing.T) {
 
 	gob := NewGobSource(file)
 	writer := New(gob)
+	writer.SetStore(src)
 	writer.RegisterSnapshotter(gob)
-	if err := writer.Snapshot(context.Background(), src); err != nil {
+	if err := writer.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
 	target := cache.New()
 	co := New(NewGobSource(file))
-	if _, err := co.BootInto(context.Background(), target); err != nil {
+	co.SetStore(target)
+	if _, err := co.BootInto(context.Background()); err != nil {
 		t.Fatalf("BootInto: %v", err)
 	}
 
@@ -186,8 +192,9 @@ func (s *fakeSource) Boot(_ context.Context) (apipersistence.BootResult, error) 
 func TestCoordinator_BootInto_PropagatesSourceError(t *testing.T) {
 	wantErr := errors.New("source-side failure")
 	co := New(&fakeSource{name: "fake", err: wantErr})
+	co.SetStore(cache.New())
 
-	_, err := co.BootInto(context.Background(), cache.New())
+	_, err := co.BootInto(context.Background())
 	if err == nil {
 		t.Fatal("expected error from BootInto")
 	}
@@ -201,8 +208,9 @@ func TestCoordinator_BootInto_InvalidBootMode(t *testing.T) {
 		name: "fake",
 		res:  apipersistence.BootResult{Mode: 99},
 	})
+	co.SetStore(cache.New())
 
-	_, err := co.BootInto(context.Background(), cache.New())
+	_, err := co.BootInto(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid BootMode")
 	}
@@ -216,8 +224,9 @@ func TestCoordinator_BootInto_SnapshotModeRequiresIterator(t *testing.T) {
 		name: "fake",
 		res:  apipersistence.BootResult{Mode: apipersistence.BootModeSnapshot}, // Snapshot nil
 	})
+	co.SetStore(cache.New())
 
-	_, err := co.BootInto(context.Background(), cache.New())
+	_, err := co.BootInto(context.Background())
 	if err == nil {
 		t.Fatal("expected error for nil Snapshot iterator under BootModeSnapshot")
 	}
@@ -237,7 +246,8 @@ func TestCoordinator_BootInto_ReplayAdvancesLSNCursor(t *testing.T) {
 		},
 	})
 
-	lsn, err := co.BootInto(context.Background(), cache.New())
+	co.SetStore(cache.New())
+	lsn, err := co.BootInto(context.Background())
 	if err != nil {
 		t.Fatalf("BootInto: %v", err)
 	}
@@ -282,8 +292,9 @@ func TestCoordinator_LastSaveUnix(t *testing.T) {
 		t.Errorf("LastSaveUnix before any save = %d, want 0", got)
 	}
 
+	co.SetStore(cache.New())
 	before := time.Now().Unix()
-	if err := co.Snapshot(context.Background(), cache.New()); err != nil {
+	if err := co.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	after := time.Now().Unix()

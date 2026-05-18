@@ -61,8 +61,9 @@ func (r *recordingSnapshotter) snapshotEntries() []apipersistence.SnapshotEntry 
 func TestCoordinator_Snapshot_NoSnapshotter(t *testing.T) {
 	c := New(nil)
 	target := cache.New()
+	c.SetStore(target)
 
-	err := c.Snapshot(context.Background(), target)
+	err := c.Snapshot(context.Background())
 	if !errors.Is(err, apipersistence.ErrNoSnapshotter) {
 		t.Errorf("expected ErrNoSnapshotter, got %v", err)
 	}
@@ -95,9 +96,10 @@ func TestCoordinator_Snapshot_FeedsAllEntries(t *testing.T) {
 
 	rec := &recordingSnapshotter{name: "rec"}
 	c := New(nil)
+	c.SetStore(target)
 	c.RegisterSnapshotter(rec)
 
-	if err := c.Snapshot(context.Background(), target); err != nil {
+	if err := c.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
@@ -128,9 +130,10 @@ func TestCoordinator_Snapshot_PropagatesError(t *testing.T) {
 	wantErr := errors.New("disk full")
 	rec := &recordingSnapshotter{name: "rec", saveErr: wantErr}
 	c := New(nil)
+	c.SetStore(target)
 	c.RegisterSnapshotter(rec)
 
-	err := c.Snapshot(context.Background(), target)
+	err := c.Snapshot(context.Background())
 	if !errors.Is(err, wantErr) {
 		t.Errorf("expected %v, got %v", wantErr, err)
 	}
@@ -148,9 +151,10 @@ func TestCoordinator_Snapshot_GobRoundTrip(t *testing.T) {
 
 	gob := NewGobSource(file)
 	c := New(gob)
+	c.SetStore(source)
 	c.RegisterSnapshotter(gob)
 
-	if err := c.Snapshot(context.Background(), source); err != nil {
+	if err := c.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	if _, err := os.Stat(file); err != nil {
@@ -159,7 +163,8 @@ func TestCoordinator_Snapshot_GobRoundTrip(t *testing.T) {
 
 	// Round-trip: load the same snapshot back into a fresh cache.
 	target := cache.New()
-	if _, err := c.BootInto(context.Background(), target); err != nil {
+	c.SetStore(target)
+	if _, err := c.BootInto(context.Background()); err != nil {
 		t.Fatalf("BootInto: %v", err)
 	}
 	if got := target.Len(); got != 2 {
@@ -179,9 +184,10 @@ func TestGobSource_SetFilename_HotReload(t *testing.T) {
 
 	gob := NewGobSource(file1)
 	c := New(gob)
+	c.SetStore(source)
 	c.RegisterSnapshotter(gob)
 
-	if err := c.Snapshot(context.Background(), source); err != nil {
+	if err := c.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot to file1: %v", err)
 	}
 	if _, err := os.Stat(file1); err != nil {
@@ -189,7 +195,7 @@ func TestGobSource_SetFilename_HotReload(t *testing.T) {
 	}
 
 	gob.SetFilename(file2)
-	if err := c.Snapshot(context.Background(), source); err != nil {
+	if err := c.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot to file2: %v", err)
 	}
 	if _, err := os.Stat(file2); err != nil {
@@ -263,6 +269,7 @@ func TestCoordinator_Snapshot_SeedsLSN(t *testing.T) {
 
 	rec := &recordingLSNSnapshotter{recordingSnapshotter: recordingSnapshotter{name: "v1-mock"}}
 	c := New(nil)
+	c.SetStore(target)
 	c.RegisterSnapshotter(rec)
 	// Burn LSNs so CurrentLSN is non-zero — verifies the coordinator
 	// reads its own cursor instead of always passing ZeroLSN.
@@ -270,7 +277,7 @@ func TestCoordinator_Snapshot_SeedsLSN(t *testing.T) {
 	c.AllocateLSN()
 	c.AllocateLSN()
 
-	if err := c.Snapshot(context.Background(), target); err != nil {
+	if err := c.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	if rec.seededLSN != apipersistence.LSN(3) {
@@ -288,9 +295,10 @@ func TestCoordinator_Snapshot_NoSeedWhenNoLSNSeeder(t *testing.T) {
 
 	rec := &recordingSnapshotter{name: "gob-mock"}
 	c := New(nil)
+	c.SetStore(target)
 	c.RegisterSnapshotter(rec)
 	c.AllocateLSN() // make CurrentLSN > 0
-	if err := c.Snapshot(context.Background(), target); err != nil {
+	if err := c.Snapshot(context.Background()); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	// No assertion on seededLSN — the recording snapshotter doesn't

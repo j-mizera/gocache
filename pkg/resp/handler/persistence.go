@@ -17,7 +17,7 @@ func HandleSnapshot(cmdCtx *command.Context) command.Result {
 		if cmdCtx.Snapshotter == nil {
 			return fmt.Errorf("snapshot: no snapshotter registered")
 		}
-		if err := cmdCtx.Snapshotter.Snapshot(cmdCtx.Context(), cmdCtx.Cache); err != nil {
+		if err := cmdCtx.Snapshotter.Snapshot(cmdCtx.Context()); err != nil {
 			return err
 		}
 		return "OK"
@@ -43,9 +43,8 @@ func HandleBgsave(cmdCtx *command.Context) command.Result {
 		return command.Result{Err: fmt.Errorf("snapshot: no snapshotter registered")}
 	}
 	snapshotter := cmdCtx.Snapshotter
-	c := cmdCtx.Cache
 	go func() {
-		if err := snapshotter.Snapshot(context.Background(), c); err != nil {
+		if err := snapshotter.Snapshot(context.Background()); err != nil {
 			logger.ErrorNoCtx().Err(err).Msg("BGSAVE failed")
 		}
 	}()
