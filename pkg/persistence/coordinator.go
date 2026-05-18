@@ -11,7 +11,6 @@ import (
 
 	"gocache/api/logger"
 	apipersistence "gocache/api/persistence"
-	"gocache/pkg/cache"
 )
 
 // Coordinator orchestrates the persistence Source and Sinks. On boot it
@@ -28,6 +27,11 @@ import (
 type Coordinator struct {
 	source apipersistence.Source
 	sinks  []apipersistence.Sink
+
+	// store is the coordinator's abstract view of the cache. Set via
+	// SetStore before BootInto / Snapshot. The coordinator never imports
+	// pkg/cache — all cache access flows through this interface.
+	store apipersistence.CacheStore
 
 	// snapshotter is the registered point-in-time snapshot writer.
 	// Optional — Coordinator.Snapshot returns ErrNoSnapshotter when nil.
@@ -157,6 +161,11 @@ func (c *Coordinator) Source() apipersistence.Source { return c.source }
 // Sinks returns the registered sinks (may be empty).
 func (c *Coordinator) Sinks() []apipersistence.Sink { return c.sinks }
 
+// SetStore wires the cache abstraction used by BootInto and Snapshot.
+// Must be called before either method. Passing nil is valid only when
+// neither boot nor snapshot will be invoked (pure pass-through mode).
+func (c *Coordinator) SetStore(s apipersistence.CacheStore) { c.store = s }
+
 // RegisterSnapshotter installs the point-in-time snapshot writer. Safe to
 // call before or after Start. A nil argument clears the registration.
 // Replacing an existing snapshotter is allowed — useful when config
@@ -174,32 +183,26 @@ func (c *Coordinator) Snapshotter() apipersistence.Snapshotter {
 	return c.snapshotter
 }
 
-// Snapshot writes a point-in-time dump of target to the registered
-// snapshotter. Iterates the cache, materialises a SnapshotSource backed
-// by the captured slice, then delegates to snapshotter.SaveSnapshot.
+// Snapshot writes a point-in-time dump to the registered snapshotter.
+// Iterates the cache via the CacheStore interface, materialises a
+// SnapshotSource backed by the captured slice, then delegates to
+// snapshotter.SaveSnapshot.
 //
 // Returns ErrNoSnapshotter when none is registered — callers can choose
 // to treat that as fatal (SAVE command) or as a no-op (scheduled worker
 // when persistence is disabled).
-//
-// The cache snapshot is captured eagerly into a slice before the
-// snapshotter sees it. That keeps the snapshotter simple (it just walks
-// Next/io.EOF) at the cost of buffering all entries in memory once. The
-// upcoming v1 streaming format (ADR-0005) can reduce buffering by
-// writing each record as it's yielded; the gob shim already buffers
-// internally so this PR is no worse than the legacy SaveSnapshot.
-func (c *Coordinator) Snapshot(ctx context.Context, target *cache.Cache) error {
+func (c *Coordinator) Snapshot(ctx context.Context) error {
 	s := c.Snapshotter()
 	if s == nil {
 		return apipersistence.ErrNoSnapshotter
 	}
-	// Optional LSN seeding — snapshotters that record the cursor in
-	// their on-disk format (v1 binary format, ADR-0005) implement
-	// LSNSeeder. Skip silently for snapshotters that don't.
+	if c.store == nil {
+		return fmt.Errorf("persistence: coordinator store not set")
+	}
 	if seeder, ok := s.(apipersistence.LSNSeeder); ok {
 		seeder.SetLSN(c.CurrentLSN())
 	}
-	entries := captureSnapshotEntries(target)
+	entries := c.store.CaptureSnapshot()
 	src := &sliceSnapshotSource{entries: entries}
 	if err := s.SaveSnapshot(ctx, src); err != nil {
 		return err
@@ -208,47 +211,6 @@ func (c *Coordinator) Snapshot(ctx context.Context, target *cache.Cache) error {
 	return nil
 }
 
-// captureSnapshotEntries walks the cache and returns every live entry as
-// an api/persistence.SnapshotEntry. Packed values are copied out of the
-// slab allocator so the snapshotter sees a stable []byte independent of
-// slab lifecycle. ValueType and Encoding cast directly from the cache
-// enums to the api enums — the values are aligned by construction (see
-// type comments in api/persistence/types.go).
-//
-// SortedSet values are flattened to map[string]float64 here so the api
-// boundary stays free of pkg/cache types — plugins receive only generic
-// Go primitives (see ADR-0008). The conversion is the same shape as
-// hash/list/set already use.
-func captureSnapshotEntries(target *cache.Cache) []apipersistence.SnapshotEntry {
-	var entries []apipersistence.SnapshotEntry
-	target.Range(func(key string, entry cache.Entry, expiration int64) bool {
-		var v any
-		switch {
-		case entry.Encoding == cache.EncPacked:
-			src := target.ResolvePacked(entry)
-			buf := make([]byte, len(src))
-			copy(buf, src)
-			v = buf
-		case entry.ValueType == cache.ObjTypeSortedSet:
-			if z, ok := entry.Value.(*cache.SortedSet); ok {
-				v = z.Members()
-			} else {
-				v = entry.Value
-			}
-		default:
-			v = entry.Value
-		}
-		entries = append(entries, apipersistence.SnapshotEntry{
-			Key:        key,
-			ValueType:  apipersistence.ValueType(entry.ValueType),
-			Encoding:   apipersistence.Encoding(entry.Encoding),
-			Value:      v,
-			Expiration: expiration,
-		})
-		return true
-	})
-	return entries
-}
 
 // sliceSnapshotSource is a SnapshotSource backed by a pre-captured slice.
 // Forward-only single-pass — Next walks the slice and returns io.EOF once
@@ -269,7 +231,7 @@ func (s *sliceSnapshotSource) Next(_ context.Context) (apipersistence.SnapshotEn
 }
 
 // BootInto drives the recovery path: fetches the BootResult from the
-// Source, applies it to the target cache, and seeds the LSN cursor. The
+// Source, applies it to the CacheStore, and seeds the LSN cursor. The
 // returned LSN is the resume point for runtime mutation allocation.
 //
 // For BootModeInitial (or nil source), returns (ZeroLSN, nil) without
@@ -280,7 +242,7 @@ func (s *sliceSnapshotSource) Next(_ context.Context) (apipersistence.SnapshotEn
 //
 // On error, the cache may be in a partially-loaded state — callers should
 // abort startup rather than continue serving traffic against a torn cache.
-func (c *Coordinator) BootInto(ctx context.Context, target *cache.Cache) (apipersistence.LSN, error) {
+func (c *Coordinator) BootInto(ctx context.Context) (apipersistence.LSN, error) {
 	if c.source == nil {
 		logger.Debug(ctx).Msg("persistence coordinator: no source registered, BootMode=initial")
 		return apipersistence.ZeroLSN, nil
@@ -305,7 +267,7 @@ func (c *Coordinator) BootInto(ctx context.Context, target *cache.Cache) (apiper
 		if boot.Snapshot == nil {
 			return 0, fmt.Errorf("source %s declared BootModeSnapshot with nil Snapshot", c.source.Name())
 		}
-		loaded, err := loadSnapshotInto(ctx, boot.Snapshot, target)
+		loaded, err := c.loadSnapshotInto(ctx, boot.Snapshot)
 		if err != nil {
 			return 0, fmt.Errorf("source %s snapshot: %w", c.source.Name(), err)
 		}
@@ -321,7 +283,7 @@ func (c *Coordinator) BootInto(ctx context.Context, target *cache.Cache) (apiper
 		if boot.Replay == nil {
 			return 0, fmt.Errorf("source %s declared BootModeReplay with nil Replay", c.source.Name())
 		}
-		last, applied, err := replayInto(ctx, boot.Replay, target)
+		last, applied, err := replayInto(ctx, boot.Replay)
 		if err != nil {
 			return 0, fmt.Errorf("source %s replay: %w", c.source.Name(), err)
 		}
@@ -340,8 +302,11 @@ func (c *Coordinator) BootInto(ctx context.Context, target *cache.Cache) (apiper
 
 // loadSnapshotInto drains a SnapshotIterator into the cache. Returns the
 // number of entries loaded.
-func loadSnapshotInto(ctx context.Context, it apipersistence.SnapshotIterator, target *cache.Cache) (int, error) {
-	target.Clear(ctx)
+func (c *Coordinator) loadSnapshotInto(ctx context.Context, it apipersistence.SnapshotIterator) (int, error) {
+	if c.store == nil {
+		return 0, fmt.Errorf("persistence: coordinator store not set")
+	}
+	c.store.Clear(ctx)
 	loaded := 0
 	now := time.Now().UnixNano()
 	for {
@@ -355,7 +320,7 @@ func loadSnapshotInto(ctx context.Context, it apipersistence.SnapshotIterator, t
 		if e.Expiration > 0 && e.Expiration < now {
 			continue
 		}
-		if err := applyEntry(ctx, e, target); err != nil {
+		if err := c.store.LoadEntry(ctx, e); err != nil {
 			logger.Warn(ctx).Err(err).Str("key", e.Key).Msg("persistence: skipping malformed entry")
 			continue
 		}
@@ -369,7 +334,7 @@ func loadSnapshotInto(ctx context.Context, it apipersistence.SnapshotIterator, t
 // mutations against the cache (that requires the engine adapter wired in
 // feat/persistence-mutation-feed). Returning early is correct: the
 // snapshot path is the recovery path that ships now.
-func replayInto(ctx context.Context, it apipersistence.ReplayIterator, _ *cache.Cache) (apipersistence.LSN, int, error) {
+func replayInto(ctx context.Context, it apipersistence.ReplayIterator) (apipersistence.LSN, int, error) {
 	var last apipersistence.LSN
 	count := 0
 	for {
@@ -389,42 +354,3 @@ func replayInto(ctx context.Context, it apipersistence.ReplayIterator, _ *cache.
 	}
 }
 
-// applyEntry writes one snapshot entry into the target cache. It mirrors
-// the existing LoadSnapshot logic — the only difference is the api types
-// instead of pkg/persistence's internal struct. Conversion between the
-// api enums and pkg/cache enums is a numeric cast (the values are aligned
-// — see the type comments in api/persistence/types.go).
-//
-// SortedSet values cross the api boundary as map[string]float64 (per
-// ADR-0008); reconstruct the cache-internal *SortedSet here before
-// handing to RawLoad. Other native types (list, hash, set, bytes) flow
-// through unchanged because they're already generic Go primitives.
-func applyEntry(_ context.Context, e apipersistence.SnapshotEntry, target *cache.Cache) error {
-	if e.Encoding == apipersistence.EncodingPacked {
-		var buf []byte
-		switch v := e.Value.(type) {
-		case []byte:
-			buf = v
-		case string:
-			buf = []byte(v)
-		default:
-			return fmt.Errorf("packed entry has non-byte payload: %T", e.Value)
-		}
-		target.RawLoadPacked(e.Key, cache.ValueType(e.ValueType), buf, e.Expiration)
-		return nil
-	}
-	value := e.Value
-	if e.ValueType == apipersistence.ValueTypeSortedSet {
-		members, ok := value.(map[string]float64)
-		if !ok {
-			return fmt.Errorf("sorted-set entry has non-map payload: %T", e.Value)
-		}
-		z := cache.NewSortedSet()
-		for member, score := range members {
-			z.Add(member, score)
-		}
-		value = z
-	}
-	target.RawLoad(e.Key, value, e.Expiration)
-	return nil
-}

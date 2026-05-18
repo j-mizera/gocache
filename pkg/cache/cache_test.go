@@ -41,15 +41,17 @@ func TestCache_Snapshot(t *testing.T) {
 
 	gob := persistence.NewGobSource(file)
 	coord := persistence.New(gob)
+	coord.SetStore(c)
 	coord.RegisterSnapshotter(gob)
 
-	if err := coord.Snapshot(context.Background(), c); err != nil {
+	if err := coord.Snapshot(context.Background()); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
 	c2 := cache.New()
 	coord2 := persistence.New(persistence.NewGobSource(file))
-	if _, err := coord2.BootInto(context.Background(), c2); err != nil {
+	coord2.SetStore(c2)
+	if _, err := coord2.BootInto(context.Background()); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 

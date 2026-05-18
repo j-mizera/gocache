@@ -160,7 +160,7 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 					continue
 				}
 				if err := w.engine.Dispatch(opCtx, func() {
-					if err := w.snapshotter.Snapshot(opCtx, w.cache); err != nil {
+					if err := w.snapshotter.Snapshot(opCtx); err != nil {
 						logger.Warn(opCtx).Err(err).Msg("snapshot save failed")
 						w.failOp(op, err.Error())
 					} else {

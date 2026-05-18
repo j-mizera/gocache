@@ -33,6 +33,7 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 
 	gob := persistence.NewGobSource(file)
 	coord := persistence.New(gob)
+	coord.SetStore(c)
 	coord.RegisterSnapshotter(gob)
 
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond)
