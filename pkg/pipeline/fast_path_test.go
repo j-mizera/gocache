@@ -1,4 +1,4 @@
-package evaluator
+package pipeline
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 // the tracker entirely. ActiveCount stays zero and SkippedCount climbs by
 // the number of commands run.
 func TestFastPath_NoSinks_BypassesTracker(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	if got := tracker.SkippedCount(); got != 0 {
@@ -43,7 +43,7 @@ func TestFastPath_NoSinks_BypassesTracker(t *testing.T) {
 // (events fire, tracker registers and unregisters) — even though the
 // fast-path branch is also present.
 func TestFastPath_BusEmitter_RoutesToSlowPath(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	emitter := &mockEmitter{}
@@ -69,7 +69,7 @@ func TestFastPath_BusEmitter_RoutesToSlowPath(t *testing.T) {
 // command-hook executor with HasAny=true routes new commands through the
 // slow path so pre-hooks fire.
 func TestFastPath_HookExecutor_RoutesToSlowPath(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	hooks := &mockHookExecutor{hasAny: true}
@@ -93,7 +93,7 @@ func TestFastPath_HookExecutor_RoutesToSlowPath(t *testing.T) {
 // operation-hook executor with HasAny=true routes new commands through the
 // slow path so start/complete ophooks fire.
 func TestFastPath_OpHookExecutor_RoutesToSlowPath(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	ophooks := &mockOpHookExecutor{hasAny: true}
@@ -126,7 +126,7 @@ func TestFastPath_OpHookExecutor_RoutesToSlowPath(t *testing.T) {
 // once Subscribe / Register returns, all subsequent evaluator calls see
 // the new state.
 func TestFastPath_MidStreamSubscribe(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	// Wire a real Bus so we can subscribe mid-stream.

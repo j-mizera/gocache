@@ -1,4 +1,4 @@
-package evaluator
+package pipeline
 
 // hasAnySink reports whether any observer is currently attached to the
 // evaluator's three sinks: the event bus, the command-hook executor, and
@@ -17,7 +17,7 @@ package evaluator
 // event bus replay ring covers Emit'd events; ophook lifecycle replay is
 // out of scope (see ophooks.Executor.Replay — it only fires for ops the
 // tracker still holds, which the fast path does not register).
-func (b *BaseEvaluator) hasAnySink() bool {
+func (b *Pipeline) hasAnySink() bool {
 	if b.emitter != nil && b.emitter.HasSubscribers() {
 		return true
 	}

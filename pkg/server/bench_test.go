@@ -27,7 +27,7 @@ import (
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/engine"
-	"gocache/pkg/evaluator"
+	"gocache/pkg/pipeline"
 	"gocache/pkg/events"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/resp"
@@ -39,7 +39,7 @@ import (
 type inProcRig struct {
 	cache *cache.Cache
 	eng   *engine.Engine
-	eval  *evaluator.BaseEvaluator
+	eval  *pipeline.Pipeline
 }
 
 func newInProcRig(b *testing.B) *inProcRig {
@@ -56,7 +56,7 @@ func newInProcRig(b *testing.B) *inProcRig {
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
 
-	ev := evaluator.New(c, e, "", br, wm)
+	ev := pipeline.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	// Match production: cmd/server/main.go always wires the event bus, even
 	// when no plugins are loaded. Without this, the evaluator's emitter
@@ -198,7 +198,7 @@ func TestHSET_PromotedHash_O1(t *testing.T) {
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
-	ev := evaluator.New(c, e, "", br, wm)
+	ev := pipeline.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
 
@@ -240,7 +240,7 @@ func runPromotedCollectionO1(t *testing.T, deadline time.Duration, n int, makeAr
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
-	ev := evaluator.New(c, e, "", br, wm)
+	ev := pipeline.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
 
