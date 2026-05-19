@@ -112,6 +112,89 @@ func HashSet(buf []byte, field, value string, maxEntries, maxValueLen int) (
 	return out, true, shouldPromote, nil
 }
 
+// HashSetBatch sets multiple field=value pairs in a single pass. Scans the
+// existing buffer once, applies updates in place, and appends new fields.
+// O(N + K) instead of O(N × K) for K individual HashSet calls.
+func HashSetBatch(buf []byte, kvs []string, maxEntries, maxValueLen int) (
+	newBuf []byte, added int, shouldPromote bool, err error,
+) {
+	if len(kvs) == 2 {
+		nb, ok, sp, err := HashSet(buf, kvs[0], kvs[1], maxEntries, maxValueLen)
+		if ok {
+			return nb, 1, sp, err
+		}
+		return nb, 0, sp, err
+	}
+	for i := 0; i < len(kvs); i += 2 {
+		if len(kvs[i]) > cache.MaxCollectionItemLen || len(kvs[i+1]) > cache.MaxCollectionItemLen {
+			return buf, 0, false, cache.ErrItemTooLarge
+		}
+	}
+
+	count, err := readCount(buf)
+	if err != nil {
+		return buf, 0, false, err
+	}
+
+	incoming := make(map[string]string, len(kvs)/2)
+	for i := 0; i < len(kvs); i += 2 {
+		incoming[kvs[i]] = kvs[i+1]
+	}
+
+	capEst := len(buf)
+	for field, value := range incoming {
+		capEst += 2*LenPrefixBytes + len(field) + len(value)
+	}
+
+	out := make([]byte, HeaderBytes, capEst)
+	consumed := make(map[string]struct{}, len(incoming))
+	pos := HeaderBytes
+	for i := 0; i < count; i++ {
+		entryStart := pos
+		f, afterField, err := readFrame(buf, pos)
+		if err != nil {
+			return buf, 0, false, err
+		}
+		_, afterValue, err := readFrame(buf, afterField)
+		if err != nil {
+			return buf, 0, false, err
+		}
+		field := string(f)
+		if newVal, upd := incoming[field]; upd {
+			out = append(out, buf[entryStart:afterField]...)
+			out = appendFrameString(out, newVal)
+			consumed[field] = struct{}{}
+		} else {
+			out = append(out, buf[entryStart:afterValue]...)
+		}
+		pos = afterValue
+	}
+	for field, value := range incoming {
+		if _, done := consumed[field]; !done {
+			out = appendFrameString(out, field)
+			out = appendFrameString(out, value)
+			added++
+		}
+	}
+
+	newCount := count + added
+	if newCount > cache.MaxCollectionItems {
+		return buf, 0, false, cache.ErrTooManyItems
+	}
+	writeCount(out, newCount)
+
+	shouldPromote = newCount > maxEntries
+	if !shouldPromote {
+		for _, value := range incoming {
+			if len(value) > maxValueLen {
+				shouldPromote = true
+				break
+			}
+		}
+	}
+	return out, added, shouldPromote, nil
+}
+
 // HashDelete removes field from buf. Returns the (possibly reallocated)
 // buffer and whether field was present.
 func HashDelete(buf []byte, field string) (newBuf []byte, removed bool, err error) {

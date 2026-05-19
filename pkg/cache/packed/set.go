@@ -54,72 +54,149 @@ func setFrameBytes(buf []byte, start int) []byte {
 }
 
 // SetContains reports whether member exists. Binary-searches the sorted
-// layout.
+// layout via the offset index.
 func SetContains(buf []byte, member string) (bool, error) {
 	starts, _, err := setOffsets(buf)
 	if err != nil {
 		return false, err
 	}
-	// Linear scan for now — bounded by maxEntries ≤ 512. If benchmarking
-	// shows this matters we'll binary-search via starts[] indexing.
-	for _, s := range starts {
-		if string(setFrameBytes(buf, s)) == member {
-			return true, nil
-		}
+	target := []byte(member)
+	idx := sort.Search(len(starts), func(i int) bool {
+		return bytes.Compare(setFrameBytes(buf, starts[i]), target) >= 0
+	})
+	if idx < len(starts) && bytes.Equal(setFrameBytes(buf, starts[idx]), target) {
+		return true, nil
 	}
 	return false, nil
 }
 
 // SetAdd inserts member in sorted order. Returns the new buffer,
 // added=false if it was already present, shouldPromote=true when the result
-// crosses either threshold.
+// crosses either threshold. Uses binary search over the offset index.
 func SetAdd(buf []byte, member string, maxEntries, maxValueLen int) (
 	newBuf []byte, added bool, shouldPromote bool, err error,
 ) {
 	if len(member) > cache.MaxCollectionItemLen {
 		return buf, false, false, cache.ErrItemTooLarge
 	}
-	count, err := readCount(buf)
+	starts, _, err := setOffsets(buf)
 	if err != nil {
 		return buf, false, false, err
 	}
+	count := len(starts)
 	if count+1 > cache.MaxCollectionItems {
 		return buf, false, false, cache.ErrTooManyItems
 	}
-	// Walk to find insertion position.
 	target := []byte(member)
-	pos := HeaderBytes
-	for i := 0; i < count; i++ {
-		frameStart := pos
-		frame, next, err := readFrame(buf, pos)
-		if err != nil {
-			return buf, false, false, err
-		}
-		cmp := bytes.Compare(frame, target)
-		if cmp == 0 {
-			return buf, false, false, nil // already present
-		}
-		if cmp > 0 {
-			// Insert before frameStart.
-			need := len(buf) + LenPrefixBytes + len(member)
-			out := make([]byte, 0, need)
-			out = append(out, buf[:frameStart]...)
-			out = appendFrameString(out, member)
-			out = append(out, buf[frameStart:]...)
-			writeCount(out, count+1)
-			shouldPromote = (count+1) > maxEntries || len(member) > maxValueLen
-			return out, true, shouldPromote, nil
-		}
-		pos = next
+	idx := sort.Search(count, func(i int) bool {
+		return bytes.Compare(setFrameBytes(buf, starts[i]), target) >= 0
+	})
+	if idx < count && bytes.Equal(setFrameBytes(buf, starts[idx]), target) {
+		return buf, false, false, nil
 	}
-	// Append at end (member is the new max).
+	shouldPromote = (count+1) > maxEntries || len(member) > maxValueLen
 	need := len(buf) + LenPrefixBytes + len(member)
+	if idx < count {
+		insertAt := starts[idx]
+		out := make([]byte, 0, need)
+		out = append(out, buf[:insertAt]...)
+		out = appendFrameString(out, member)
+		out = append(out, buf[insertAt:]...)
+		writeCount(out, count+1)
+		return out, true, shouldPromote, nil
+	}
 	out := make([]byte, len(buf), need)
 	copy(out, buf)
 	out = appendFrameString(out, member)
 	writeCount(out, count+1)
-	shouldPromote = (count+1) > maxEntries || len(member) > maxValueLen
 	return out, true, shouldPromote, nil
+}
+
+// SetAddBatch inserts multiple members in a single pass. Sorts and
+// deduplicates members, then sort-merges with the existing sorted layout.
+// O(N + K log K) instead of O(N × K) for K individual SetAdd calls.
+func SetAddBatch(buf []byte, members []string, maxEntries, maxValueLen int) (
+	newBuf []byte, added int, shouldPromote bool, err error,
+) {
+	if len(members) == 1 {
+		nb, ok, sp, err := SetAdd(buf, members[0], maxEntries, maxValueLen)
+		if ok {
+			return nb, 1, sp, err
+		}
+		return nb, 0, sp, err
+	}
+	for _, m := range members {
+		if len(m) > cache.MaxCollectionItemLen {
+			return buf, 0, false, cache.ErrItemTooLarge
+		}
+	}
+	starts, ends, err := setOffsets(buf)
+	if err != nil {
+		return buf, 0, false, err
+	}
+	existCount := len(starts)
+
+	sorted := make([]string, len(members))
+	copy(sorted, members)
+	sort.Strings(sorted)
+	deduped := sorted[:0]
+	for i, m := range sorted {
+		if i == 0 || m != sorted[i-1] {
+			deduped = append(deduped, m)
+		}
+	}
+
+	capEst := len(buf)
+	for _, m := range deduped {
+		capEst += LenPrefixBytes + len(m)
+	}
+
+	out := make([]byte, HeaderBytes, capEst)
+	ei, ni := 0, 0
+	for ei < existCount && ni < len(deduped) {
+		existing := setFrameBytes(buf, starts[ei])
+		cmp := bytes.Compare(existing, []byte(deduped[ni]))
+		switch {
+		case cmp < 0:
+			out = append(out, buf[starts[ei]:ends[ei]]...)
+			ei++
+		case cmp == 0:
+			out = append(out, buf[starts[ei]:ends[ei]]...)
+			ei++
+			ni++
+		default:
+			out = appendFrameString(out, deduped[ni])
+			added++
+			ni++
+		}
+	}
+	for ; ei < existCount; ei++ {
+		out = append(out, buf[starts[ei]:ends[ei]]...)
+	}
+	for ; ni < len(deduped); ni++ {
+		out = appendFrameString(out, deduped[ni])
+		added++
+	}
+	if added == 0 {
+		return buf, 0, false, nil
+	}
+
+	newCount := existCount + added
+	if newCount > cache.MaxCollectionItems {
+		return buf, 0, false, cache.ErrTooManyItems
+	}
+	writeCount(out, newCount)
+
+	shouldPromote = newCount > maxEntries
+	if !shouldPromote {
+		for _, m := range deduped {
+			if len(m) > maxValueLen {
+				shouldPromote = true
+				break
+			}
+		}
+	}
+	return out, added, shouldPromote, nil
 }
 
 // SetRemove removes member. Returns the new buffer and removed status.

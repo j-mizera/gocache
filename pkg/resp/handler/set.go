@@ -173,37 +173,21 @@ func saddStartPacked(cmdCtx *command.Context, key string, members []string) any 
 func saddPacked(cmdCtx *command.Context, key string, buf []byte, members []string) any {
 	t := cmdCtx.Cache.PackedThresholds()
 	ttl := cmdCtx.Cache.RawTTL(key)
-	added := 0
-	for i, m := range members {
-		var addedOne, promoted bool
-		var err error
-		buf, addedOne, promoted, err = packed.SetAdd(buf, m, t.SetMaxEntries, t.SetMaxValue)
-		if err != nil {
+	newBuf, added, promoted, err := packed.SetAddBatch(buf, members, t.SetMaxEntries, t.SetMaxValue)
+	if err != nil {
+		return err
+	}
+	if promoted {
+		set, perr := packed.SetToMap(newBuf)
+		if perr != nil {
+			return perr
+		}
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, setMapSize(set), ttl); err != nil {
 			return err
 		}
-		if addedOne {
-			added++
-		}
-		if promoted {
-			set, perr := packed.SetToMap(buf)
-			if perr != nil {
-				return perr
-			}
-			size := setMapSize(set)
-			for _, rest := range members[i+1:] {
-				if _, exists := set[rest]; !exists {
-					set[rest] = struct{}{}
-					added++
-					size += int64(len(rest)) + cache.SetMemberOverhead
-				}
-			}
-			if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, size, ttl); err != nil {
-				return err
-			}
-			return added
-		}
+		return added
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSet, buf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSet, newBuf, ttl); err != nil {
 		return err
 	}
 	return added

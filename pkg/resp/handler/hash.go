@@ -55,68 +55,27 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 // logic as hsetPacked so a single field larger than maxValue skips Packed
 // entirely.
 func hsetStartPacked(cmdCtx *command.Context, key string, kvs []string) any {
-	buf := packed.HashNew()
-	t := cmdCtx.Cache.PackedThresholds()
-	added := 0
-	for i := 0; i < len(kvs); i += 2 {
-		var addedOne, promoted bool
-		var err error
-		buf, addedOne, promoted, err = packed.HashSet(buf, kvs[i], kvs[i+1], t.HashMaxEntries, t.HashMaxValue)
-		if err != nil {
-			return err
-		}
-		if addedOne {
-			added++
-		}
-		if promoted {
-			m, perr := packed.HashToMap(buf)
-			if perr != nil {
-				return perr
-			}
-			n, nerr := finishHsetNative(cmdCtx, key, m, hashMapSize(m), kvs[i+2:])
-			if nerr != nil {
-				return nerr
-			}
-			added += n
-			return added
-		}
-	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeHash, buf, 0); err != nil {
-		return err
-	}
-	return added
+	return hsetPacked(cmdCtx, key, packed.HashNew(), kvs)
 }
 
-// hsetPacked mutates an existing Packed hash. On promotion it hands off to
-// the native path with the remaining arguments.
 func hsetPacked(cmdCtx *command.Context, key string, buf []byte, kvs []string) any {
 	t := cmdCtx.Cache.PackedThresholds()
-	added := 0
-	for i := 0; i < len(kvs); i += 2 {
-		var addedOne, promoted bool
-		var err error
-		buf, addedOne, promoted, err = packed.HashSet(buf, kvs[i], kvs[i+1], t.HashMaxEntries, t.HashMaxValue)
-		if err != nil {
+	ttl := cmdCtx.Cache.RawTTL(key)
+	newBuf, added, promoted, err := packed.HashSetBatch(buf, kvs, t.HashMaxEntries, t.HashMaxValue)
+	if err != nil {
+		return err
+	}
+	if promoted {
+		m, perr := packed.HashToMap(newBuf)
+		if perr != nil {
+			return perr
+		}
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, m, hashMapSize(m), ttl); err != nil {
 			return err
 		}
-		if addedOne {
-			added++
-		}
-		if promoted {
-			m, perr := packed.HashToMap(buf)
-			if perr != nil {
-				return perr
-			}
-			n, nerr := finishHsetNative(cmdCtx, key, m, hashMapSize(m), kvs[i+2:])
-			if nerr != nil {
-				return nerr
-			}
-			added += n
-			return added
-		}
+		return added
 	}
-	ttl := cmdCtx.Cache.RawTTL(key)
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeHash, buf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeHash, newBuf, ttl); err != nil {
 		return err
 	}
 	return added

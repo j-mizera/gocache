@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gammazero/deque"
+
 	apiconfig "gocache/api/config"
 	"gocache/api/logger"
 	"gocache/pkg/cache/slab"
@@ -665,7 +667,7 @@ func estimateBytesSize(key string, buf []byte) int64 {
 // valueTypeOf maps a Go-native value to its ObjType.
 func valueTypeOf(value any) ValueType {
 	switch value.(type) {
-	case []string:
+	case *deque.Deque[string]:
 		return ObjTypeList
 	case map[string]string:
 		return ObjTypeHash
@@ -695,9 +697,9 @@ func estimateSize(key string, value any) int64 {
 		size += int64(len(v))
 	case string:
 		size += int64(len(v))
-	case []string:
-		for _, s := range v {
-			size += int64(len(s)) + ListElementOverhead
+	case *deque.Deque[string]:
+		for i := 0; i < v.Len(); i++ {
+			size += int64(len(v.At(i))) + ListElementOverhead
 		}
 	case map[string]string:
 		for k, val := range v {

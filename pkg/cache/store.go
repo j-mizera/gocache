@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gammazero/deque"
+
 	apipersistence "gocache/api/persistence"
 )
 
@@ -21,6 +23,16 @@ func (c *Cache) CaptureSnapshot() []apipersistence.SnapshotEntry {
 			buf := make([]byte, len(src))
 			copy(buf, src)
 			v = buf
+		case entry.ValueType == ObjTypeList:
+			if dq, ok := entry.Value.(*deque.Deque[string]); ok {
+				items := make([]string, 0, dq.Len())
+				for i := 0; i < dq.Len(); i++ {
+					items = append(items, dq.At(i))
+				}
+				v = items
+			} else {
+				v = entry.Value
+			}
 		case entry.ValueType == ObjTypeSortedSet:
 			if z, ok := entry.Value.(*SortedSet); ok {
 				v = z.Members()
@@ -57,6 +69,18 @@ func (c *Cache) LoadEntry(_ context.Context, e apipersistence.SnapshotEntry) err
 		return nil
 	}
 	value := e.Value
+	if e.ValueType == apipersistence.ValueTypeList {
+		items, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("list entry has non-slice payload: %T", e.Value)
+		}
+		dq := new(deque.Deque[string])
+		dq.Grow(len(items))
+		for _, item := range items {
+			dq.PushBack(item)
+		}
+		value = dq
+	}
 	if e.ValueType == apipersistence.ValueTypeSortedSet {
 		members, ok := value.(map[string]float64)
 		if !ok {
