@@ -1,6 +1,10 @@
 package packed
 
-import "gocache/pkg/cache"
+import (
+	"github.com/gammazero/deque"
+
+	"gocache/pkg/cache"
+)
 
 // List layout: [count u32] ( [len u32] [item] )*
 //
@@ -260,6 +264,24 @@ func ListToSlice(buf []byte) ([]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// ListToDeque decodes buf into *deque.Deque[string]. Used for Packed→Native promotion.
+func ListToDeque(buf []byte) (*deque.Deque[string], error) {
+	count, err := readCount(buf)
+	if err != nil {
+		return nil, err
+	}
+	dq := new(deque.Deque[string])
+	dq.Grow(count)
+	err = ListIterate(buf, func(_ int, item []byte) bool {
+		dq.PushBack(string(item))
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dq, nil
 }
 
 // ListFromSlice encodes items into a packed buffer. Used for native→packed

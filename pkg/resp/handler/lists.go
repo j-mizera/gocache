@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gammazero/deque"
+
 	"gocache/api/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
@@ -13,13 +15,10 @@ import (
 )
 
 
-// listSliceSize walks a []string once to compute its estimateSize-equivalent
-// payload size. Used at the packed→native promotion boundary; subsequent
-// mutations track size incrementally and never re-walk.
-func listSliceSize(list []string) int64 {
+func listDequeSize(dq *deque.Deque[string]) int64 {
 	var size int64
-	for _, s := range list {
-		size += int64(len(s)) + cache.ListElementOverhead
+	for i := 0; i < dq.Len(); i++ {
+		size += int64(len(dq.At(i))) + cache.ListElementOverhead
 	}
 	return size
 }
@@ -37,8 +36,8 @@ func listAppendSize(values []string) int64 {
 //
 //   EncPacked: cmdCtx.Cache.ResolvePacked(entry) — a packed.List buffer, bounded by
 //             PackedThresholds.ListMaxBytes. Mutations splice in place.
-//   EncNative: entry.Value.([]string) — the Go slice used by large lists
-//             and lists that have outgrown the packed threshold.
+//   EncNative: entry.Value.(*deque.Deque[string]) — ring-buffer deque used by
+//             large lists and lists that have outgrown the packed threshold.
 //
 // Lists promote on total encoded size (mirroring Valkey's
 // list-max-listpack-size default, 8 KiB). Blocking ops (BLPOP/BRPOP) and
@@ -59,7 +58,7 @@ func HandleLpush(cmdCtx *command.Context) command.Result {
 		case cache.EncPacked:
 			return lpushPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), values)
 		default:
-			return lpushNative(cmdCtx, key, entry.Value.([]string), values)
+			return lpushNative(cmdCtx, key, entry.Value.(*deque.Deque[string]), values)
 		}
 	}
 	result := command.Dispatch(cmdCtx, executeFn)
@@ -75,14 +74,14 @@ func lpushStartPacked(cmdCtx *command.Context, key string, values []string) any 
 		return err
 	}
 	if promoted {
-		items, derr := packed.ListToSlice(buf)
+		dq, derr := packed.ListToDeque(buf)
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), 0); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), 0); err != nil {
 			return err
 		}
-		return len(items)
+		return dq.Len()
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, 0); err != nil {
 		return err
@@ -98,14 +97,14 @@ func lpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 		return err
 	}
 	if promoted {
-		items, derr := packed.ListToSlice(newBuf)
+		dq, derr := packed.ListToDeque(newBuf)
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), ttl); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), ttl); err != nil {
 			return err
 		}
-		return len(items)
+		return dq.Len()
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, newBuf, ttl); err != nil {
 		return err
@@ -114,18 +113,16 @@ func lpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 	return n
 }
 
-func lpushNative(cmdCtx *command.Context, key string, list []string, values []string) any {
-	reversed := make([]string, len(values))
-	for i, v := range values {
-		reversed[len(values)-1-i] = v
+func lpushNative(cmdCtx *command.Context, key string, dq *deque.Deque[string], values []string) any {
+	for i := len(values) - 1; i >= 0; i-- {
+		dq.PushFront(values[i])
 	}
-	list = append(reversed, list...)
 	ttl := cmdCtx.Cache.RawTTL(key)
 	newSize := cmdCtx.Cache.NativeSize(key) + listAppendSize(values)
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, list, newSize, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, newSize, ttl); err != nil {
 		return err
 	}
-	return len(list)
+	return dq.Len()
 }
 
 func HandleRpush(cmdCtx *command.Context) command.Result {
@@ -143,7 +140,7 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 		case cache.EncPacked:
 			return rpushPacked(cmdCtx, key, cmdCtx.Cache.ResolvePacked(entry), values)
 		default:
-			return rpushNative(cmdCtx, key, entry.Value.([]string), values)
+			return rpushNative(cmdCtx, key, entry.Value.(*deque.Deque[string]), values)
 		}
 	}
 	result := command.Dispatch(cmdCtx, executeFn)
@@ -159,14 +156,14 @@ func rpushStartPacked(cmdCtx *command.Context, key string, values []string) any 
 		return err
 	}
 	if promoted {
-		items, derr := packed.ListToSlice(buf)
+		dq, derr := packed.ListToDeque(buf)
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), 0); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), 0); err != nil {
 			return err
 		}
-		return len(items)
+		return dq.Len()
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, 0); err != nil {
 		return err
@@ -182,14 +179,14 @@ func rpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 		return err
 	}
 	if promoted {
-		items, derr := packed.ListToSlice(newBuf)
+		dq, derr := packed.ListToDeque(newBuf)
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, items, listSliceSize(items), ttl); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), ttl); err != nil {
 			return err
 		}
-		return len(items)
+		return dq.Len()
 	}
 	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, newBuf, ttl); err != nil {
 		return err
@@ -198,14 +195,16 @@ func rpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 	return n
 }
 
-func rpushNative(cmdCtx *command.Context, key string, list []string, values []string) any {
-	list = append(list, values...)
+func rpushNative(cmdCtx *command.Context, key string, dq *deque.Deque[string], values []string) any {
+	for _, v := range values {
+		dq.PushBack(v)
+	}
 	ttl := cmdCtx.Cache.RawTTL(key)
 	newSize := cmdCtx.Cache.NativeSize(key) + listAppendSize(values)
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, list, newSize, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, newSize, ttl); err != nil {
 		return err
 	}
-	return len(list)
+	return dq.Len()
 }
 
 func HandleLpop(cmdCtx *command.Context) command.Result {
@@ -279,23 +278,21 @@ func popList(cmdCtx *command.Context, key string, entry cache.Entry, fromLeft bo
 		return string(popped), nil
 
 	default:
-		list := entry.Value.([]string)
-		if len(list) == 0 {
+		dq := entry.Value.(*deque.Deque[string])
+		if dq.Len() == 0 {
 			return nil, nil
 		}
 		var val string
 		if fromLeft {
-			val = list[0]
-			list = list[1:]
+			val = dq.PopFront()
 		} else {
-			val = list[len(list)-1]
-			list = list[:len(list)-1]
+			val = dq.PopBack()
 		}
-		if len(list) == 0 {
+		if dq.Len() == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
 			newSize := cmdCtx.Cache.NativeSize(key) - int64(len(val)) - cache.ListElementOverhead
-			if werr := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, list, newSize, ttl); werr != nil {
+			if werr := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, newSize, ttl); werr != nil {
 				logger.Error(cmdCtx.Context()).Err(werr).Str("key", key).Msg("unexpected error on pop write-back")
 			}
 		}
@@ -321,7 +318,7 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 			}
 			return n
 		default:
-			return len(entry.Value.([]string))
+			return entry.Value.(*deque.Deque[string]).Len()
 		}
 	}
 	return command.Dispatch(cmdCtx, executeFn)
@@ -356,8 +353,8 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 			}
 			return items
 		default:
-			list := entry.Value.([]string)
-			length := len(list)
+			dq := entry.Value.(*deque.Deque[string])
+			length := dq.Len()
 			if start < 0 {
 				start = length + start
 			}
@@ -373,7 +370,11 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 			if start > stop || start >= length {
 				return []string{}
 			}
-			return list[start : stop+1]
+			result := make([]string, 0, stop-start+1)
+			for i := start; i <= stop; i++ {
+				result = append(result, dq.At(i))
+			}
+			return result
 		}
 	}
 	return command.Dispatch(cmdCtx, executeFn)
