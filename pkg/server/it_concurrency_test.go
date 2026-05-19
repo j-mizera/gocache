@@ -204,7 +204,7 @@ func TestIT_FlushDBPropagation_AcrossConnections(t *testing.T) {
 		c.Close()
 	}
 
-	const dur = 300 * time.Millisecond
+	const dur = 500 * time.Millisecond
 	stop := make(chan struct{})
 	go func() {
 		time.Sleep(dur)
@@ -217,24 +217,26 @@ func TestIT_FlushDBPropagation_AcrossConnections(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// FLUSHDB-loop on its own connection.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		conn := dial(t, addr)
-		defer conn.Close()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
+	// Multiple FLUSHDB goroutines increase the chance of overlapping
+	// with the WATCH→EXEC window on the watcher connection.
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			conn := dial(t, addr)
+			defer conn.Close()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				sendCommand(t, conn, "FLUSHDB")
+				sendCommand(t, conn, "SET", "fkey", "0")
+				flushCount.Add(1)
 			}
-			sendCommand(t, conn, "FLUSHDB")
-			// Re-seed so the watcher has something to look at.
-			sendCommand(t, conn, "SET", "fkey", "0")
-			flushCount.Add(1)
-		}
-	}()
+		}()
+	}
 
 	// Watcher: WATCH/MULTI/GET/EXEC loop. Some EXECs MUST abort because
 	// FLUSHDB invalidates the watched key via NotifyAll.
