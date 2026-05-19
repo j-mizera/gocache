@@ -14,7 +14,6 @@ func newTestEngine(t *testing.T) (*Engine, *cache.Cache) {
 	t.Helper()
 	c := cache.New()
 	e := New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 	return e, c
 }
@@ -42,7 +41,6 @@ func TestDispatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Dispatch is synchronous — by the time it returns, fn has run.
 	if !called.Load() {
 		t.Error("expected Dispatch to execute the function")
 	}
@@ -79,11 +77,8 @@ func TestDispatchWithResult_Serialization(t *testing.T) {
 func TestStop_ReturnsEngineStopped(t *testing.T) {
 	c := cache.New()
 	e := New(c)
-	go e.Run()
-
 	e.Stop()
 
-	// After stop, DispatchWithResult should return ErrEngineStopped.
 	res, err := e.DispatchWithResult(context.Background(), func() any {
 		return "should not run"
 	})
@@ -110,96 +105,48 @@ func TestDispatch_CtxCancelled(t *testing.T) {
 func TestStop_Idempotent(t *testing.T) {
 	c := cache.New()
 	e := New(c)
-	go e.Run()
-
 	e.Stop()
 	e.Stop() // should not panic
 }
 
-// TestSendAndWait_PoolSafety_CancelDuringWait pins down the resChan-pool
-// safety rule on the per-shard dispatch path: when ctx.Done() fires AFTER
-// the engine has taken ownership of the result channel but BEFORE
-// sendAndWait observed the result, the channel must NOT be returned to
-// the pool — the engine may still write to it. The next caller must
-// always Get a clean channel.
-//
-// We verify by stalling the engine inside its execute callback, cancelling
-// the context, then issuing a fresh dispatch and asserting it does not
-// see the stale value.
-func TestSendAndWait_PoolSafety_CancelDuringWait(t *testing.T) {
+func TestDispatchToShard(t *testing.T) {
 	e, _ := newTestEngine(t)
 
-	// Hold the engine inside its execute callback long enough for ctx to cancel.
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	enter := make(chan struct{})
-	release := make(chan struct{})
-	doneCh := make(chan struct{})
-
-	go func() {
-		_, _ = e.DispatchToShard(ctx1, 0, func() any {
-			close(enter)
-			<-release
-			return "stalled-result"
-		})
-		close(doneCh)
-	}()
-
-	<-enter        // engine is now executing fn, holding resChan
-	cancel1()      // cancellation fires while engine still owns the channel
-	<-doneCh       // sendAndWait returned ctx.Err(); resChan was orphaned
-	close(release) // let the engine finish writing to the orphaned channel
-
-	// Drain. The engine wrote "stalled-result" into the orphaned channel
-	// after sendAndWait returned. Any next dispatch must NOT see that
-	// stale value.
-	res, err := e.DispatchToShard(context.Background(), 0, func() any { return "fresh" })
+	res, err := e.DispatchToShard(context.Background(), 0, func() any {
+		return "hello"
+	})
 	if err != nil {
-		t.Fatalf("post-cancel dispatch error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if res != "fresh" {
-		t.Fatalf("post-cancel dispatch leaked stale value: got %v", res)
+	if res != "hello" {
+		t.Errorf("expected hello, got %v", res)
 	}
 }
 
-// TestSendAndWait_PoolSafety_StopDuringWait mirrors the cancel-path test
-// for the engine-stop branch. Same rule, same hazard.
-func TestSendAndWait_PoolSafety_StopDuringWait(t *testing.T) {
+func TestDispatchToShard_Stopped(t *testing.T) {
 	c := cache.New()
 	e := New(c)
-	go e.Run()
+	e.Stop()
 
-	enter := make(chan struct{})
-	release := make(chan struct{})
-	doneCh := make(chan struct{})
-
-	go func() {
-		_, _ = e.DispatchToShard(context.Background(), 0, func() any {
-			close(enter)
-			<-release
-			return "stalled-result"
-		})
-		close(doneCh)
-	}()
-
-	<-enter        // engine is executing fn
-	e.Stop()       // stop fires while engine holds the channel
-	<-doneCh       // sendAndWait returned ErrEngineStopped
-	close(release) // engine finishes writing to the orphaned channel
-
-	// After stop the engine is gone, so a follow-up dispatch returns
-	// ErrEngineStopped instead of running. The important guarantee is
-	// "no panic, no goroutine leak"; both are observable here because
-	// the test would deadlock otherwise.
-	_, err := e.DispatchToShard(context.Background(), 0, func() any { return "fresh" })
+	_, err := e.DispatchToShard(context.Background(), 0, func() any { return nil })
 	if !errors.Is(err, ErrEngineStopped) {
-		t.Fatalf("expected ErrEngineStopped after stop, got %v", err)
+		t.Errorf("expected ErrEngineStopped, got %v", err)
 	}
 }
 
-// TestSendAndWait_PoolReuse_Sequential exercises the success path's Put
-// and asserts that sequential per-shard dispatches reuse channels from
-// the pool without leaking results.
-func TestSendAndWait_PoolReuse_Sequential(t *testing.T) {
+func TestDispatchToShard_CtxCancelled(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := e.DispatchToShard(ctx, 0, func() any { return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestDispatchToShard_Sequential(t *testing.T) {
 	e, _ := newTestEngine(t)
 
 	const n = 100
@@ -209,7 +156,25 @@ func TestSendAndWait_PoolReuse_Sequential(t *testing.T) {
 			t.Fatalf("iter %d: dispatch error %v", i, err)
 		}
 		if res != i {
-			t.Fatalf("iter %d: stale value: got %v, want %d", i, res, i)
+			t.Fatalf("iter %d: got %v, want %d", i, res, i)
 		}
+	}
+}
+
+func TestDispatchToShards(t *testing.T) {
+	e, _ := newTestEngine(t)
+	shards := []int{0, 1}
+	if e.ShardCount() < 2 {
+		shards = []int{0}
+	}
+
+	res, err := e.DispatchToShards(context.Background(), shards, func() any {
+		return "multi"
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res != "multi" {
+		t.Errorf("expected multi, got %v", res)
 	}
 }

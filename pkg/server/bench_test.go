@@ -49,7 +49,6 @@ func newInProcRig(b *testing.B) *inProcRig {
 	// branch is skipped entirely — the harness understates per-command cost.
 	c := cache.NewWithConfig(1024, cache.EvictionLRU)
 	e := engine.New(c)
-	go e.Run()
 	b.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()
@@ -97,7 +96,6 @@ func newTCPRig(b *testing.B) *tcpRig {
 	// branch is skipped entirely — the harness understates per-command cost.
 	c := cache.NewWithConfig(1024, cache.EvictionLRU)
 	e := engine.New(c)
-	go e.Run()
 	b.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()
@@ -193,7 +191,6 @@ func BenchmarkInProc_HSET(b *testing.B) {
 func TestHSET_PromotedHash_O1(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
@@ -234,7 +231,6 @@ func runPromotedCollectionO1(t *testing.T, deadline time.Duration, n int, makeAr
 	t.Helper()
 	c := cache.NewWithConfig(1024, cache.EvictionLRU)
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()

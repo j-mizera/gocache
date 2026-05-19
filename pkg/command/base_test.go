@@ -12,7 +12,6 @@ import (
 func TestSetup(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 	ctx := clientctx.New()
 

@@ -22,7 +22,6 @@ import (
 func newTestPipeline() (*Pipeline, *engine.Engine, *serverOps.Tracker) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	eval := New(c, e, "", br, wm)

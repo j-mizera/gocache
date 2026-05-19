@@ -299,9 +299,6 @@ func main() {
 		}
 	}
 
-	// Start engine.
-	go engineInstance.Run()
-
 	// Start the persistence coordinator AFTER boot so the LSN cursor
 	// reflects the recovered snapshot. With no sinks registered (current
 	// configuration), Start is a no-op aside from arming the lifecycle —

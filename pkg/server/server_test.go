@@ -21,7 +21,6 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 	t.Helper()
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()
@@ -154,7 +153,6 @@ func TestServer_AuthGate(t *testing.T) {
 func TestServer_Shutdown(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	defer e.Stop()
 
 	br := blocking.NewRegistry()
@@ -209,7 +207,6 @@ func (c *captureListener) Addr() net.Addr { return c.inner.Addr() }
 func TestServer_TCPNoDelay(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()
