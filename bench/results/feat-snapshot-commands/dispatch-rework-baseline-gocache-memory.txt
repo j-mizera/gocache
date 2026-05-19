@@ -1,0 +1,17 @@
+label=dispatch-rework-baseline
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=6db6ba2ed2cb2df39a44ad5e955ab5431e9107ac
+gocache_branch=feat/snapshot-commands
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=8281653
+post_standard_rss_bytes=136734310
+final_rss_bytes=179830784
+delta_rss_bytes=171549131
