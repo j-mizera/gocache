@@ -5,7 +5,7 @@ mainframe **sd** Plugin Command Routing (Main + REX Namespace)
 
 actor "Redis Client" as Client
     participant "Server\nhandleConnection" as Server
-    participant "Evaluator" as Eval
+    participant "Pipeline" as Eval
     participant "Command Router" as Router
     participant "PluginConn\n(multiplexed)" as PC
     participant "Plugin Process\n(pubsub)" as Plugin

@@ -21,7 +21,7 @@ frame "Hook Context System (pkg/command)" as F {
     }
 
     rectangle "Flow" as flow {
-        component [Evaluator] as eval
+        component [Pipeline] as eval
         component [Hook Executor] as exec
         component [Pre-Hook Plugin] as pre
         component [Post-Hook Plugin] as post

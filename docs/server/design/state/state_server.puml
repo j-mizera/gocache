@@ -13,7 +13,7 @@ frame "Server Lifecycle FSM" as F {
 
     state "LoadingSnapshot" as LoadingSnapshot : persistence.LoadSnapshot()\nSkipped if LoadOnStartup=false\nWarns on error (not fatal)
 
-    state "StartingEngine" as StartingEngine : go engine.Run()\nSerial dispatch loop
+    state "StartingEngine" as StartingEngine : engine.New()\nDirect shard mutex dispatch
 
     state "StartingWorkers" as StartingWorkers : snapshotWorker.Start()\ncleanupWorker.Start()
 

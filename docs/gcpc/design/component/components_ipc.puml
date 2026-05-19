@@ -7,7 +7,7 @@ frame "GoCache Server-Plugin IPC" as F {
 
     rectangle "Server Process" as server {
 
-        rectangle "Evaluator" as eval {
+        rectangle "Pipeline" as eval {
             component [Command Router] as CmdRouter <<Main + REX>>
             component [Hook Executor] as HookExec <<Pre/Post>>
         }

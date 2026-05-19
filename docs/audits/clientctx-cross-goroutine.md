@@ -31,7 +31,7 @@ For each field, identify:
    exists between writer and reader.
 
 The Go memory model gives us happens-before via:
-- channel send/receive (engine `cmdChan` ↔ `resChan` is the main one)
+- shard mutex Lock/Unlock (engine acquires shard lock for each dispatch)
 - mutex Lock/Unlock pairs
 - atomic operations
 - single-goroutine program order
@@ -45,31 +45,31 @@ have no synchronization edge between them.
 
 | Field | Writers | Readers | Synchronization | Race? |
 |---|---|---|---|---|
-| `InTransaction` | `transaction.Multi/Discard`, `HandleExec` (all engine goroutine) | `evaluateInternal:184` (connection), `HandleExec`, `HandleWatch`, `transaction.Manager.{Multi,Discard}` (engine) | engine→connection via `resChan` recv (HB edge); engine self-reads same-goroutine | **no** |
-| `CommandQueue` | `HandleMulti`/`StartTransaction` (engine), `EnqueueCommand` from `evaluateInternal:189` (connection!), `HandleExec`/`ResetTransaction` (engine) | `HandleExec` (engine) reads + nils | Connection appends only when `InTransaction=true` (engine just set it); engine reads queue only on EXEC (connection just sent it). All chains go through `cmdChan`/`resChan` ⇒ HB | **no** |
-| `Authenticated` | `HandleAuth`, `HandleHello` (engine) | `server.go:334` auth gate (connection) | engine→connection via `resChan` recv | **no** |
-| `ProtoVersion` | `HandleHello` (engine) | `server.go:388` `mapValueToResp` (connection), `HandleHello` self (engine) | engine→connection via `resChan` recv | **no** |
-| `RexVersion` | `HandleHello` (engine) | `server.go:297` META gate (connection), `HandleHello` self (engine) | engine→connection via `resChan` recv | **no** |
-| `RexMeta` | `ensureRexStore` (engine, via REX.META subcommands) | `evaluator.go:230,231,250,307` (engine, instrumentation slow path), `routeToPlugin` (connection via `evaluateInternal`) | engine self-reads same-goroutine; connection reads after engine cycle (HB via `resChan`) | **no** |
-| `CmdMeta` | `server.go:350,352` (connection) | `evaluator.go:230,231,250,307` (engine instrumentation, but called via `evaluateInternal` which runs on connection goroutine) | All accesses on connection goroutine | **no** |
+| `InTransaction` | `transaction.Multi/Discard`, `HandleExec` (all under shard lock) | `evaluateInternal` (connection), `HandleExec`, `HandleWatch`, `transaction.Manager.{Multi,Discard}` (under shard lock) | shard mutex Lock/Unlock provides HB edge; handler reads within same lock scope | **no** |
+| `CommandQueue` | `HandleMulti`/`StartTransaction` (under shard lock), `EnqueueCommand` from `evaluateInternal` (connection!), `HandleExec`/`ResetTransaction` (under shard lock) | `HandleExec` (under shard lock) reads + nils | Connection appends only when `InTransaction=true` (set under shard lock); engine reads queue only on EXEC (connection just dispatched it). All chains go through shard mutex ⇒ HB | **no** |
+| `Authenticated` | `HandleAuth`, `HandleHello` (under shard lock) | `server.go:334` auth gate (connection) | shard mutex Unlock→next dispatch Lock | **no** |
+| `ProtoVersion` | `HandleHello` (under shard lock) | `server.go:388` `mapValueToResp` (connection), `HandleHello` self (under shard lock) | shard mutex Unlock→next dispatch Lock | **no** |
+| `RexVersion` | `HandleHello` (under shard lock) | `server.go:297` META gate (connection), `HandleHello` self (under shard lock) | shard mutex Unlock→next dispatch Lock | **no** |
+| `RexMeta` | `ensureRexStore` (under shard lock, via REX.META subcommands) | `pipeline.go` instrumentation slow path, `routeToPlugin` (connection via `evaluateInternal`) | handler writes under shard lock; connection reads after dispatch returns (HB via shard mutex) | **no** |
+| `CmdMeta` | `server.go:350,352` (connection) | `pipeline.go` instrumentation (called via `evaluateInternal` which runs on connection goroutine) | All accesses on connection goroutine | **no** |
 | `OperationID` | `server.go:226` (connection, ONCE at startup) | many (both goroutines) | Set once before any commands; read-only afterwards. No concurrent writes to race against | **no** |
 | `WatchedKeys` | `watch.Manager.Watch` line 31 (under `m.mu`), `ClearWatch` from `watch.Manager.Unwatch` line 47 (under `m.mu`) | `watch.Manager.Unwatch` line 39 (under `m.mu`) | All access under `watch.Manager.mu` | **no** |
 | `watchDirty` | `watch.Manager.NotifyMutation/NotifyAll` (engine, under `cache.Lock` and `m.mu`) | `HandleExec` (engine) | **Cross-goroutine: engine writes from one connection's command, another connection's `HandleExec` reads.** | **was YES, fixed in #32** via `atomic.Bool` |
 
 ### Subtle case: `evaluateInternal` is on the connection goroutine
 
-The instrumentation block in `evaluateInternal` (lines 230, 231, 250,
-307) reads `ctx.RexMeta` and `ctx.CmdMeta`. This block runs in the
-**connection goroutine** (NOT inside a handler closure passed to the
-engine), so it does not enter the engine. CmdMeta is also written in
-the connection goroutine (`server.go:350/352`). RexMeta is written in
-the engine goroutine — but the connection goroutine reads it AFTER
-`evaluator.Evaluate` returns from a previous REX.META command, so the
-`resChan` recv establishes happens-before.
+The instrumentation block in `evaluateInternal` reads `ctx.RexMeta`
+and `ctx.CmdMeta`. This block runs in the **connection goroutine**
+(NOT inside a handler closure passed to the engine), so it does not
+enter the engine. CmdMeta is also written in the connection goroutine
+(`server.go`). RexMeta is written under the shard lock — but the
+connection goroutine reads it AFTER `pipeline.Evaluate` returns from a
+previous REX.META command, so the shard mutex Unlock establishes
+happens-before.
 
 ### Subtle case: `routeToPlugin` reads RexMeta on the connection goroutine
 
-`routeToPlugin` is called from `evaluateInternal:144` when the command
+`routeToPlugin` is called from `evaluateInternal` when the command
 is plugin-routed. It reads `client.RexMeta` and `client.CmdMeta` on
 the connection goroutine, sends to plugin via IPC, blocks for response.
 
@@ -86,7 +86,7 @@ The audit confirms the architectural separation is sound:
 
 - Per-connection `ClientContext` fields are safe because each connection
   has its own context and processes commands serially through the
-  engine queue. The `cmdChan`/`resChan` round-trip per command provides
+  engine dispatch. The shard mutex Lock/Unlock per command provides
   the synchronization edge.
 - The single field that crosses connections (`watchDirty`, written by
   another connection's mutation goroutine) is now atomic.

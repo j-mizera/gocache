@@ -3,7 +3,7 @@
 
 mainframe **sd** Hook Context Namespacing & Flow
 
-participant "Evaluator" as Eval
+participant "Pipeline" as Eval
 participant "Hook Executor" as Exec
 participant "Auth Plugin\n(critical, pri=1)" as Auth
 participant "RateLimiter Plugin\n(critical, pri=2)" as RL

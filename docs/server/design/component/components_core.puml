@@ -10,15 +10,15 @@ frame "GoCache Core System HLD" as F {
             component [RESP Handler] as ProtocolHandler <<Protocol>>
         }
 
-        rectangle "Evaluator Boundary" as eval {
-            component [Evaluator] as Evaluator <<Dispatch>>
+        rectangle "Pipeline Boundary" as eval {
+            component [Pipeline] as Pipeline <<Dispatch>>
             component [Hook Executor] as HookExec <<Pre/Post Hooks>>
             component [Operation Tracker] as OpTracker <<Op lifecycle>>
             component [Command Router] as CmdRouter <<Plugin Fallback>>
         }
 
         rectangle "Engine Boundary" as eng {
-            component [Engine\n(per-shard goroutines)] as Engine <<Serial dispatch>>
+            component [Engine\n(direct shard mutex)] as Engine <<Direct dispatch>>
             component [Transaction\nManager] as TransactionMgr <<MULTI/EXEC>>
             component [Watch Manager] as WatchMgr <<WATCH/UNWATCH>>
             component [Blocking Registry] as BlockingReg <<BLPOP/BRPOP>>
@@ -38,13 +38,13 @@ frame "GoCache Core System HLD" as F {
 
     ' -- Relations --
     ServiceEntry --> ProtocolHandler : Raw bytes
-    ProtocolHandler --> Evaluator : Parsed command
+    ProtocolHandler --> Pipeline : Parsed command
 
-    Evaluator --> HookExec : Pre/Post hooks
-    Evaluator --> OpTracker : Start/Complete op
-    Evaluator --> CmdRouter : Plugin fallback
-    Evaluator --> Engine : Core commands
-    Evaluator --> TransactionMgr : MULTI/EXEC/DISCARD
+    Pipeline --> HookExec : Pre/Post hooks
+    Pipeline --> OpTracker : Start/Complete op
+    Pipeline --> CmdRouter : Plugin fallback
+    Pipeline --> Engine : Core commands
+    Pipeline --> TransactionMgr : MULTI/EXEC/DISCARD
 
     Engine --> CacheRouter : DispatchToShard / DispatchToShards / DispatchWithResult
     CacheRouter --> Shards : Lock(shardIDs) -> fn() -> Unlock

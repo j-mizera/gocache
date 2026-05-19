@@ -4,7 +4,7 @@
 title Runtime Scope Enforcement
 
 participant "Client" as Client
-participant "Evaluator" as Eval
+participant "Pipeline" as Eval
 participant "Hook Executor" as Hooks
 participant "Scope Enforcer" as Enforcer
 participant "Scope Registry" as Reg

@@ -12,7 +12,7 @@ related:
 
 **Issue:** [#45](https://github.com/j-mizera/gocache/issues/45)
 **Date:** 2026-05-03
-**Outcome:** The gap between Go bench's +18% pipelined-GET gain (from #34's per-shard locking) and docker bench's +3% on the same workload is **mostly scheduler overhead, not syscall cost**. Channel-hop relief from sharding is happening (engine goroutines are 89% idle in docker), but the time saved is reabsorbed by goroutine park/unpark cycles caused by docker's higher TCP latency. **The gap is not fixable in code** — it's the structural cost of running through veth + iptables NAT vs Go's loopback.
+**Outcome:** The gap between Go bench's +18% pipelined-GET gain (from #34's per-shard locking) and docker bench's +3% on the same workload is **mostly scheduler overhead, not syscall cost**. Channel-hop relief from sharding was happening (engine goroutines were 89% idle in docker), but the time saved was reabsorbed by goroutine park/unpark cycles caused by docker's higher TCP latency. **The gap is not fixable in code** — it's the structural cost of running through veth + iptables NAT vs Go's loopback. **Note:** The channel dispatch analyzed here was subsequently replaced by direct shard mutex (ADR-0010), eliminating the `sendAndWait` / `selectgo` overhead entirely.
 
 ## Method
 
@@ -38,19 +38,19 @@ The cleanest signal: **`runtime.selectgo` consumes 12.6 percentage points MORE i
 
 `runtime.selectgo` is the Go runtime's select-statement arbitration. Three select sites in the gocache hot path (per pipelined batch of 10 commands):
 
-1. **Connection goroutine ↔ shard engine goroutine** — `sendAndWait` selects on `cmdChan <- Command` then `<-resChan`. Two select calls per dispatched command.
-2. **Engine goroutine** — `shardEngine.run` selects on `<-cmdChan / <-stopChan` per command processed.
+1. **Connection goroutine ↔ shard engine goroutine** — `sendAndWait` selected on `cmdChan <- Command` then `<-resChan`. Two select calls per dispatched command. *(Since removed by ADR-0010 — replaced with direct shard mutex.)*
+2. **Engine goroutine** — `shardEngine.run` selected on `<-cmdChan / <-stopChan` per command processed. *(Since removed — no per-shard goroutines.)*
 3. **Connection acceptor + various server-internal select sites** — accept loop, shutdown signaling, worker tickers.
 
-In Go bench (loopback): pipelined batches arrive back-to-back. Connection goroutines stay active, engine goroutines drain `cmdChan` continuously. Few park/unpark cycles per second.
+In Go bench (loopback): pipelined batches arrived back-to-back. Connection goroutines stayed active, engine goroutines drained `cmdChan` continuously. Few park/unpark cycles per second.
 
-In docker (veth + iptables NAT): pipelined batches take longer to round-trip end-to-end. Connection goroutines park between batches more often. Engine goroutines park between batches more often. **Each park/unpark involves runtime.selectgo arbitration.**
+In docker (veth + iptables NAT): pipelined batches took longer to round-trip end-to-end. Connection goroutines parked between batches more often. Engine goroutines parked between batches more often. **Each park/unpark involved runtime.selectgo arbitration.**
 
 ## Block profile — engines are mostly idle
 
 | Source | Block time | % of total |
 |---|---:|---:|
-| `shardEngine.run` (engine goroutines parked on empty cmdChan) | 600.58s | 88.89% |
+| `shardEngine.run` (engine goroutines parked on empty cmdChan) *(since removed)* | 600.58s | 88.89% |
 | `CleanupWorker.Start.func1` (worker tick) | 60.06s | 8.89% |
 | **Connection-side `Engine.DispatchToShard` wait** | **15s** | **2.22%** |
 
@@ -63,7 +63,7 @@ Connection-side wait is **only 2.2% of total block time**. The architectural rel
 | `Engine.DispatchToShard` cum | 6.53s | 44% |
 | Other (cleanup, shard lock, ...) | 8.31s | 56% |
 
-Mutex contention from the channel-hop pattern (`runtime.unlock` reached via `runtime.selectgo` → `selunlock`) is 44%. Not as dominant as in pre-#34 (where it was 55-67%), but still the largest single contributor.
+Mutex contention from the channel-hop pattern (`runtime.unlock` reached via `runtime.selectgo` → `selunlock`) was 44%. Not as dominant as in pre-#34 (where it was 55-67%), but still the largest single contributor. *(This contention source was eliminated by ADR-0010's direct shard mutex.)*
 
 ## Heap attribution — workload hot allocations
 
