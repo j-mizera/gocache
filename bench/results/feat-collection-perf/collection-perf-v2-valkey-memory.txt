@@ -1,0 +1,17 @@
+label=collection-perf-v2
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=6cc14b871851a8a52ebefa09be3451a6a9c7292e
+gocache_branch=feat/collection-perf
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=9196011
+post_standard_rss_bytes=24295505
+final_rss_bytes=28479324
+delta_rss_bytes=19283313
