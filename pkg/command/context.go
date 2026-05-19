@@ -63,6 +63,7 @@ type Context struct {
 	Op               string
 	Args             []string
 	InBatch          bool
+	ShardLocked      bool
 	Engine           *engine.Engine
 	Cache            *cache.Cache
 	Transaction      *transaction.Manager
@@ -154,6 +155,7 @@ func (c *Context) Reset() {
 	c.Op = ""
 	c.Args = nil
 	c.InBatch = false
+	c.ShardLocked = false
 	c.Engine = nil
 	c.Cache = nil
 	c.Transaction = nil
@@ -194,7 +196,7 @@ func Dispatch(ctx *Context, fn func() any) Result {
 	// replay correctness.
 	fn = wrapWithEmission(ctx, fn)
 
-	if ctx.InBatch {
+	if ctx.InBatch || ctx.ShardLocked {
 		return wrapInline(fn)
 	}
 	if ctx.MultiKey {
@@ -211,6 +213,10 @@ func Dispatch(ctx *Context, fn func() any) Result {
 	}
 	if ctx.Shard < 0 {
 		return wrapInline(fn)
+	}
+	if ctx.Spec.ReadOnly {
+		res, err := ctx.Engine.DispatchToShardRO(ctx.Context(), ctx.Shard, fn)
+		return wrapDispatch(res, err)
 	}
 	res, err := ctx.Engine.DispatchToShard(ctx.Context(), ctx.Shard, fn)
 	return wrapDispatch(res, err)

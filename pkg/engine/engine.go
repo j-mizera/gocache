@@ -95,6 +95,25 @@ func (e *Engine) DispatchToShard(ctx context.Context, shard int, fn func() any) 
 	return fn(), nil
 }
 
+// DispatchToShardRO acquires the named shard's read lock, runs fn, and
+// releases. Used by single-key read-only commands (GET, HGET, LRANGE,
+// SCARD, TTL, etc.) to allow concurrent readers on the same shard.
+func (e *Engine) DispatchToShardRO(ctx context.Context, shard int, fn func() any) (any, error) {
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s := e.cache.ShardByIndex(shard)
+	s.RLock()
+	defer s.RUnlock()
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	return fn(), nil
+}
+
 // DispatchToShards acquires the listed shards' write locks in
 // ascending order, runs fn under the umbrella, and releases them.
 // Used by multi-key handlers that touch a known subset of shards
@@ -112,6 +131,24 @@ func (e *Engine) DispatchToShards(ctx context.Context, shardIDs []int, fn func()
 		return nil, ErrEngineStopped
 	}
 	return fn(), nil
+}
+
+// AcquireShard acquires the named shard's exclusive write lock and returns
+// a release function. Used by pipeline batch coalescing to pre-acquire
+// multiple shard locks before evaluating a batch of commands.
+func (e *Engine) AcquireShard(shard int) func() {
+	s := e.cache.ShardByIndex(shard)
+	s.Lock()
+	return s.Unlock
+}
+
+// AcquireShardRO acquires the named shard's read lock and returns a
+// release function. Used by pipeline batch coalescing when all commands
+// targeting a shard are read-only.
+func (e *Engine) AcquireShardRO(shard int) func() {
+	s := e.cache.ShardByIndex(shard)
+	s.RLock()
+	return s.RUnlock
 }
 
 // ShardCount exposes the underlying cache's shard count for callers that

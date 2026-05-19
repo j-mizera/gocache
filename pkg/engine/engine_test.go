@@ -161,6 +161,87 @@ func TestDispatchToShard_Sequential(t *testing.T) {
 	}
 }
 
+func TestDispatchToShardRO(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	res, err := e.DispatchToShardRO(context.Background(), 0, func() any {
+		return "read"
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res != "read" {
+		t.Errorf("expected read, got %v", res)
+	}
+}
+
+func TestDispatchToShardRO_Stopped(t *testing.T) {
+	c := cache.New()
+	e := New(c)
+	e.Stop()
+
+	_, err := e.DispatchToShardRO(context.Background(), 0, func() any { return nil })
+	if !errors.Is(err, ErrEngineStopped) {
+		t.Errorf("expected ErrEngineStopped, got %v", err)
+	}
+}
+
+func TestDispatchToShardRO_CtxCancelled(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := e.DispatchToShardRO(ctx, 0, func() any { return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestDispatchToShardRO_ConcurrentReads(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	const readers = 50
+	start := make(chan struct{})
+	done := make(chan struct{}, readers)
+
+	for range readers {
+		go func() {
+			<-start
+			_, err := e.DispatchToShardRO(context.Background(), 0, func() any {
+				return "ok"
+			})
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	close(start)
+	for range readers {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for concurrent reads")
+		}
+	}
+}
+
+func TestAcquireShard(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	release := e.AcquireShard(0)
+	release()
+}
+
+func TestAcquireShardRO(t *testing.T) {
+	e, _ := newTestEngine(t)
+
+	release := e.AcquireShardRO(0)
+	release()
+}
+
 func TestDispatchToShards(t *testing.T) {
 	e, _ := newTestEngine(t)
 	shards := []int{0, 1}

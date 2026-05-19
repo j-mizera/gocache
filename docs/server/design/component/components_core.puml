@@ -18,7 +18,7 @@ frame "GoCache Core System HLD" as F {
         }
 
         rectangle "Engine Boundary" as eng {
-            component [Engine\n(direct shard mutex)] as Engine <<Direct dispatch>>
+            component [Engine\n(direct shard mutex)\nRLock reads | Lock writes\nbatch coalescing] as Engine <<Direct dispatch>>
             component [Transaction\nManager] as TransactionMgr <<MULTI/EXEC>>
             component [Watch Manager] as WatchMgr <<WATCH/UNWATCH>>
             component [Blocking Registry] as BlockingReg <<BLPOP/BRPOP>>
@@ -46,8 +46,8 @@ frame "GoCache Core System HLD" as F {
     Pipeline --> Engine : Core commands
     Pipeline --> TransactionMgr : MULTI/EXEC/DISCARD
 
-    Engine --> CacheRouter : DispatchToShard / DispatchToShards / DispatchWithResult
-    CacheRouter --> Shards : Lock(shardIDs) -> fn() -> Unlock
+    Engine --> CacheRouter : DispatchToShard / DispatchToShardRO / DispatchToShards / DispatchWithResult
+    CacheRouter --> Shards : RLock|Lock(shardIDs) -> fn() -> Unlock
     Engine --> WatchMgr : Mutation notify
     Engine --> BlockingReg : Unblock waiters
 
@@ -56,12 +56,15 @@ frame "GoCache Core System HLD" as F {
 }
 
 note right of Shards
-  **Default N = 8** (power-of-two; per-key fast path masks).
+  **Default N = 256** (power-of-two; per-key fast path masks).
+  Read-only commands use RLock for concurrent reads;
+  write commands use exclusive Lock.
   Single-key handlers take only the touched shard's lock.
   Multi-key handlers acquire the sorted shard set
   (deadlock-free); full-bulk handlers (FLUSHDB,
-  SAVE, KEYS) take all shards. Cross-shard cost
-  is the structural sharding tax — see audits/.
+  SAVE, KEYS) take all shards.
+  Pipelined commands are batched by shard to reduce
+  lock acquisitions from N to num-unique-shards.
 end note
 
 @enduml

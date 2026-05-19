@@ -3,14 +3,23 @@ package handler
 import (
 	"crypto/subtle"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
+
+var msetPerShardPool = sync.Pool{
+	New: func() any {
+		s := make([][]cache.BulkPair, 256)
+		return &s
+	},
+}
 
 // constantTimeStringCompare returns true iff a == b, using a constant-time
 // algorithm that does not leak password length or content via timing.
@@ -232,23 +241,46 @@ func HandleMset(cmdCtx *command.Context) command.Result {
 	if len(cmdCtx.Args)%2 != 0 {
 		return command.Result{Value: resp.ErrArgs("mset")}
 	}
-	pairCount := len(cmdCtx.Args) / 2
-	// Group pairs by shard. perShard[i] holds the pairs whose keys hash
-	// to shard i. Pre-sized so we never grow during dispatch.
 	shardCount := cmdCtx.Cache.ShardCount()
-	perShard := make([][]cache.BulkPair, shardCount)
-	keys := make([]string, 0, pairCount)
-	for i := 0; i < len(cmdCtx.Args); i += 2 {
-		keys = append(keys, cmdCtx.Args[i])
+	psp := msetPerShardPool.Get().(*[][]cache.BulkPair)
+	perShard := *psp
+	if len(perShard) < shardCount {
+		perShard = make([][]cache.BulkPair, shardCount)
+		*psp = perShard
 	}
+	defer func() {
+		for i := range perShard {
+			perShard[i] = perShard[i][:0]
+		}
+		msetPerShardPool.Put(psp)
+	}()
+
+	var mask [4]uint64
 	for i := 0; i < len(cmdCtx.Args); i += 2 {
 		idx := cmdCtx.Cache.ShardIndexOf(cmdCtx.Args[i])
 		perShard[idx] = append(perShard[idx], cache.BulkPair{
 			Key:   cmdCtx.Args[i],
 			Value: []byte(cmdCtx.Args[i+1]),
 		})
+		mask[idx/64] |= 1 << uint(idx%64)
 	}
-	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
+
+	total := 0
+	for i := range mask {
+		total += bits.OnesCount64(mask[i])
+	}
+	touched := make([]int, 0, total)
+	for i := range mask {
+		w := mask[i]
+		base := i * 64
+		for w != 0 {
+			bit := bits.TrailingZeros64(w)
+			touched = append(touched, base+bit)
+			w &= w - 1
+		}
+	}
+	cmdCtx.TouchedShards = touched
+
 	return command.Dispatch(cmdCtx, func() any {
 		for shardID, pairs := range perShard {
 			if len(pairs) == 0 {

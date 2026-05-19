@@ -178,10 +178,31 @@ func (b *Pipeline) registerAll() {
 }
 
 func (b *Pipeline) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
-	return b.evaluateInternal(parentCtx, client, op, args, false)
+	return b.evaluateCore(parentCtx, client, op, args, false, false)
 }
 
+// EvaluatePreLocked evaluates a command with ShardLocked=true, indicating
+// the target shard's lock is already held by the caller. Used by pipeline
+// batch coalescing where shard locks are pre-acquired.
+func (b *Pipeline) EvaluatePreLocked(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+	return b.evaluateCore(parentCtx, client, op, args, false, true)
+}
+
+// SpecFor returns the argument spec for the given command name, or false
+// if the command is not a registered core command.
+func (b *Pipeline) SpecFor(op string) (command.Spec, bool) {
+	spec, ok := b.specs[strings.ToUpper(op)]
+	return spec, ok
+}
+
+// evaluateInternal is the EvalFn-compatible entry point used by EXEC to
+// re-enter the pipeline for queued commands. Delegates to evaluateCore
+// with shardLocked=false.
 func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
+	return b.evaluateCore(parentCtx, ctx, op, args, inBatch, false)
+}
+
+func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, shardLocked bool) command.Result {
 	op = strings.ToUpper(op)
 
 	handler, ok := b.handlers[op]
@@ -236,7 +257,7 @@ func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.Cl
 	// correlation works; the operation is simply never registered, enriched,
 	// emitted, or hook-fired.
 	if !b.hasAnySink() {
-		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec)
+		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
 	}
 
 	// --- Create command operation ---
@@ -276,6 +297,7 @@ func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.Cl
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
 	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
+	cmdCtx.ShardLocked = shardLocked
 	cmdCtx.SetContext(opCtx)
 
 	// --- Command hooks (pre) ---
@@ -338,13 +360,14 @@ func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.Cl
 // evaluateFast runs the handler with a bare *ops.Operation and no
 // instrumentation. Hot path when no sinks are attached. See hasAnySink for
 // the documented invariant on late-subscriber visibility.
-func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec command.Spec) command.Result {
+func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec command.Spec, shardLocked bool) command.Result {
 	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
 	opCtx := ops.WithContext(parentCtx, cmdOp)
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
 	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
+	cmdCtx.ShardLocked = shardLocked
 	cmdCtx.SetContext(opCtx)
 
 	result := handler(cmdCtx)

@@ -44,7 +44,9 @@ Plugin (separate process):
 
 All cache mutations are serialized per-shard through direct mutex acquisition. The engine acquires the target shard's lock, executes the command closure, and releases the lock. No goroutines, channels, or result queues are involved — the calling goroutine holds the lock directly.
 
-With 8-64 shards, single-key commands (SET, GET, INCR, LPUSH, HSET, SADD) run with ~10-20ns dispatch overhead (atomic CAS fast path). Multi-key commands acquire a sorted shard subset to prevent deadlocks. Full-bulk commands (KEYS, FLUSHDB, SAVE) acquire all shards.
+With 256 shards (default), single-key commands (SET, GET, INCR, LPUSH, HSET, SADD) run with ~10-20ns dispatch overhead (atomic CAS fast path). Read-only commands (GET, HGET, LRANGE, etc.) use `RLock` for concurrent read access; write commands use exclusive `Lock`. Multi-key commands acquire a sorted shard subset to prevent deadlocks. Full-bulk commands (KEYS, FLUSHDB, SAVE) acquire all shards.
+
+When pipelined commands are detected (multiple commands buffered in the connection's read buffer), the server collects them into a batch, groups by target shard, and pre-acquires shard locks in ascending order. All commands in the batch then evaluate with the lock already held, reducing lock acquisitions from N to the number of distinct shards touched. Non-batchable commands (transactions, AUTH, multi-key) fall back to one-at-a-time dispatch.
 
 ### Process Isolation
 

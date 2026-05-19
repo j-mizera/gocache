@@ -1,0 +1,17 @@
+label=mset-alloc
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=7bca346b18ce5d288b52d0e74ac728e127ff6954
+gocache_branch=feat/snapshot-commands
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=36312186
+post_standard_rss_bytes=146066636
+final_rss_bytes=185807667
+delta_rss_bytes=149495481

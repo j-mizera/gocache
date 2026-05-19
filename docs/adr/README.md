@@ -40,6 +40,11 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0008](0008-plugin-config-and-reload-contract.md) | Plugin config and reload contract is library-agnostic | accepted | 2026-05-04 |
 | [0009](0009-rename-evaluator-to-pipeline.md) | Rename evaluator to pipeline | proposed | 2026-05-19 |
 | [0010](0010-direct-shard-mutex-dispatch.md) | Replace channel dispatch with direct shard mutex | proposed | 2026-05-19 |
+| [0011](0011-default-256-shards.md) | Increase default shard count to 256 | accepted | 2026-05-19 |
+| [0012](0012-read-lock-dispatch.md) | Read-lock dispatch for read-only commands | accepted | 2026-05-19 |
+| [0013](0013-pipeline-batch-coalescing.md) | Pipeline batch coalescing | accepted | 2026-05-19 |
+| [0014](0014-pipelined-performance-limits.md) | Pipelined performance limits audit | accepted | 2026-05-19 |
+| [0015](0015-mset-allocation-reduction.md) | MSET allocation reduction | accepted | 2026-05-19 |
 
 ## Writing a new ADR
 

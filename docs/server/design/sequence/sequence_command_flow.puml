@@ -74,9 +74,19 @@ actor Client
                 else Pre-hook allows (or no hooks)
                     HookExec --> Pipeline : OK
 
-                    alt Single-key handler (most common)
+                    alt Single-key read-only (GET, HGET, LRANGE ...)
+                        Pipeline -> Engine : DispatchToShardRO(ctx, shardIdx, fn)
+                        Engine -> Router : acquire shard read lock
+                        Router -> Shards : shard.RLock()
+                        activate Shards #LightBlue
+                        Router -> Shards : fn() reads shard state
+                        Shards --> Router : result
+                        Router -> Shards : shard.RUnlock()
+                        deactivate Shards
+                        Router --> Engine : result
+                    else Single-key write (SET, LPUSH, HSET ...)
                         Pipeline -> Engine : DispatchToShard(ctx, shardIdx, fn)
-                        Engine -> Router : acquire shard lock
+                        Engine -> Router : acquire shard write lock
                         Router -> Shards : shard.Lock()
                         activate Shards
                         Router -> Shards : fn() reads/mutates shard state
@@ -122,14 +132,49 @@ actor Client
         end
     end
 
+== Pipeline Batch Coalescing (when reader.Buffered() > 0) ==
+
+    hnote over ConnHandler
+      When pipelined commands are buffered,
+      the connection handler collects up to 128
+      batchable single-key commands, groups them
+      by target shard, and pre-acquires all needed
+      shard locks in ascending order (deadlock-free).
+    end note
+
+    ConnHandler -> ConnHandler : collectBatch(reader, up to 128 cmds)
+    ConnHandler -> ConnHandler : group by shard, sort shard IDs ascending
+
+    loop For each unique shard (ascending order)
+        ConnHandler -> Engine : AcquireShard / AcquireShardRO(shardID)
+        Engine -> Shards : Lock() or RLock() per shard
+        activate Shards
+    end
+
+    loop For each command in batch (original order)
+        ConnHandler -> Pipeline : EvaluatePreLocked(ctx, op, args)
+        hnote over Pipeline
+          ShardLocked=true: handler runs inline
+          (no lock acquisition, like InBatch)
+        end note
+        Pipeline --> ConnHandler : Result
+    end
+
+    loop Release all locks (reverse order)
+        Engine -> Shards : Unlock() or RUnlock()
+        deactivate Shards
+    end
+
+    ConnHandler -> Writer : Write all results in original order
+    Writer --> Client : Pipelined RESP responses
+
 note right of Engine
   **Direct shard mutex**: each dispatch method
   acquires shard lock(s) directly on the calling
   goroutine. No channels, no per-shard goroutines.
-  Cross-shard handlers (MSET, SINTER, MGET) pay
-  a structural cache-line bounce per shard touched.
-  Audit at docs/audits/per-shard-arc-summary.md
-  measures the residual MSET regression.
+  Read-only commands use RLock for concurrent reads.
+  Pipelined commands are batched by shard to reduce
+  lock acquisitions from N to num-unique-shards.
 end note
 
 @enduml
