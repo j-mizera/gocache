@@ -12,7 +12,7 @@ import (
 	"gocache/pkg/cache"
 	pkgcommand "gocache/pkg/command"
 	"gocache/pkg/engine"
-	"gocache/pkg/evaluator"
+	"gocache/pkg/pipeline"
 	serverOps "gocache/pkg/operations"
 )
 
@@ -37,7 +37,7 @@ type baseWorker struct {
 	intervalChan   chan time.Duration
 	tracker        *serverOps.Tracker
 	emitter        events.Emitter
-	opHookExecutor evaluator.OpHookExecutor
+	opHookExecutor pipeline.OpHookExecutor
 }
 
 // SetTracker sets the operation tracker.
@@ -47,7 +47,7 @@ func (w *baseWorker) SetTracker(t *serverOps.Tracker) { w.tracker = t }
 func (w *baseWorker) SetEmitter(e events.Emitter) { w.emitter = e }
 
 // SetOpHookExecutor sets the operation hook executor.
-func (w *baseWorker) SetOpHookExecutor(e evaluator.OpHookExecutor) { w.opHookExecutor = e }
+func (w *baseWorker) SetOpHookExecutor(e pipeline.OpHookExecutor) { w.opHookExecutor = e }
 
 // startOp creates an operation if tracker is set, runs start hooks, emits start
 // event. Returns (op, ctx) where ctx is derived from parentCtx and carries op

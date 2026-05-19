@@ -86,7 +86,7 @@ func setupREXCapture(t *testing.T, srv *Server) func() map[string]string {
 	var mu sync.Mutex
 	var captured map[string]string
 
-	srv.evaluator.RegisterHandler("TEST.CAPTURE", func(cmdCtx *command.Context) command.Result {
+	srv.pipeline.RegisterHandler("TEST.CAPTURE", func(cmdCtx *command.Context) command.Result {
 		mu.Lock()
 		defer mu.Unlock()
 		if cmdCtx.Client.CmdMeta != nil {
@@ -299,7 +299,7 @@ func TestServer_REXMeta_PrecedenceMetaOverridesConnDefaults(t *testing.T) {
 		connMu       sync.Mutex
 		connDefaults map[string]string
 	)
-	srv.evaluator.RegisterHandler("TEST.CAPTURE_BOTH", func(cmdCtx *command.Context) command.Result {
+	srv.pipeline.RegisterHandler("TEST.CAPTURE_BOTH", func(cmdCtx *command.Context) command.Result {
 		connMu.Lock()
 		defer connMu.Unlock()
 		connDefaults = nil

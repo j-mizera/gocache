@@ -1,4 +1,4 @@
-package evaluator
+package pipeline
 
 import (
 	"context"
@@ -19,10 +19,9 @@ import (
 
 // --- Test helpers ---
 
-func newTestEvaluator() (*BaseEvaluator, *engine.Engine, *serverOps.Tracker) {
+func newTestPipeline() (*Pipeline, *engine.Engine, *serverOps.Tracker) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	eval := New(c, e, "", br, wm)
@@ -86,7 +85,7 @@ func (m *mockEmitter) HasSubscribers() bool { return true }
 // --- Tests ---
 
 func TestEvaluate_BasicCommand(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	ctx := clientctx.New()
@@ -97,7 +96,7 @@ func TestEvaluate_BasicCommand(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_CreatesOperation(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	ctx := clientctx.New()
@@ -113,7 +112,7 @@ func TestEvaluate_WithTracker_CreatesOperation(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_OperationHasContext(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	// Use a mock op hook executor that captures the operation.
@@ -145,7 +144,7 @@ func TestEvaluate_WithTracker_OperationHasContext(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_ParentID(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -162,7 +161,7 @@ func TestEvaluate_WithTracker_ParentID(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_REXMetadataInContext(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -188,7 +187,7 @@ func TestEvaluate_WithTracker_REXMetadataInContext(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	// Op hook enriches with traceparent during start.
@@ -212,7 +211,7 @@ func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	emitter := &mockEmitter{}
@@ -261,7 +260,7 @@ func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	// Op hook enriches operation context.
@@ -299,7 +298,7 @@ func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -334,7 +333,7 @@ func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
 }
 
 func TestEvaluate_WithTracker_PreHookEnrichmentFlowsToOperation(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -366,7 +365,7 @@ func TestEvaluate_WithTracker_PreHookEnrichmentFlowsToOperation(t *testing.T) {
 }
 
 func TestEvaluate_UnknownCommand(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	ctx := clientctx.New()
@@ -380,7 +379,7 @@ func TestEvaluate_UnknownCommand(t *testing.T) {
 }
 
 func TestEvaluate_TransactionQueued(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	ctx := clientctx.New()
@@ -398,7 +397,7 @@ func TestEvaluate_TransactionQueued(t *testing.T) {
 }
 
 func TestEvaluate_ConcurrentCommands(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -432,7 +431,7 @@ func TestEvaluate_ConcurrentCommands(t *testing.T) {
 }
 
 func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	emitter := &mockEmitter{}
@@ -461,7 +460,7 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 }
 
 func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
-	eval, e, _ := newTestEvaluator()
+	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
 	opHook := &mockOpHookExecutor{hasAny: true}
@@ -482,7 +481,7 @@ func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
 }
 
 func TestEvaluate_ArgValidation_NoOperation(t *testing.T) {
-	eval, e, tracker := newTestEvaluator()
+	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
 
 	ctx := clientctx.New()

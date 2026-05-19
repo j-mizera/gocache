@@ -18,7 +18,7 @@ related:
 - RESP2/RESP3 protocol with per-connection negotiation
 - Inline command support (telnet/netcat compatible)
 - Pipelining with buffered writer
-- Serial engine dispatch (all mutations through single goroutine)
+- Direct shard mutex dispatch (all mutations through per-shard locks)
 - Transactions: MULTI/EXEC/DISCARD with atomic batch execution
 - Optimistic locking: WATCH/UNWATCH with dirty-marking
 - Blocking list operations: BLPOP/BRPOP with waiter registry

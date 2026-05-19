@@ -20,7 +20,6 @@ func TestHandler_Snapshot(t *testing.T) {
 
 	c1 := cache.New()
 	e1 := engine.New(c1)
-	go e1.Run()
 	t.Cleanup(func() { e1.Stop() })
 	ctx1 := clientctx.New()
 

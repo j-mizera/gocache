@@ -3,7 +3,7 @@
 
 frame "Plugin Command Registration & Routing" as F {
 
-    rectangle "Evaluator Pipeline (pkg/evaluator)" as eval {
+    rectangle "Pipeline (pkg/pipeline)" as eval {
         component [Handler Map] as CoreHandlers <<map[string]command.Handler\n- RESP handlers from pkg/resp/handler\n- REX.META from pkg/rex/handler>>
         component [Plugin Router\nFallback] as Fallback <<if handler not found>>
     }

@@ -6,7 +6,7 @@ mainframe **sd** REX Metadata Flow: Negotiation, META lines, and hook context in
 actor Client
 participant "Connection\nHandler" as Conn
 participant "ClientContext\n(per connection)" as CC
-participant "Evaluator" as Eval
+participant "Pipeline" as Eval
 participant "rex package" as REX
 participant "Hook Executor" as Hook
 participant "Auth Plugin\n(pre-hook)" as Auth

@@ -7,10 +7,10 @@ actor Client
     participant "TCP Listener\n(net.Listener)" as Listener
     participant "Connection Handler\n(per-goroutine)" as ConnHandler
     participant "RESP Reader\n(resp.NewReader)" as Reader
-    participant "Evaluator\n(BaseEvaluator)" as Evaluator
+    participant "Pipeline\n(Pipeline)" as Pipeline
     participant "Hook Executor" as HookExec
     participant "Command Router\n(plugin fallback)" as CmdRouter
-    participant "Engine\n(per-shard goroutines)" as Engine
+    participant "Engine\n(direct shard mutex)" as Engine
     participant "Cache Router\n(shardIndexOf)" as Router
     participant "Shard(s)\n(write lock held)" as Shards
     participant "RESP Writer\n(resp.NewWriter)" as Writer
@@ -43,9 +43,9 @@ actor Client
             Writer --> Client : -NOAUTH Authentication required.
 
         else Valid command
-            ConnHandler -> Evaluator : Evaluate(ctx, op, args)
+            ConnHandler -> Pipeline : Evaluate(ctx, op, args)
 
-            hnote over Evaluator
+            hnote over Pipeline
               Lookup handler in map.
               Validate arg count via commandSpecs.
               Classify by sharding behavior:
@@ -54,29 +54,39 @@ actor Client
             end note
 
             alt Unknown command (not in core handlers)
-                Evaluator -> CmdRouter : HasCommand(op)?
+                Pipeline -> CmdRouter : HasCommand(op)?
                 alt Plugin command found
-                    Evaluator -> Evaluator : metadata = rex.BuildMetadata(...)
+                    Pipeline -> Pipeline : metadata = rex.BuildMetadata(...)
                     CmdRouter -> CmdRouter : Route via IPC\n(CommandRequestV1 + metadata)
-                    CmdRouter --> Evaluator : Result from plugin
+                    CmdRouter --> Pipeline : Result from plugin
                 else Not found
-                    Evaluator --> ConnHandler : Result{ErrUnknown}
+                    Pipeline --> ConnHandler : Result{ErrUnknown}
                 end
 
             else In transaction (not MULTI/EXEC/DISCARD)
-                Evaluator --> ConnHandler : Queue command -> Result{"QUEUED"}
+                Pipeline --> ConnHandler : Queue command -> Result{"QUEUED"}
 
             else Normal core command
-                Evaluator -> HookExec : RunPreHooks(op, args)
+                Pipeline -> HookExec : RunPreHooks(op, args)
                 alt Pre-hook denies
-                    HookExec --> Evaluator : Denied{reason}
-                    Evaluator --> ConnHandler : Result{"-DENIED reason"}
+                    HookExec --> Pipeline : Denied{reason}
+                    Pipeline --> ConnHandler : Result{"-DENIED reason"}
                 else Pre-hook allows (or no hooks)
-                    HookExec --> Evaluator : OK
+                    HookExec --> Pipeline : OK
 
-                    alt Single-key handler (most common)
-                        Evaluator -> Engine : DispatchToShard(ctx, shardIdx, fn)
-                        Engine -> Router : forward to shard goroutine
+                    alt Single-key read-only (GET, HGET, LRANGE ...)
+                        Pipeline -> Engine : DispatchToShardRO(ctx, shardIdx, fn)
+                        Engine -> Router : acquire shard read lock
+                        Router -> Shards : shard.RLock()
+                        activate Shards #LightBlue
+                        Router -> Shards : fn() reads shard state
+                        Shards --> Router : result
+                        Router -> Shards : shard.RUnlock()
+                        deactivate Shards
+                        Router --> Engine : result
+                    else Single-key write (SET, LPUSH, HSET ...)
+                        Pipeline -> Engine : DispatchToShard(ctx, shardIdx, fn)
+                        Engine -> Router : acquire shard write lock
                         Router -> Shards : shard.Lock()
                         activate Shards
                         Router -> Shards : fn() reads/mutates shard state
@@ -85,8 +95,8 @@ actor Client
                         deactivate Shards
                         Router --> Engine : result
                     else Multi-key handler (MGET / MSET / SINTER ...)
-                        Evaluator -> Evaluator : touched := cache.TouchedShards(keys)
-                        Evaluator -> Engine : DispatchToShards(ctx, touched, fn)
+                        Pipeline -> Pipeline : touched := cache.TouchedShards(keys)
+                        Pipeline -> Engine : DispatchToShards(ctx, touched, fn)
                         Engine -> Router : acquire touched shards in sorted order
                         Router -> Shards : Lock all in touched set
                         activate Shards
@@ -96,7 +106,7 @@ actor Client
                         deactivate Shards
                         Router --> Engine : result
                     else Full-bulk handler (KEYS / FLUSHDB / SAVE)
-                        Evaluator -> Engine : DispatchWithResult(ctx, fn)
+                        Pipeline -> Engine : DispatchWithResult(ctx, fn)
                         Engine -> Router : acquire ALL shards
                         Router -> Shards : Lock(0..N-1)
                         activate Shards
@@ -107,12 +117,12 @@ actor Client
                         Router --> Engine : result
                     end
 
-                    Engine --> Evaluator : result via ResChan
+                    Engine --> Pipeline : result
 
-                    Evaluator -> HookExec : RunPostHooks(op, args, result)
+                    Pipeline -> HookExec : RunPostHooks(op, args, result)
                     note right : Non-critical: async\nCritical: blocks
 
-                    Evaluator --> ConnHandler : Result{Value}
+                    Pipeline --> ConnHandler : Result{Value}
                 end
             end
 
@@ -122,13 +132,49 @@ actor Client
         end
     end
 
+== Pipeline Batch Coalescing (when reader.Buffered() > 0) ==
+
+    hnote over ConnHandler
+      When pipelined commands are buffered,
+      the connection handler collects up to 128
+      batchable single-key commands, groups them
+      by target shard, and pre-acquires all needed
+      shard locks in ascending order (deadlock-free).
+    end note
+
+    ConnHandler -> ConnHandler : collectBatch(reader, up to 128 cmds)
+    ConnHandler -> ConnHandler : group by shard, sort shard IDs ascending
+
+    loop For each unique shard (ascending order)
+        ConnHandler -> Engine : AcquireShard / AcquireShardRO(shardID)
+        Engine -> Shards : Lock() or RLock() per shard
+        activate Shards
+    end
+
+    loop For each command in batch (original order)
+        ConnHandler -> Pipeline : EvaluatePreLocked(ctx, op, args)
+        hnote over Pipeline
+          ShardLocked=true: handler runs inline
+          (no lock acquisition, like InBatch)
+        end note
+        Pipeline --> ConnHandler : Result
+    end
+
+    loop Release all locks (reverse order)
+        Engine -> Shards : Unlock() or RUnlock()
+        deactivate Shards
+    end
+
+    ConnHandler -> Writer : Write all results in original order
+    Writer --> Client : Pipelined RESP responses
+
 note right of Engine
-  **Sharding tax**: cross-shard handlers
-  (MSET, SINTER, MGET) pay a structural
-  cache-line bounce per shard touched.
-  Audit at docs/audits/per-shard-arc-summary.md
-  measures the residual MSET regression
-  vs the single-mutex baseline.
+  **Direct shard mutex**: each dispatch method
+  acquires shard lock(s) directly on the calling
+  goroutine. No channels, no per-shard goroutines.
+  Read-only commands use RLock for concurrent reads.
+  Pipelined commands are batched by shard to reduce
+  lock acquisitions from N to num-unique-shards.
 end note
 
 @enduml

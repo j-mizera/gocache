@@ -21,12 +21,12 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 	t.Helper()
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
+	c.OnMutateAll = wm.NotifyAll
 
 	srv := New("127.0.0.1:0", c, e, requirePass, br, wm)
 	srv.SetTracker(serverOps.NewTracker())
@@ -154,7 +154,6 @@ func TestServer_AuthGate(t *testing.T) {
 func TestServer_Shutdown(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	defer e.Stop()
 
 	br := blocking.NewRegistry()
@@ -209,12 +208,12 @@ func (c *captureListener) Addr() net.Addr { return c.inner.Addr() }
 func TestServer_TCPNoDelay(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	c.OnMutate = wm.NotifyMutation
+	c.OnMutateAll = wm.NotifyAll
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	srv.SetTracker(serverOps.NewTracker())

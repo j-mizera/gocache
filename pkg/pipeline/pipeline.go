@@ -1,4 +1,4 @@
-package evaluator
+package pipeline
 
 import (
 	"context"
@@ -61,15 +61,15 @@ type OpHookExecutor interface {
 	RunCompleteHooks(op *ops.Operation)
 }
 
-// BaseEvaluator is the command dispatch pipeline. It owns no command-specific
+// Pipeline is the command dispatch pipeline. It owns no command-specific
 // knowledge — handlers and their argument specs are provided by external
 // packages (resp/handler, rex/handler) via command.Registration.
 //
 // Following "accept interfaces, return structs," constructors return
-// *BaseEvaluator directly; consumers that need a narrower surface for testing
+// *Pipeline directly; consumers that need a narrower surface for testing
 // should define their own interface locally (pkg/server does this via a
 // package-private alias of the methods it actually calls).
-type BaseEvaluator struct {
+type Pipeline struct {
 	cache              *cache.Cache
 	engine             *engine.Engine
 	transactionManager *transaction.Manager
@@ -87,8 +87,8 @@ type BaseEvaluator struct {
 	snapshotInvoker    command.SnapshotInvoker
 }
 
-func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *BaseEvaluator {
-	b := &BaseEvaluator{
+func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Pipeline {
+	b := &Pipeline{
 		cache:              c,
 		engine:             e,
 		transactionManager: transaction.NewManager(),
@@ -104,14 +104,14 @@ func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Regi
 }
 
 // Register adds a single command handler and its argument spec.
-func (b *BaseEvaluator) Register(op string, reg command.Registration) {
+func (b *Pipeline) Register(op string, reg command.Registration) {
 	op = strings.ToUpper(op)
 	b.handlers[op] = reg.Handler
 	b.specs[op] = reg.Spec
 }
 
 // RegisterHandler adds a handler without a spec (for dynamic/test commands).
-func (b *BaseEvaluator) RegisterHandler(op string, handler command.Handler) {
+func (b *Pipeline) RegisterHandler(op string, handler command.Handler) {
 	b.handlers[strings.ToUpper(op)] = handler
 }
 
@@ -119,19 +119,19 @@ func (b *BaseEvaluator) RegisterHandler(op string, handler command.Handler) {
 // safe for concurrent use — all must be called during server startup,
 // before any client connection is accepted.
 
-func (b *BaseEvaluator) SetPluginRouter(r *router.Router) {
+func (b *Pipeline) SetPluginRouter(r *router.Router) {
 	b.pluginRouter = r
 }
 
-func (b *BaseEvaluator) SetHookExecutor(e command.HookExecutor) {
+func (b *Pipeline) SetHookExecutor(e command.HookExecutor) {
 	b.hookExecutor = e
 }
 
-func (b *BaseEvaluator) SetEmitter(e events.Emitter) {
+func (b *Pipeline) SetEmitter(e events.Emitter) {
 	b.emitter = e
 }
 
-func (b *BaseEvaluator) SetTracker(t *serverOps.Tracker) {
+func (b *Pipeline) SetTracker(t *serverOps.Tracker) {
 	b.tracker = t
 }
 
@@ -140,7 +140,7 @@ func (b *BaseEvaluator) SetTracker(t *serverOps.Tracker) {
 // inherits the same instance, so command.Dispatch can decide per-command
 // whether to wrap the write closure with emission. Pass nil to disable
 // emission (the default — no coordinator means no mutation feed).
-func (b *BaseEvaluator) SetPersistenceFeed(f command.MutationEmitter) {
+func (b *Pipeline) SetPersistenceFeed(f command.MutationEmitter) {
 	b.persistenceFeed = f
 }
 
@@ -150,15 +150,15 @@ func (b *BaseEvaluator) SetPersistenceFeed(f command.MutationEmitter) {
 // pkg/persistence directly. Pass nil to disable snapshot commands —
 // the handler returns an error to the client when invoked without a
 // registered snapshotter.
-func (b *BaseEvaluator) SetSnapshotInvoker(s command.SnapshotInvoker) {
+func (b *Pipeline) SetSnapshotInvoker(s command.SnapshotInvoker) {
 	b.snapshotInvoker = s
 }
 
-func (b *BaseEvaluator) SetOpHookExecutor(e OpHookExecutor) {
+func (b *Pipeline) SetOpHookExecutor(e OpHookExecutor) {
 	b.opHookExecutor = e
 }
 
-func (b *BaseEvaluator) CoreCommandNames() []string {
+func (b *Pipeline) CoreCommandNames() []string {
 	names := make([]string, 0, len(b.handlers))
 	for name := range b.handlers {
 		names = append(names, name)
@@ -166,7 +166,7 @@ func (b *BaseEvaluator) CoreCommandNames() []string {
 	return names
 }
 
-func (b *BaseEvaluator) registerAll() {
+func (b *Pipeline) registerAll() {
 	// RESP command handlers provide their own specs.
 	for name, reg := range resphandler.Registrations() {
 		b.Register(name, reg)
@@ -177,11 +177,32 @@ func (b *BaseEvaluator) registerAll() {
 	}
 }
 
-func (b *BaseEvaluator) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
-	return b.evaluateInternal(parentCtx, client, op, args, false)
+func (b *Pipeline) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+	return b.evaluateCore(parentCtx, client, op, args, false, false)
 }
 
-func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
+// EvaluatePreLocked evaluates a command with ShardLocked=true, indicating
+// the target shard's lock is already held by the caller. Used by pipeline
+// batch coalescing where shard locks are pre-acquired.
+func (b *Pipeline) EvaluatePreLocked(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+	return b.evaluateCore(parentCtx, client, op, args, false, true)
+}
+
+// SpecFor returns the argument spec for the given command name, or false
+// if the command is not a registered core command.
+func (b *Pipeline) SpecFor(op string) (command.Spec, bool) {
+	spec, ok := b.specs[strings.ToUpper(op)]
+	return spec, ok
+}
+
+// evaluateInternal is the EvalFn-compatible entry point used by EXEC to
+// re-enter the pipeline for queued commands. Delegates to evaluateCore
+// with shardLocked=false.
+func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
+	return b.evaluateCore(parentCtx, ctx, op, args, inBatch, false)
+}
+
+func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, shardLocked bool) command.Result {
 	op = strings.ToUpper(op)
 
 	handler, ok := b.handlers[op]
@@ -236,7 +257,7 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 	// correlation works; the operation is simply never registered, enriched,
 	// emitted, or hook-fired.
 	if !b.hasAnySink() {
-		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec)
+		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
 	}
 
 	// --- Create command operation ---
@@ -276,6 +297,7 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
 	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
+	cmdCtx.ShardLocked = shardLocked
 	cmdCtx.SetContext(opCtx)
 
 	// --- Command hooks (pre) ---
@@ -338,13 +360,14 @@ func (b *BaseEvaluator) evaluateInternal(parentCtx context.Context, ctx *clientc
 // evaluateFast runs the handler with a bare *ops.Operation and no
 // instrumentation. Hot path when no sinks are attached. See hasAnySink for
 // the documented invariant on late-subscriber visibility.
-func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec command.Spec) command.Result {
+func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec command.Spec, shardLocked bool) command.Result {
 	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
 	opCtx := ops.WithContext(parentCtx, cmdOp)
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
 	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
+	cmdCtx.ShardLocked = shardLocked
 	cmdCtx.SetContext(opCtx)
 
 	result := handler(cmdCtx)
@@ -364,7 +387,7 @@ func (b *BaseEvaluator) evaluateFast(parentCtx context.Context, ctx *clientctx.C
 // command's Spec so command.Dispatch can decide whether to take a single
 // shard's lock (single-key), all shard locks (multi-key), or run inline
 // (keyless) — see command.Dispatch for the routing matrix.
-func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, spec command.Spec) {
+func (b *Pipeline) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, spec command.Spec) {
 	c.Client = ctx
 	c.Op = op
 	c.Args = args
@@ -398,7 +421,7 @@ func (b *BaseEvaluator) fillCmdCtx(c *command.Context, ctx *clientctx.ClientCont
 // routeToPlugin dispatches a command to a plugin via the router. The per-call
 // timeout is derived from parentCtx so connection-level cancellation also
 // aborts the plugin call.
-func (b *BaseEvaluator) routeToPlugin(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
 	metadata := rex.BuildMetadata(client.RexMeta, client.CmdMeta)
 
 	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)

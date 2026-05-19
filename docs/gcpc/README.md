@@ -260,9 +260,9 @@ The logic lives in `pkg/rex/`:
 - `rex.BuildMetadata(store, cmdMeta)` -- merges defaults + per-command metadata into a bare-key map for the GCPC `metadata` field (returns nil when empty)
 - `rex.ValidateKey(key)` -- enforces the reserved-prefix rules
 
-The `REX.META` handler lives in `pkg/rex/handler/handler.go` and is registered by the evaluator alongside core RESP handlers.
+The `REX.META` handler lives in `pkg/rex/handler/handler.go` and is registered by the pipeline alongside core RESP handlers.
 
-The hook executor extracts `shared.rex.*` keys from the hook context into the dedicated `metadata` field on `HookRequestV1` (prefix-stripped). The command router receives bare-key metadata from the evaluator and forwards it on `CommandRequestV1`.
+The hook executor extracts `shared.rex.*` keys from the hook context into the dedicated `metadata` field on `HookRequestV1` (prefix-stripped). The command router receives bare-key metadata from the pipeline and forwards it on `CommandRequestV1`.
 
 ## Event Replay
 

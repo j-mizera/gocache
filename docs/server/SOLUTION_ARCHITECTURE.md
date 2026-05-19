@@ -40,11 +40,13 @@ Plugin (separate process):
 - Prometheus/OpenTelemetry
 - Replication, clustering
 
-### Serial Dispatch
+### Direct Shard Mutex Dispatch
 
-All cache mutations are serialized through a single command dispatch loop. Commands arrive via a buffered channel, the cache lock is acquired, the command executes, and the result is sent back on a per-command response channel.
+All cache mutations are serialized per-shard through direct mutex acquisition. The engine acquires the target shard's lock, executes the command closure, and releases the lock. No goroutines, channels, or result queues are involved — the calling goroutine holds the lock directly.
 
-This eliminates data races without fine-grained locking. The cache lock is held only during command execution. The bottleneck is the single dispatch thread for writes, but this matches the Redis model and simplifies correctness.
+With 256 shards (default), single-key commands (SET, GET, INCR, LPUSH, HSET, SADD) run with ~10-20ns dispatch overhead (atomic CAS fast path). Read-only commands (GET, HGET, LRANGE, etc.) use `RLock` for concurrent read access; write commands use exclusive `Lock`. Multi-key commands acquire a sorted shard subset to prevent deadlocks. Full-bulk commands (KEYS, FLUSHDB, SAVE) acquire all shards.
+
+When pipelined commands are detected (multiple commands buffered in the connection's read buffer), the server collects them into a batch, groups by target shard, and pre-acquires shard locks in ascending order. All commands in the batch then evaluate with the lock already held, reducing lock acquisitions from N to the number of distinct shards touched. Non-batchable commands (transactions, AUTH, multi-key) fall back to one-at-a-time dispatch.
 
 ### Process Isolation
 
@@ -60,21 +62,21 @@ Plugins run as separate OS processes forked by the plugin manager. Communication
 
 TCP listener with a dedicated handler per connection. Each connection maintains its own protocol reader/writer and tracks per-session state: authentication status, protocol version (RESP2/RESP3), transaction queue, and watched keys. Supports pipelining via buffered writes flushed when the client input buffer is drained.
 
-### Command Evaluator
+### Command Pipeline
 
-Central command dispatch hub. Maintains a registry mapping command names to handler functions. On command arrival:
+Central command processing hub. Maintains a registry mapping command names to handler functions. On command arrival:
 
 1. Look up handler in the core command registry
 2. If not found, fall through to the plugin router
 3. Validate argument count against the command's spec (min/max)
 4. If inside a transaction (MULTI), queue instead of executing
 5. Run pre-hooks (critical hooks can deny the command)
-6. Execute handler via the serial dispatch loop
+6. Execute handler via the dispatch engine
 7. Run post-hooks
 
 ### Dispatch Engine
 
-Single-threaded command dispatch loop. Receives command closures on a buffered channel (capacity 100), acquires the cache lock, executes, and returns the result. Provides both fire-and-forget and request-response dispatch modes. Shutdown is coordinated via a stop signal channel.
+Stateless dispatch layer over per-shard mutexes. Acquires the target shard lock(s), executes the command closure, and releases the lock. Provides single-shard, multi-shard, and full-bulk dispatch modes. Shutdown is coordinated via an atomic stopped flag.
 
 ### In-Memory Store
 
@@ -187,8 +189,8 @@ Hot reload via filesystem notifications: changes to memory limits, eviction poli
 | Component | Strategy |
 |-----------|----------|
 | Connection handling | One goroutine per client connection |
-| Command dispatch | Single goroutine, buffered command channel |
-| Cache access | Mutex-protected, held only during command execution |
+| Command dispatch | Direct shard mutex acquisition, no dispatch goroutines |
+| Cache access | Per-shard write lock, held only during command execution |
 | Plugin routing | Read-write lock for route table, concurrent map for pending IPC responses |
 | Hook dispatch | Read-write lock for registry, priority-sorted execution |
 | Scope checks | Read-write lock, map per plugin |
@@ -199,16 +201,15 @@ Hot reload via filesystem notifications: changes to memory limits, eviction poli
 ### Core Command (Hot Path)
 
 ```
-Client -> TCP -> RESP Parse -> Command Evaluator -> Handler Lookup
-    -> Pre-hooks (if any) -> Dispatch Loop -> Cache Lock
-    -> Execute -> Cache Unlock -> Post-hooks (if any)
-    -> RESP Serialize -> TCP -> Client
+Client -> TCP -> RESP Parse -> Command Pipeline -> Handler Lookup
+    -> Pre-hooks (if any) -> Shard Lock -> Execute -> Shard Unlock
+    -> Post-hooks (if any) -> RESP Serialize -> TCP -> Client
 ```
 
 ### Plugin Command
 
 ```
-Client -> TCP -> RESP Parse -> Command Evaluator -> Handler Miss
+Client -> TCP -> RESP Parse -> Command Pipeline -> Handler Miss
     -> Plugin Router -> Route Lookup -> IPC Send
     -> Unix Socket -> Plugin Process -> Handle Command
     -> Plugin Process -> Unix Socket -> Correlation Match
@@ -218,7 +219,7 @@ Client -> TCP -> RESP Parse -> Command Evaluator -> Handler Miss
 ### Hook Flow
 
 ```
-Command Arrives -> Evaluator
+Command Arrives -> Pipeline
     -> Hook Executor -> Match pre-hooks for command
         -> Non-critical: fire async (no wait)
         -> Critical: send + wait response (sequential by priority)
@@ -248,7 +249,7 @@ Signal (SIGTERM/SIGINT)
 | Category | Diagram | Description |
 |----------|---------|-------------|
 | Component | [System HLD](design/component/components.puml) | Full high-level system design |
-| Component | [Core Subsystems](design/component/components_core.puml) | Evaluator, engine, storage, workers |
+| Component | [Core Subsystems](design/component/components_core.puml) | Pipeline, engine, storage, workers |
 | Component | [Configuration](design/component/components_config.puml) | Config loading, layering, hot reload |
 | Component | [Memory & Eviction](design/component/components_memory_eviction.puml) | LRU eviction internals |
 | Component | [Event Bus + Replay Ring](design/component/components_event_bus_ring.puml) | Bounded ring for late subscriber catch-up |

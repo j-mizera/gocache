@@ -4,7 +4,7 @@
 mainframe **sd** Command Flow with Plugin Hooks & Context
 
 actor Client
-    participant "Evaluator" as Evaluator
+    participant "Pipeline" as Evaluator
     participant "Hook Executor" as HookExec
     participant "Hook Registry" as HookReg
     participant "PluginConn\n(multiplexed)" as PluginConn

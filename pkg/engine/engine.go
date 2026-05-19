@@ -1,12 +1,8 @@
-// Package engine serialises all cache mutations through one goroutine
-// per shard. Callers submit work via Dispatch / DispatchWithResult; the
-// engine routes the work to the goroutine owning the shard the command's
-// key hashes to, where it runs under that shard's write lock.
-//
-// Today's production configuration is N=1 (single shard, single engine
-// goroutine, identical behaviour to the pre-shard cache); the routing
-// machinery is in place so a follow-up can bump N without touching call
-// sites.
+// Package engine serialises all cache mutations through per-shard
+// mutexes. Callers submit work via the Dispatch* methods; the engine
+// acquires the target shard lock(s), runs the work, and releases.
+// No goroutines, channels, or result queues are involved — the calling
+// goroutine holds the lock directly.
 package engine
 
 import (
@@ -23,137 +19,30 @@ import (
 // the work could be executed.
 var ErrEngineStopped = errors.New("engine stopped")
 
-// cmdChanCapacity sizes each shard's buffered submission channel.
-const cmdChanCapacity = 100
-
-// Command is the unit of work the engine executes under a shard's write lock.
-type Command struct {
-	Execute func() any
-	ResChan chan any
-}
-
-// resChanPool recycles the per-call result channel sendAndWait creates
-// for every dispatch. Same Put-on-success-only safety rule as before:
-// once the engine goroutine takes ownership of the channel via the
-// receive on cmdChan, sendAndWait must NOT return the channel to the
-// pool from a stop / cancel branch — the engine may still write to it.
-var resChanPool = sync.Pool{
-	New: func() any { return make(chan any, 1) },
-}
-
-// shardEngine is one goroutine + cmdChan pair, owning a single Shard.
-// Each shard's goroutine runs handlers under that shard's write lock.
-type shardEngine struct {
-	shard    *cache.Shard
-	cmdChan  chan Command
-	stopChan chan struct{}
-}
-
-// Engine fans out commands to N shard engines. The Dispatch* methods
-// route by key hash so the right shard's goroutine processes the work.
+// Engine is a stateless dispatch layer over per-shard mutexes.
 type Engine struct {
 	cache    *cache.Cache
-	shards   []*shardEngine
 	stopped  atomic.Bool
 	stopOnce sync.Once
 }
 
-// New constructs an Engine with one goroutine per cache shard.
+// New constructs an Engine backed by the given cache.
 func New(c *cache.Cache) *Engine {
-	e := &Engine{cache: c, shards: make([]*shardEngine, c.ShardCount())}
-	for i := range e.shards {
-		e.shards[i] = &shardEngine{
-			shard:    c.ShardByIndex(i),
-			cmdChan:  make(chan Command, cmdChanCapacity),
-			stopChan: make(chan struct{}),
-		}
-	}
-	return e
+	return &Engine{cache: c}
 }
 
-// Run launches one goroutine per shard. Returns immediately.
-func (e *Engine) Run() {
-	logger.InfoNoCtx().Int("shards", len(e.shards)).Msg("engine dispatch loop started")
-	for _, se := range e.shards {
-		go se.run()
-	}
-}
-
-// Stop signals every shard goroutine to exit. Safe to call multiple times.
+// Stop marks the engine as stopped. Safe to call multiple times.
 func (e *Engine) Stop() {
 	e.stopOnce.Do(func() {
 		logger.InfoNoCtx().Msg("engine stop signal received")
 		e.stopped.Store(true)
-		for _, se := range e.shards {
-			close(se.stopChan)
-		}
 	})
-}
-
-func (se *shardEngine) run() {
-	for {
-		select {
-		case cmd := <-se.cmdChan:
-			se.shard.Lock()
-			res := cmd.Execute()
-			se.shard.Unlock()
-			cmd.ResChan <- res
-		case <-se.stopChan:
-			return
-		}
-	}
-}
-
-// sendAndWait submits fn to the named shard's goroutine and blocks for its
-// result. The Put rules:
-//   - submit-stage stop/cancel: engine never received the Command, so the
-//     channel is still privately owned by sendAndWait → safe to Put back.
-//   - successful receive: the buffer slot has just been drained → safe to
-//     Put back.
-//   - wait-stage stop/cancel: engine already owns the write end and may
-//     write to it before observing stop → DO NOT Put back. The channel
-//     becomes garbage; sync.Pool just won't see it.
-func (e *Engine) sendAndWait(ctx context.Context, shard int, fn func() any) (any, error) {
-	se := e.shards[shard]
-	resChan := resChanPool.Get().(chan any)
-	select {
-	case se.cmdChan <- Command{Execute: fn, ResChan: resChan}:
-	case <-se.stopChan:
-		resChanPool.Put(resChan)
-		return nil, ErrEngineStopped
-	case <-ctx.Done():
-		resChanPool.Put(resChan)
-		return nil, ctx.Err()
-	}
-	select {
-	case res := <-resChan:
-		resChanPool.Put(resChan)
-		return res, nil
-	case <-se.stopChan:
-		// Engine owns the channel — orphan it.
-		return nil, ErrEngineStopped
-	case <-ctx.Done():
-		// Engine owns the channel — orphan it.
-		return nil, ctx.Err()
-	}
 }
 
 // Dispatch acquires every shard's write lock in shard-id order and runs
 // fn under all of them, returning when fn completes. Used by callers
 // that need a globally-consistent view of the cache: snapshot worker,
-// cleanup worker, MULTI/EXEC, FLUSHDB, and other multi-key paths. The
-// per-shard engine goroutines are not involved on this path; the bulk
-// lock provides the same serialization the single-engine model used to
-// give "for free."
-//
-// At N=1 this is equivalent to taking the (only) shard's lock — exactly
-// the pre-shard behaviour. At N>1 the locks are acquired in id order so
-// concurrent callers cannot deadlock against each other.
-//
-// Returns ctx.Err() if ctx is cancelled before any lock is acquired, or
-// nil otherwise. The bulk lock acquisition itself is unconditional once
-// started; at the per-shard granularity this is a sync.RWMutex.Lock call
-// which doesn't honour cancellation.
+// cleanup worker, FLUSHDB, and other full-keyspace paths.
 func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
 	if e.stopped.Load() {
 		return ErrEngineStopped
@@ -164,14 +53,14 @@ func (e *Engine) Dispatch(ctx context.Context, fn func()) error {
 	e.cache.Lock()
 	defer e.cache.Unlock()
 	if e.stopped.Load() {
-		// A Stop concurrent with the lock acquisition: refuse to run.
 		return ErrEngineStopped
 	}
 	fn()
 	return nil
 }
 
-// DispatchWithResult is Dispatch with a return value.
+// DispatchWithResult is Dispatch with a return value. Used by MULTI/EXEC
+// (bulk lock for atomic batch) and full-keyspace read commands (KEYS, SCAN).
 func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, error) {
 	if e.stopped.Load() {
 		return nil, ErrEngineStopped
@@ -187,25 +76,48 @@ func (e *Engine) DispatchWithResult(ctx context.Context, fn func() any) (any, er
 	return fn(), nil
 }
 
-// DispatchToShard routes fn to the goroutine owning the named shard.
-// Used by per-key handlers once the caller has computed the shard from
-// the command's key.
+// DispatchToShard acquires the named shard's write lock, runs fn, and
+// releases. Used by per-key handlers (SET, GET, INCR, LPUSH, HSET, SADD,
+// and every other single-key command).
 func (e *Engine) DispatchToShard(ctx context.Context, shard int, fn func() any) (any, error) {
-	if shard < 0 || shard >= len(e.shards) {
-		return nil, errors.New("engine: shard index out of range")
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
 	}
-	return e.sendAndWait(ctx, shard, fn)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s := e.cache.ShardByIndex(shard)
+	s.Lock()
+	defer s.Unlock()
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	return fn(), nil
+}
+
+// DispatchToShardRO acquires the named shard's read lock, runs fn, and
+// releases. Used by single-key read-only commands (GET, HGET, LRANGE,
+// SCARD, TTL, etc.) to allow concurrent readers on the same shard.
+func (e *Engine) DispatchToShardRO(ctx context.Context, shard int, fn func() any) (any, error) {
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s := e.cache.ShardByIndex(shard)
+	s.RLock()
+	defer s.RUnlock()
+	if e.stopped.Load() {
+		return nil, ErrEngineStopped
+	}
+	return fn(), nil
 }
 
 // DispatchToShards acquires the listed shards' write locks in
 // ascending order, runs fn under the umbrella, and releases them.
 // Used by multi-key handlers that touch a known subset of shards
-// (MGET, MSET, RENAME, etc.). For multi-key handlers that touch
-// every shard (FLUSHDB, EXEC, snapshot save/load, KEYS, SCAN), use
-// DispatchWithResult which acquires the bulk lock instead.
-//
-// shardIDs must be sorted unique indices in [0, ShardCount). Obtain
-// a correctly-shaped slice from Cache.TouchedShards.
+// (MGET, MSET, RENAME, etc.).
 func (e *Engine) DispatchToShards(ctx context.Context, shardIDs []int, fn func() any) (any, error) {
 	if e.stopped.Load() {
 		return nil, ErrEngineStopped
@@ -221,7 +133,25 @@ func (e *Engine) DispatchToShards(ctx context.Context, shardIDs []int, fn func()
 	return fn(), nil
 }
 
+// AcquireShard acquires the named shard's exclusive write lock and returns
+// a release function. Used by pipeline batch coalescing to pre-acquire
+// multiple shard locks before evaluating a batch of commands.
+func (e *Engine) AcquireShard(shard int) func() {
+	s := e.cache.ShardByIndex(shard)
+	s.Lock()
+	return s.Unlock
+}
+
+// AcquireShardRO acquires the named shard's read lock and returns a
+// release function. Used by pipeline batch coalescing when all commands
+// targeting a shard are read-only.
+func (e *Engine) AcquireShardRO(shard int) func() {
+	s := e.cache.ShardByIndex(shard)
+	s.RLock()
+	return s.RUnlock
+}
+
 // ShardCount exposes the underlying cache's shard count for callers that
-// need to mirror the routing (the evaluator does this when computing
+// need to mirror the routing (the pipeline does this when computing
 // the destination shard from a command's key).
-func (e *Engine) ShardCount() int { return len(e.shards) }
+func (e *Engine) ShardCount() int { return e.cache.ShardCount() }

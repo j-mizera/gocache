@@ -25,7 +25,6 @@ func setup(t *testing.T) (*cache.Cache, *engine.Engine, *clientctx.ClientContext
 	t.Helper()
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 	ctx := clientctx.New()
 	return c, e, ctx

@@ -181,7 +181,6 @@ func TestZadd_OOM_NoEviction(t *testing.T) {
 	// Use a tiny cache with noeviction — ZADD should return an OOM error.
 	c := cache.NewWithBytes(1, cache.EvictionNone)
 	e := engine.New(c)
-	go e.Run()
 	defer e.Stop()
 
 	ctx := setupCtx(t)

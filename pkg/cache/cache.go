@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"math/bits"
 	"strings"
 	"sync"
 	"time"
@@ -498,30 +499,36 @@ func (c *Cache) LockShards(shardIDs []int, write bool) func() {
 }
 
 // TouchedShards returns the sorted unique shard indices for the given
-// keys. Allocation-light: uses a uint64 bitset for the dedup (works
-// for ShardCount ≤ 64, which covers the practical range up to and
-// well beyond the prototype's measured-optimum N=16) and allocates
-// one small result slice. Callers pass the slice straight to
-// LockShards or to command.Context.TouchedShards.
+// keys. Uses a [4]uint64 bitset (256 bits, stack-allocated) for shard
+// counts up to 256 — zero heap allocation for the dedup. Callers pass
+// the slice straight to LockShards or to command.Context.TouchedShards.
 func (c *Cache) TouchedShards(keys []string) []int {
 	if len(keys) == 0 {
 		return nil
 	}
-	if c.n <= 64 {
-		var mask uint64
+	if c.n <= 256 {
+		var mask [4]uint64
 		for _, k := range keys {
-			mask |= 1 << uint(c.shardIndex(k))
+			idx := c.shardIndex(k)
+			mask[idx/64] |= 1 << uint(idx%64)
 		}
-		out := make([]int, 0, popcount(mask))
-		for i := 0; mask != 0; i++ {
-			if mask&1 != 0 {
-				out = append(out, i)
+		total := 0
+		for i := range mask {
+			total += bits.OnesCount64(mask[i])
+		}
+		out := make([]int, 0, total)
+		for i := range mask {
+			w := mask[i]
+			base := i * 64
+			for w != 0 {
+				bit := bits.TrailingZeros64(w)
+				out = append(out, base+bit)
+				w &= w - 1
 			}
-			mask >>= 1
 		}
 		return out
 	}
-	// N > 64 fallback: dedup via map. Not on the hot path today.
+	// N > 256 fallback: dedup via map.
 	seen := make(map[int]struct{}, len(keys))
 	out := make([]int, 0, len(keys))
 	for _, k := range keys {
@@ -531,20 +538,12 @@ func (c *Cache) TouchedShards(keys []string) []int {
 			out = append(out, s)
 		}
 	}
-	// Insert sort — small N, allocation-free.
 	for i := 1; i < len(out); i++ {
 		for j := i; j > 0 && out[j] < out[j-1]; j-- {
 			out[j], out[j-1] = out[j-1], out[j]
 		}
 	}
 	return out
-}
-
-func popcount(x uint64) int {
-	x = x - ((x >> 1) & 0x5555555555555555)
-	x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333)
-	x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0f
-	return int((x * 0x0101010101010101) >> 56)
 }
 
 // Aggregates and config -----------------------------------------------------

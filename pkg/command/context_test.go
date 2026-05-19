@@ -19,7 +19,6 @@ import (
 func TestContext_Reset(t *testing.T) {
 	c := cache.New()
 	e := engine.New(c)
-	go e.Run()
 	t.Cleanup(func() { e.Stop() })
 
 	ctx := &Context{

@@ -27,7 +27,7 @@ frame "Permission / Scope System" as F {
     rectangle "Runtime Enforcement" as rt {
         component [Hook Executor] as HookExec <<pre-hook gate>>
         component [Command Router] as Router <<plugin IPC>>
-        component [Evaluator] as Eval <<core dispatch>>
+        component [Pipeline] as Eval <<core dispatch>>
     }
 
     ' -- Registration path --

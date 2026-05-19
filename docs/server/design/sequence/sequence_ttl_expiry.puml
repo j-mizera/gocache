@@ -4,7 +4,7 @@
 mainframe **sd** Dual TTL Expiry Strategy
 
 participant "Client" as Client
-participant "Evaluator" as Eval
+participant "Pipeline" as Eval
 participant "Engine" as Engine
 participant "Cache" as Cache
 participant "CleanupWorker" as Worker

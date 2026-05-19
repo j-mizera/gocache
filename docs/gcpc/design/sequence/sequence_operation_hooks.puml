@@ -3,7 +3,7 @@
 
 mainframe **sd** Operation Hook Execution Flow
 
-participant "Server\n(Evaluator / Worker)" as Server
+participant "Server\n(Pipeline / Worker)" as Server
 participant "Operation\nTracker" as Tracker
 participant "OpHook\nExecutor" as Exec
 participant "OpHook\nRegistry" as Reg

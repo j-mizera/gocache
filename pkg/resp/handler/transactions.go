@@ -42,16 +42,20 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 	queue := cmdCtx.Client.CommandQueue
 	cmdCtx.Client.CommandQueue = nil
 
-	if cmdCtx.WatchManager != nil {
-		cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
-	}
-
 	if queue == nil {
+		if cmdCtx.WatchManager != nil {
+			cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
+		}
 		return command.Result{Value: []any{}}
 	}
 
 	batchCtx := cmdCtx.Context()
 	results, err := cmdCtx.Engine.DispatchWithResult(batchCtx, func() any {
+		// Re-check dirty under the lock: a concurrent FLUSHDB may have
+		// fired NotifyAll between the pre-lock check and lock acquisition.
+		if cmdCtx.Client.IsWatchDirty() {
+			return nil
+		}
 		batchResults := make([]any, len(queue))
 		for i, cmdParts := range queue {
 			res := cmdCtx.EvalFn(batchCtx, cmdCtx.Client, cmdParts[0], cmdParts[1:], true)
@@ -63,8 +67,16 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 		}
 		return batchResults
 	})
+
+	if cmdCtx.WatchManager != nil {
+		cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
+	}
+
 	if err != nil {
 		return command.Result{Err: err}
+	}
+	if results == nil {
+		return command.Result{Value: nil}
 	}
 	return command.Result{Value: results}
 }

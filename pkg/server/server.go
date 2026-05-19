@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +20,7 @@ import (
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
-	"gocache/pkg/evaluator"
+	"gocache/pkg/pipeline"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/resp"
@@ -31,11 +32,25 @@ import (
 // when the server's context is cancelled (vs an explicit Shutdown call).
 const ctxCancelShutdownTimeout = 5 * time.Second
 
+const maxBatchSize = 128
+
+type batchEntry struct {
+	op       string
+	args     []string
+	shard    int
+	readOnly bool
+}
+
+type pendingCmd struct {
+	op   string
+	args []string
+}
+
 type Server struct {
 	addr             string
 	cache            *cache.Cache
 	engine           *engine.Engine
-	evaluator        *evaluator.BaseEvaluator
+	pipeline         *pipeline.Pipeline
 	listener         net.Listener
 	shutdownChan     chan struct{}
 	connectionWg     sync.WaitGroup
@@ -48,18 +63,18 @@ type Server struct {
 	activeConns      atomic.Int64
 	emitter          events.Emitter
 	tracker          *serverOps.Tracker
-	opHookExecutor   evaluator.OpHookExecutor
+	opHookExecutor   pipeline.OpHookExecutor
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
 	tracker := serverOps.NewTracker()
-	ev := evaluator.New(c, e, requirePass, br, wm)
-	ev.SetTracker(tracker)
+	p := pipeline.New(c, e, requirePass, br, wm)
+	p.SetTracker(tracker)
 	return &Server{
 		addr:             addr,
 		cache:            c,
 		engine:           e,
-		evaluator:        ev,
+		pipeline:         p,
 		shutdownChan:     make(chan struct{}),
 		requirePass:      requirePass,
 		blockingRegistry: br,
@@ -72,48 +87,48 @@ func New(addr string, c *cache.Cache, e *engine.Engine, requirePass string, br *
 
 // CoreCommandNames returns the list of core command names for plugin shadow checking.
 func (srv *Server) CoreCommandNames() []string {
-	return srv.evaluator.CoreCommandNames()
+	return srv.pipeline.CoreCommandNames()
 }
 
-// SetPluginRouter sets the plugin command router on the evaluator.
+// SetPluginRouter sets the plugin command router on the pipeline.
 func (srv *Server) SetPluginRouter(r *router.Router) {
-	srv.evaluator.SetPluginRouter(r)
+	srv.pipeline.SetPluginRouter(r)
 }
 
-// SetHookExecutor sets the hook executor on the evaluator.
+// SetHookExecutor sets the hook executor on the pipeline.
 func (srv *Server) SetHookExecutor(e command.HookExecutor) {
-	srv.evaluator.SetHookExecutor(e)
+	srv.pipeline.SetHookExecutor(e)
 }
 
-// SetEmitter sets the event emitter on both the server and evaluator.
+// SetEmitter sets the event emitter on both the server and pipeline.
 func (srv *Server) SetEmitter(e events.Emitter) {
 	srv.emitter = e
-	srv.evaluator.SetEmitter(e)
+	srv.pipeline.SetEmitter(e)
 }
 
-// SetTracker sets the operation tracker on both the server and evaluator.
+// SetTracker sets the operation tracker on both the server and pipeline.
 func (srv *Server) SetTracker(t *serverOps.Tracker) {
 	srv.tracker = t
-	srv.evaluator.SetTracker(t)
+	srv.pipeline.SetTracker(t)
 }
 
-// SetOpHookExecutor sets the operation hook executor on both the server and evaluator.
-func (srv *Server) SetOpHookExecutor(e evaluator.OpHookExecutor) {
+// SetOpHookExecutor sets the operation hook executor on both the server and pipeline.
+func (srv *Server) SetOpHookExecutor(e pipeline.OpHookExecutor) {
 	srv.opHookExecutor = e
-	srv.evaluator.SetOpHookExecutor(e)
+	srv.pipeline.SetOpHookExecutor(e)
 }
 
 // SetPersistenceFeed wires the persistence coordinator's mutation-feed
-// hook into the evaluator so command.Dispatch can emit mutations to
+// hook into the pipeline so command.Dispatch can emit mutations to
 // registered Sinks. Pass nil to disable the feed (the default).
 func (srv *Server) SetPersistenceFeed(f command.MutationEmitter) {
-	srv.evaluator.SetPersistenceFeed(f)
+	srv.pipeline.SetPersistenceFeed(f)
 }
 
 // SetSnapshotInvoker wires the persistence coordinator's SAVE/BGSAVE
-// entry point into the evaluator. Pass nil to disable snapshot commands.
+// entry point into the pipeline. Pass nil to disable snapshot commands.
 func (srv *Server) SetSnapshotInvoker(s command.SnapshotInvoker) {
-	srv.evaluator.SetSnapshotInvoker(s)
+	srv.pipeline.SetSnapshotInvoker(s)
 }
 
 // ServerStateProvider methods — used by the plugin manager for server query responses.
@@ -255,9 +270,9 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	// Per-command metadata accumulator. META lines fill this map;
 	// the next non-META command consumes and clears it.
 	var cmdMeta map[string]string
+	var pending *pendingCmd
 
 	for {
-		// Check if server is shutting down
 		if srv.isShuttingDown.Load() {
 			if err := writer.Write(resp.MarshalError("ERR Server is shutting down")); err != nil {
 				logger.Debug(connCtx).Err(err).Msg("write shutdown notice failed")
@@ -265,42 +280,51 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 			return
 		}
 
-		val, err := reader.Read()
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				logger.Debug(connCtx).Err(err).Msg("connection read error")
-			}
-			return
-		}
+		var op string
+		var args []string
 
-		if val.Type != resp.Array {
-			if err := writer.Write(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
+		if pending != nil {
+			op = pending.op
+			args = pending.args
+			pending = nil
+		} else {
+			val, err := reader.Read()
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					logger.Debug(connCtx).Err(err).Msg("connection read error")
+				}
 				return
 			}
-			if reader.Buffered() == 0 {
-				if err := writer.Flush(); err != nil {
+
+			if val.Type != resp.Array {
+				if err := writer.Write(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
 					return
 				}
+				if reader.Buffered() == 0 {
+					if err := writer.Flush(); err != nil {
+						return
+					}
+				}
+				continue
 			}
-			continue
-		}
 
-		if len(val.Array) == 0 {
-			continue
-		}
+			if len(val.Array) == 0 {
+				continue
+			}
 
-		parts := make([]string, len(val.Array))
-		for i, v := range val.Array {
-			parts[i] = v.Str
+			parts := make([]string, len(val.Array))
+			for i, v := range val.Array {
+				parts[i] = v.Str
+			}
+			op = strings.ToUpper(parts[0])
+			args = parts[1:]
 		}
-
-		op := strings.ToUpper(parts[0])
 
 		// META accumulation: when REXV is negotiated and the command is META,
 		// collect key-value into the per-command map. META is RESP-compliant:
 		// it always produces a response (+OK on success, -ERR on failure).
 		if ctx.RexVersion > 0 && op == resp.CmdMeta {
-			key, value, err := rex.ParseMeta(parts[1:])
+			key, value, err := rex.ParseMeta(args)
 			if err != nil {
 				if writeErr := writer.Write(resp.MarshalError("ERR " + err.Error())); writeErr != nil {
 					return
@@ -310,7 +334,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 						return
 					}
 				}
-				cmdMeta = nil // discard accumulated metadata on error
+				cmdMeta = nil
 				continue
 			}
 			if cmdMeta == nil {
@@ -352,19 +376,138 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 			}
 		}
 
-		ctx.CmdMeta = cmdMeta
-		res := srv.evaluator.Evaluate(connCtx, ctx, op, parts[1:])
-		ctx.CmdMeta = nil
-		cmdMeta = nil
-		if err := writer.Write(srv.mapToResp(ctx, res)); err != nil {
-			return
+		if reader.Buffered() > 0 && srv.canBatch(ctx, op, args) {
+			pending = srv.runBatch(connCtx, ctx, reader, writer, op, args, cmdMeta)
+			cmdMeta = nil
+		} else {
+			ctx.CmdMeta = cmdMeta
+			res := srv.pipeline.Evaluate(connCtx, ctx, op, args)
+			ctx.CmdMeta = nil
+			cmdMeta = nil
+			if err := writer.Write(srv.mapToResp(ctx, res)); err != nil {
+				return
+			}
 		}
-		if reader.Buffered() == 0 {
+
+		if reader.Buffered() == 0 && pending == nil {
 			if err := writer.Flush(); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func (srv *Server) canBatch(ctx *clientctx.ClientContext, op string, args []string) bool {
+	if srv.requirePass != "" && !ctx.Authenticated {
+		return false
+	}
+	if ctx.InTransaction {
+		return false
+	}
+	switch op {
+	case "QUIT", "AUTH", resp.CmdHello, resp.CmdMeta,
+		resp.CmdMulti, resp.CmdExec, resp.CmdDiscard:
+		return false
+	}
+	spec, ok := srv.pipeline.SpecFor(op)
+	if !ok || spec.KeyArgIndex < 0 || spec.MultiKey {
+		return false
+	}
+	return spec.KeyArgIndex < len(args)
+}
+
+func (srv *Server) runBatch(
+	connCtx context.Context,
+	ctx *clientctx.ClientContext,
+	reader *resp.Reader,
+	writer *resp.Writer,
+	firstOp string,
+	firstArgs []string,
+	cmdMeta map[string]string,
+) *pendingCmd {
+	spec, _ := srv.pipeline.SpecFor(firstOp)
+	batch := make([]batchEntry, 1, 16)
+	batch[0] = batchEntry{
+		op:       firstOp,
+		args:     firstArgs,
+		shard:    srv.cache.ShardIndexOf(firstArgs[spec.KeyArgIndex]),
+		readOnly: spec.ReadOnly,
+	}
+
+	var overflow *pendingCmd
+
+	for reader.Buffered() > 0 && len(batch) < maxBatchSize {
+		val, err := reader.Read()
+		if err != nil {
+			break
+		}
+		if val.Type != resp.Array || len(val.Array) == 0 {
+			_ = writer.Write(resp.MarshalError("ERR Protocol error: expected array"))
+			continue
+		}
+		parts := make([]string, len(val.Array))
+		for i, v := range val.Array {
+			parts[i] = v.Str
+		}
+		nextOp := strings.ToUpper(parts[0])
+		nextArgs := parts[1:]
+
+		if !srv.canBatch(ctx, nextOp, nextArgs) {
+			overflow = &pendingCmd{op: nextOp, args: nextArgs}
+			break
+		}
+
+		nextSpec, _ := srv.pipeline.SpecFor(nextOp)
+		batch = append(batch, batchEntry{
+			op:       nextOp,
+			args:     nextArgs,
+			shard:    srv.cache.ShardIndexOf(nextArgs[nextSpec.KeyArgIndex]),
+			readOnly: nextSpec.ReadOnly,
+		})
+	}
+
+	shardMode := make(map[int]bool, len(batch))
+	for _, e := range batch {
+		if prev, ok := shardMode[e.shard]; ok {
+			shardMode[e.shard] = prev && e.readOnly
+		} else {
+			shardMode[e.shard] = e.readOnly
+		}
+	}
+
+	shardIDs := make([]int, 0, len(shardMode))
+	for id := range shardMode {
+		shardIDs = append(shardIDs, id)
+	}
+	sort.Ints(shardIDs)
+
+	releases := make([]func(), len(shardIDs))
+	for i, id := range shardIDs {
+		if shardMode[id] {
+			releases[i] = srv.engine.AcquireShardRO(id)
+		} else {
+			releases[i] = srv.engine.AcquireShard(id)
+		}
+	}
+
+	results := make([]command.Result, len(batch))
+	ctx.CmdMeta = cmdMeta
+	for i, e := range batch {
+		results[i] = srv.pipeline.EvaluatePreLocked(connCtx, ctx, e.op, e.args)
+		if i == 0 {
+			ctx.CmdMeta = nil
+		}
+	}
+
+	for i := len(releases) - 1; i >= 0; i-- {
+		releases[i]()
+	}
+
+	for _, r := range results {
+		_ = writer.Write(srv.mapToResp(ctx, r))
+	}
+
+	return overflow
 }
 
 func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res command.Result) resp.Value {

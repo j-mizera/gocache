@@ -10,8 +10,8 @@ frame "GoCache HLD System Diagram" as F {
             component [RESP Handler] as ProtocolHandler <<Protocol>>
         }
 
-        rectangle "Evaluator Boundary" as eval {
-            component [Evaluator] as Evaluator <<Dispatch>>
+        rectangle "Pipeline Boundary" as eval {
+            component [Pipeline] as Pipeline <<Dispatch>>
             component [Hook Executor] as HookExec <<Pre/Post Hooks>>
             component [Command Router] as CmdRouter <<Plugin Commands>>
         }
@@ -54,14 +54,14 @@ frame "GoCache HLD System Diagram" as F {
         component [Plugin\nImplementation] as PluginImpl <<User Code>>
     }
 
-    ' -- Session -> Evaluator --
+    ' -- Session -> Pipeline --
     ServiceEntry --> ProtocolHandler : Passes raw bytes
-    ProtocolHandler --> Evaluator : Parsed command + args
+    ProtocolHandler --> Pipeline : Parsed command + args
 
-    ' -- Evaluator dispatches --
-    Evaluator --> HookExec : Pre/Post hooks
-    Evaluator --> CmdRouter : Plugin commands\n(fallback if not core)
-    Evaluator --> Engine : Core commands
+    ' -- Pipeline dispatches --
+    Pipeline --> HookExec : Pre/Post hooks
+    Pipeline --> CmdRouter : Plugin commands\n(fallback if not core)
+    Pipeline --> Engine : Core commands
 
     ' -- Engine -> Cache --
     Engine --> InMemCache : Lock -> Execute -> Unlock

@@ -48,7 +48,7 @@ frame "Hook Execution State Machine" as F {
 
         state "SendCritPost" as SendCritPost : PluginConn.Send(HookRequestV1)\nWait for HookResponseV1 (ack)\nPost-hooks cannot deny
 
-        state "Done" as Done : All hooks fired\nReturn to evaluator
+        state "Done" as Done : All hooks fired\nReturn to pipeline
 
         [*] --> MatchPost
         MatchPost --> [*] : No matches
