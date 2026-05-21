@@ -19,4 +19,9 @@ type CacheStore interface {
 
 	// Clear drops every entry in the cache.
 	Clear(ctx context.Context)
+
+	// ApplyMutation re-executes a single persisted mutation against the
+	// cache. Used during AOF replay at boot. The implementation
+	// dispatches on m.Op to the appropriate Raw* methods (ADR-0017).
+	ApplyMutation(ctx context.Context, m Mutation) error
 }

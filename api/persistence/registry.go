@@ -99,3 +99,49 @@ func ResetSnapshotProviderForTest() {
 	defer snapshotProviderMu.Unlock()
 	snapshotProvider = nil
 }
+
+// AOFProvider is the registration handle for an embedded AOF plugin.
+// Same pattern as SnapshotProvider — init() registers, cmd/server
+// resolves at startup. AOF returns (Source, Sink) because the same
+// file serves both roles: Source for boot-time replay, Sink for
+// runtime mutation logging.
+type AOFProvider interface {
+	Name() string
+	Build(cfg apiconfig.PluginConfig) (Source, Sink, error)
+}
+
+var (
+	aofProviderMu sync.RWMutex
+	aofProvider   AOFProvider
+)
+
+// RegisterAOFProvider installs the embedded AOF plugin.
+// Panics on nil or double-register, same as RegisterSnapshotProvider.
+func RegisterAOFProvider(p AOFProvider) {
+	if p == nil {
+		panic("api/persistence: RegisterAOFProvider called with nil")
+	}
+	aofProviderMu.Lock()
+	defer aofProviderMu.Unlock()
+	if aofProvider != nil {
+		panic(fmt.Sprintf(
+			"api/persistence: AOF provider already registered (%q); cannot register %q — exactly one provider per binary",
+			aofProvider.Name(), p.Name(),
+		))
+	}
+	aofProvider = p
+}
+
+// AOFProviderRegistered returns the registered AOF provider, or nil.
+func AOFProviderRegistered() AOFProvider {
+	aofProviderMu.RLock()
+	defer aofProviderMu.RUnlock()
+	return aofProvider
+}
+
+// ResetAOFProviderForTest clears the registered AOF provider. Test-only.
+func ResetAOFProviderForTest() {
+	aofProviderMu.Lock()
+	defer aofProviderMu.Unlock()
+	aofProvider = nil
+}

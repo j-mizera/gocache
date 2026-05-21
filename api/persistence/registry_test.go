@@ -123,3 +123,90 @@ func TestRegistry_RegisterNil_Panics(t *testing.T) {
 	}()
 	apipersistence.RegisterSnapshotProvider(nil)
 }
+
+// --- AOF provider registry tests ---
+
+type fakeAOFProvider struct {
+	name     string
+	buildErr error
+}
+
+func (f *fakeAOFProvider) Name() string { return f.name }
+func (f *fakeAOFProvider) Build(_ apiconfig.PluginConfig) (apipersistence.Source, apipersistence.Sink, error) {
+	if f.buildErr != nil {
+		return nil, nil, f.buildErr
+	}
+	return &fakeSource{}, &fakeSink{}, nil
+}
+
+type fakeSink struct{}
+
+func (*fakeSink) Name() string                                                      { return "fake-sink" }
+func (*fakeSink) FsyncPolicy() apipersistence.FsyncPolicy                           { return apipersistence.FsyncNo }
+func (*fakeSink) Apply(_ context.Context, _ []apipersistence.Mutation) error         { return nil }
+func (*fakeSink) Close(_ context.Context) error                                      { return nil }
+
+func TestAOFRegistry_NoProvider_ReturnsNil(t *testing.T) {
+	apipersistence.ResetAOFProviderForTest()
+	if got := apipersistence.AOFProviderRegistered(); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+func TestAOFRegistry_Register_RoundTrip(t *testing.T) {
+	apipersistence.ResetAOFProviderForTest()
+	t.Cleanup(apipersistence.ResetAOFProviderForTest)
+
+	p := &fakeAOFProvider{name: "test-aof"}
+	apipersistence.RegisterAOFProvider(p)
+
+	got := apipersistence.AOFProviderRegistered()
+	if got == nil {
+		t.Fatal("registered provider not returned")
+	}
+	if got.Name() != "test-aof" {
+		t.Errorf("name = %q, want test-aof", got.Name())
+	}
+
+	src, sink, err := got.Build(noopConfig{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if src == nil || sink == nil {
+		t.Errorf("Build returned nils: src=%v sink=%v", src, sink)
+	}
+}
+
+func TestAOFRegistry_DoubleRegister_Panics(t *testing.T) {
+	apipersistence.ResetAOFProviderForTest()
+	t.Cleanup(apipersistence.ResetAOFProviderForTest)
+
+	apipersistence.RegisterAOFProvider(&fakeAOFProvider{name: "first"})
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on double-register, got none")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("panic value not a string: %T", r)
+		}
+		if !strings.Contains(msg, "first") || !strings.Contains(msg, "second") {
+			t.Errorf("panic message missing names: %s", msg)
+		}
+	}()
+	apipersistence.RegisterAOFProvider(&fakeAOFProvider{name: "second"})
+}
+
+func TestAOFRegistry_RegisterNil_Panics(t *testing.T) {
+	apipersistence.ResetAOFProviderForTest()
+	t.Cleanup(apipersistence.ResetAOFProviderForTest)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on nil provider, got none")
+		}
+	}()
+	apipersistence.RegisterAOFProvider(nil)
+}
