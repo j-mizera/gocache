@@ -1,83 +1,122 @@
 @startuml sequence_persistence
 !include ../../../design/theme.iuml
 
-mainframe **sd** Snapshot Persistence Flow
+mainframe **sd** Persistence — Generic Flow
 
-participant "SnapshotWorker" as Worker
-participant "Engine\n(serial dispatch)" as Engine
-participant "Cache" as Cache
-participant "persistence\n(gob codec)" as Persist
-participant "FileSystem" as FS
 actor "main()" as Main
+participant "Coordinator" as Coord
+participant "Source" as Src
+participant "CacheStore" as Store
+participant "sinkChannel\n(per-sink goroutine)" as SC
+participant "Sink" as Sink
+participant "Snapshotter" as Snap
 
-== Save Snapshot (periodic or SNAPSHOT command) ==
+== Boot Recovery (Coordinator.BootInto) ==
 
-Worker -> Engine : Dispatch(fn)
-activate Engine
+Main -> Coord : BootInto(ctx)
+activate Coord
 
-note over Engine
-  Engine.Run acquires
-  cache.Lock() before
-  executing fn, and
-  cache.Unlock() after.
+Coord -> Src : Boot(ctx)
+activate Src
+Src --> Coord : BootResult{Mode, Replay/Snapshot}
+deactivate Src
+
+alt BootModeInitial
+    Coord --> Main : ZeroLSN (fresh start)
+else BootModeSnapshot
+    Coord -> Store : Clear(ctx)
+    loop SnapshotIterator.Next
+        Coord -> Store : LoadEntry(ctx, entry)
+        note right : Bypasses eviction,\nskips expired entries
+    end
+    Coord -> Coord : SetLSN(boot.LSN)
+else BootModeReplay
+    loop ReplayIterator.Next
+        Coord -> Store : ApplyMutation(ctx, mutation)
+        note right : Re-executes persisted\ncommand (SET, HSET, …)
+    end
+    Coord -> Coord : SetLSN(highestLSN)
+end
+
+Coord --> Main : resume LSN
+deactivate Coord
+
+== Start (arm mutation feed) ==
+
+Main -> Coord : Start(ctx)
+activate Coord
+Coord -> SC ** : spawn per-sink goroutine
+Coord -> Coord : atomic store\nactiveSinks count
+deactivate Coord
+
+== Runtime Mutation Emission ==
+
+note over Main
+  Cache write command
+  checks HasSinks()
+  [atomic load — zero
+  cost when no sinks]
 end note
 
-Engine -> Persist : SaveSnapshot(filename, cache)
-activate Persist
+Main -> Coord : AllocateAndEmit(op, key, args)
+activate Coord
+Coord -> Coord : AllocateLSN()\n[atomic increment]
 
-Persist -> FS : os.Create(filename)
-FS --> Persist : file handle
-
-Persist -> Cache : Range(fn)
-loop For each key
-    Cache --> Persist : key, entry, expiration
-    Persist -> Persist : Collect SnapshotEntry
+loop for each registered Sink
+    Coord -> SC : incoming <- Mutation\n[non-blocking send]
+    note right : Drops + warns\nif channel full
 end
 
-Persist -> FS : gob.Encode(count)
-note right : Count header first\nso decoder knows how\nmany entries follow
+deactivate Coord
 
-loop For each SnapshotEntry
-    Persist -> FS : gob.Encode(entry)
+== Group-Commit Flush ==
+
+SC -> SC : accumulate batch
+note over SC
+  Flush triggers:
+  · 1 ms elapsed
+  · 64 KB accumulated
+  · 80% buffer (high-water)
+  · shutdown signal
+end note
+
+SC -> Sink : Apply(ctx, batch)
+activate Sink
+
+alt success
+    Sink --> SC : nil
+else transient error
+    Sink --> SC : error (retry next batch)
+else fatal error
+    Sink --> SC : ErrSinkFatal
+    SC -> Coord : onQuarantine()\n[decrement activeSinks]
 end
 
-Persist -> FS : file.Close()
-Persist --> Engine : nil (success)
-deactivate Persist
+deactivate Sink
 
-deactivate Engine
+== On-Demand Snapshot ==
 
-== Load Snapshot (startup, before engine starts) ==
-
-Main -> Persist : LoadSnapshot(filename, cache)
-activate Persist
-
-Persist -> FS : os.Open(filename)
-
-alt File not found
-    FS --> Persist : ErrNotExist
-    Persist --> Main : nil (skip silently)
-else File exists
-    FS --> Persist : file handle
-    Persist -> Cache : Clear()
-
-    Persist -> FS : gob.Decode(&count)
-
-    loop count times
-        Persist -> FS : gob.Decode(&entry)
-
-        alt entry.Expiration > 0 && expired
-            Persist -> Persist : Skip (don't load)
-        else valid
-            Persist -> Cache : RawLoad(key, value, exp)
-            note right : Bypasses memory limit\nand OnMutate callback
-        end
-    end
-
-    Persist -> FS : file.Close()
-    Persist --> Main : nil (success)
+Main -> Coord : Snapshot(ctx)
+activate Coord
+Coord -> Store : CaptureSnapshot()
+Store --> Coord : []SnapshotEntry
+Coord -> Snap : SaveSnapshot(ctx, src)
+activate Snap
+loop src.Next
+    Snap -> Snap : encode + write entry
 end
+Snap --> Coord : nil
+deactivate Snap
+deactivate Coord
 
-deactivate Persist
+== Shutdown ==
+
+Main -> Coord : Stop(ctx)
+activate Coord
+Coord -> SC : close(stop)
+SC -> Sink : Apply(ctx, remaining)
+SC -> Sink : Close(ctx)
+destroy SC
+deactivate Coord
 
 @enduml
