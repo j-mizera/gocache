@@ -1,7 +1,7 @@
 ---
 title: ADR-0017 Mutation replay execution path
 description: ApplyMutation on CacheStore dispatches replayed mutations to Raw* methods, keeping op-knowledge on the cache side of the contract boundary
-status: proposed
+status: accepted
 date: 2026-05-21
 deciders: [witherxse]
 related:

@@ -1,7 +1,7 @@
 ---
 title: ADR-0016 AOF wire and file format
 description: Append-only file uses a custom binary format (GOCAOF magic, varint-delimited mutation records, torn-write truncation recovery)
-status: proposed
+status: accepted
 date: 2026-05-21
 deciders: [witherxse]
 related:

@@ -3,14 +3,19 @@
 package aof
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
 )
+
+var _ apiconfig.PluginConfig = (*mapConfig)(nil)
 
 func TestSinkAndSource_RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.aof")
@@ -132,15 +137,287 @@ func TestSource_TornWrite_Truncates(t *testing.T) {
 }
 
 func TestProvider_Build(t *testing.T) {
-	apipersistence.ResetAOFProviderForTest()
-	t.Cleanup(apipersistence.ResetAOFProviderForTest)
-	apipersistence.RegisterAOFProvider(&provider{})
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
 
-	p := apipersistence.AOFProviderRegistered()
-	if p == nil {
-		t.Fatal("provider not registered")
+	p := &provider{}
+	cfg := newMapConfig()
+	cfg.values[keyFile] = filepath.Join(t.TempDir(), "test.aof")
+
+	backend, err := p.Build(cfg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
 	}
+	if backend.Source == nil {
+		t.Error("Build returned nil Source")
+	}
+	if backend.Sink == nil {
+		t.Error("Build returned nil Sink")
+	}
+	if backend.Commands == nil {
+		t.Error("Build returned nil Commands func")
+	}
+	if backend.OnReload == nil {
+		t.Error("Build returned nil OnReload")
+	}
+
 	if p.Name() != "aof" {
-		t.Errorf("name = %q, want aof", p.Name())
+		t.Errorf("Name() = %q, want aof", p.Name())
+	}
+
+	backend.Sink.Close(context.Background())
+}
+
+func TestProvider_Build_AppliesDefaults(t *testing.T) {
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
+
+	cfg := newMapConfig()
+	p := &provider{}
+	backend, err := p.Build(cfg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	t.Cleanup(func() { backend.Sink.Close(context.Background()) })
+
+	if got := cfg.GetString(keyFile); got != defaultFile {
+		t.Errorf("default file not applied: got %q, want %q", got, defaultFile)
+	}
+	if got := cfg.GetString(keyFsync); got != defaultFsync {
+		t.Errorf("default fsync not applied: got %q, want %q", got, defaultFsync)
+	}
+	os.Remove(defaultFile)
+}
+
+func TestProvider_Build_EmptyFile_Errors(t *testing.T) {
+	cfg := newMapConfig()
+	cfg.values[keyFile] = ""
+
+	p := &provider{}
+	_, err := p.Build(cfg, nil)
+	if err == nil {
+		t.Error("expected error when file is empty, got none")
 	}
 }
+
+func TestProvider_OnConfigReload(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newMapConfig()
+	cfg.values[keyFile] = filepath.Join(dir, "test.aof")
+	cfg.values[keyFsync] = "no"
+
+	p := &provider{}
+	backend, err := p.Build(cfg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	t.Cleanup(func() { backend.Sink.Close(context.Background()) })
+
+	sink := p.sink
+	if sink.FsyncPolicy() != apipersistence.FsyncNo {
+		t.Fatalf("initial policy = %v, want FsyncNo", sink.FsyncPolicy())
+	}
+
+	reloadCfg := newMapConfig()
+	reloadCfg.values[keyFsync] = "always"
+	p.OnConfigReload(reloadCfg)
+
+	if sink.FsyncPolicy() != apipersistence.FsyncAlways {
+		t.Errorf("after reload policy = %v, want FsyncAlways", sink.FsyncPolicy())
+	}
+}
+
+func TestReplaceFile(t *testing.T) {
+	dir := t.TempDir()
+	aofPath := filepath.Join(dir, "live.aof")
+
+	sink, err := NewSink(aofPath, apipersistence.FsyncAlways)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	err = sink.Apply(context.Background(), []apipersistence.Mutation{
+		{LSN: 1, Op: "SET", Key: "old", Args: [][]byte{[]byte("old"), []byte("val")}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	tmpPath := filepath.Join(dir, "replacement.aof")
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		t.Fatalf("create tmp: %v", err)
+	}
+	tmpBw := bufio.NewWriterSize(tmpFile, 4096)
+	if err := writeHeader(tmpBw); err != nil {
+		t.Fatalf("writeHeader: %v", err)
+	}
+	m := apipersistence.Mutation{LSN: 10, Op: "SET", Key: "replaced", Args: [][]byte{[]byte("replaced"), []byte("v")}}
+	if _, err := encodeRecord(tmpBw, m, nil); err != nil {
+		t.Fatalf("encodeRecord: %v", err)
+	}
+	tmpBw.Flush()
+	tmpFile.Sync()
+	tmpFile.Close()
+
+	if err := sink.ReplaceFile(tmpPath); err != nil {
+		t.Fatalf("ReplaceFile: %v", err)
+	}
+
+	err = sink.Apply(context.Background(), []apipersistence.Mutation{
+		{LSN: 11, Op: "SET", Key: "after", Args: [][]byte{[]byte("after"), []byte("w")}},
+	})
+	if err != nil {
+		t.Fatalf("Apply after replace: %v", err)
+	}
+	sink.Close(context.Background())
+
+	src := NewSource(aofPath)
+	boot, err := src.Boot(context.Background())
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+	if boot.Mode != apipersistence.BootModeReplay {
+		t.Fatalf("mode = %v, want Replay", boot.Mode)
+	}
+
+	ctx := context.Background()
+	got1, err := boot.Replay.Next(ctx)
+	if err != nil {
+		t.Fatalf("Next(0): %v", err)
+	}
+	if got1.LSN != 10 || got1.Key != "replaced" {
+		t.Errorf("record 0: LSN=%d Key=%q, want LSN=10 Key=replaced", got1.LSN, got1.Key)
+	}
+
+	got2, err := boot.Replay.Next(ctx)
+	if err != nil {
+		t.Fatalf("Next(1): %v", err)
+	}
+	if got2.LSN != 11 || got2.Key != "after" {
+		t.Errorf("record 1: LSN=%d Key=%q, want LSN=11 Key=after", got2.LSN, got2.Key)
+	}
+
+	_, err = boot.Replay.Next(ctx)
+	if err != io.EOF {
+		t.Errorf("expected EOF, got %v", err)
+	}
+	boot.Replay.Close()
+}
+
+func TestRewrite_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	aofPath := filepath.Join(dir, "test.aof")
+
+	sink, err := NewSink(aofPath, apipersistence.FsyncAlways)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+
+	err = sink.Apply(context.Background(), []apipersistence.Mutation{
+		{LSN: 1, Op: "SET", Key: "k1", Args: [][]byte{[]byte("k1"), []byte("old")}},
+		{LSN: 2, Op: "SET", Key: "k1", Args: [][]byte{[]byte("k1"), []byte("new")}},
+		{LSN: 3, Op: "HSET", Key: "h1", Args: [][]byte{[]byte("h1"), []byte("f1"), []byte("v1")}},
+		{LSN: 4, Op: "SADD", Key: "s1", Args: [][]byte{[]byte("s1"), []byte("a"), []byte("b")}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	origInfo, _ := os.Stat(aofPath)
+	origSize := origInfo.Size()
+
+	store := &fakeStore{
+		entries: []apipersistence.SnapshotEntry{
+			{Key: "k1", Value: []byte("new"), ValueType: apipersistence.ValueTypeBytes},
+			{Key: "h1", Value: map[string]string{"f1": "v1"}, ValueType: apipersistence.ValueTypeHash},
+			{Key: "s1", Value: map[string]struct{}{"a": {}, "b": {}}, ValueType: apipersistence.ValueTypeSet},
+		},
+	}
+
+	if err := Rewrite(context.Background(), store, sink); err != nil {
+		t.Fatalf("Rewrite: %v", err)
+	}
+	sink.Close(context.Background())
+
+	rewrittenInfo, _ := os.Stat(aofPath)
+	if rewrittenInfo.Size() >= origSize {
+		t.Errorf("rewritten file (%d) not smaller than original (%d)", rewrittenInfo.Size(), origSize)
+	}
+
+	src := NewSource(aofPath)
+	boot, err := src.Boot(context.Background())
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+	if boot.Mode != apipersistence.BootModeReplay {
+		t.Fatalf("mode = %v, want Replay", boot.Mode)
+	}
+
+	ctx := context.Background()
+	ops := map[string]string{}
+	for {
+		m, err := boot.Replay.Next(ctx)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		ops[m.Key] = m.Op
+	}
+	boot.Replay.Close()
+
+	if len(ops) != 3 {
+		t.Fatalf("expected 3 mutations, got %d: %v", len(ops), ops)
+	}
+	for key, wantOp := range map[string]string{"k1": "SET", "h1": "HSET", "s1": "SADD"} {
+		if ops[key] != wantOp {
+			t.Errorf("key %q: op = %q, want %q", key, ops[key], wantOp)
+		}
+	}
+}
+
+// --- test helpers ---
+
+type mapConfig struct {
+	values   map[string]any
+	defaults map[string]any
+}
+
+func newMapConfig() *mapConfig {
+	return &mapConfig{values: map[string]any{}, defaults: map[string]any{}}
+}
+
+func (m *mapConfig) lookup(key string) any {
+	if v, ok := m.values[key]; ok {
+		return v
+	}
+	if v, ok := m.defaults[key]; ok {
+		return v
+	}
+	return nil
+}
+
+func (m *mapConfig) GetString(key string) string {
+	if v, ok := m.lookup(key).(string); ok {
+		return v
+	}
+	return ""
+}
+func (m *mapConfig) GetInt(string) int                     { return 0 }
+func (m *mapConfig) GetInt64(string) int64                 { return 0 }
+func (m *mapConfig) GetBool(string) bool                   { return false }
+func (m *mapConfig) GetDuration(string) time.Duration      { return 0 }
+func (m *mapConfig) GetStringSlice(string) []string        { return nil }
+func (m *mapConfig) IsSet(key string) bool                 { _, ok := m.values[key]; return ok }
+func (m *mapConfig) SetDefault(key string, value any)      { m.defaults[key] = value }
+
+type fakeStore struct {
+	entries []apipersistence.SnapshotEntry
+}
+
+func (f *fakeStore) CaptureSnapshot() []apipersistence.SnapshotEntry { return f.entries }
+func (f *fakeStore) LoadEntry(context.Context, apipersistence.SnapshotEntry) error { return nil }
+func (f *fakeStore) Clear(context.Context)                                         {}
+func (f *fakeStore) ApplyMutation(context.Context, apipersistence.Mutation) error  { return nil }
