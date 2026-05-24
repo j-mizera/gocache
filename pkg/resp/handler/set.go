@@ -1,10 +1,10 @@
 package handler
 
 import (
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
 )
 
 
@@ -42,7 +42,7 @@ func getSetAsMap(c *cache.Cache, key string) (map[string]struct{}, error) {
 		return nil, nil
 	}
 	if entry.ValueType != cache.ObjTypeSet {
-		return nil, resp.ErrWrongType
+		return nil, apicommand.ErrWrongType
 	}
 	switch entry.Encoding {
 	case cache.EncPacked:
@@ -63,7 +63,7 @@ func getSetAsMap(c *cache.Cache, key string) (map[string]struct{}, error) {
 }
 
 // HandleSinter implements SINTER key [key ...]
-func HandleSinter(cmdCtx *command.Context) command.Result {
+func HandleSinter(cmdCtx *command.Context) apicommand.Result {
 	keys := cmdCtx.Args
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	executeFn := func() any {
@@ -92,7 +92,7 @@ func HandleSinter(cmdCtx *command.Context) command.Result {
 }
 
 // HandleSunion implements SUNION key [key ...]
-func HandleSunion(cmdCtx *command.Context) command.Result {
+func HandleSunion(cmdCtx *command.Context) apicommand.Result {
 	keys := cmdCtx.Args
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	executeFn := func() any {
@@ -116,7 +116,7 @@ func HandleSunion(cmdCtx *command.Context) command.Result {
 }
 
 // HandleSdiff implements SDIFF key [key ...]
-func HandleSdiff(cmdCtx *command.Context) command.Result {
+func HandleSdiff(cmdCtx *command.Context) apicommand.Result {
 	keys := cmdCtx.Args
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	executeFn := func() any {
@@ -143,7 +143,7 @@ func HandleSdiff(cmdCtx *command.Context) command.Result {
 }
 
 // HandleSadd implements SADD key member [member ...]
-func HandleSadd(cmdCtx *command.Context) command.Result {
+func HandleSadd(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
@@ -153,7 +153,7 @@ func HandleSadd(cmdCtx *command.Context) command.Result {
 			return saddStartPacked(cmdCtx, key, members)
 		}
 		if entry.ValueType != cache.ObjTypeSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -211,7 +211,7 @@ func saddNative(cmdCtx *command.Context, key string, set map[string]struct{}, me
 }
 
 // HandleSrem implements SREM key member [member ...]
-func HandleSrem(cmdCtx *command.Context) command.Result {
+func HandleSrem(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
@@ -221,7 +221,7 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -275,7 +275,7 @@ func HandleSrem(cmdCtx *command.Context) command.Result {
 }
 
 // HandleSmembers implements SMEMBERS key
-func HandleSmembers(cmdCtx *command.Context) command.Result {
+func HandleSmembers(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -284,7 +284,7 @@ func HandleSmembers(cmdCtx *command.Context) command.Result {
 			return []any{}
 		}
 		if entry.ValueType != cache.ObjTypeSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -311,7 +311,7 @@ func HandleSmembers(cmdCtx *command.Context) command.Result {
 }
 
 // HandleSismember implements SISMEMBER key member
-func HandleSismember(cmdCtx *command.Context) command.Result {
+func HandleSismember(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
@@ -321,7 +321,7 @@ func HandleSismember(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -346,7 +346,7 @@ func HandleSismember(cmdCtx *command.Context) command.Result {
 }
 
 // HandleScard implements SCARD key
-func HandleScard(cmdCtx *command.Context) command.Result {
+func HandleScard(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -355,7 +355,7 @@ func HandleScard(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -373,7 +373,7 @@ func HandleScard(cmdCtx *command.Context) command.Result {
 }
 
 // HandleSpop implements SPOP key
-func HandleSpop(cmdCtx *command.Context) command.Result {
+func HandleSpop(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -382,7 +382,7 @@ func HandleSpop(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:

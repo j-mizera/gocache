@@ -36,7 +36,7 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 	coord.RegisterSnapshotter(gob)
 
 	w := NewSnapshotWorker(c, e, 50*time.Millisecond)
-	w.SetSnapshotInvoker(coord)
+	w.SetPersistenceAPI(coord)
 	w.Start(context.Background())
 	defer w.Stop()
 

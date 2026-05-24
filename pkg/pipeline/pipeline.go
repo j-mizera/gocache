@@ -12,6 +12,7 @@ import (
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
+	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -74,17 +75,16 @@ type Pipeline struct {
 	engine             *engine.Engine
 	transactionManager *transaction.Manager
 	handlers           map[string]command.Handler
-	specs              map[string]command.Spec
+	specs              map[string]apicommand.Spec
 	requirePass        string
 	blockingRegistry   *blocking.Registry
 	watchManager       *watch.Manager
 	pluginRouter       *router.Router
-	hookExecutor       command.HookExecutor
+	hookExecutor       apicommand.HookExecutor
 	emitter            events.Emitter
 	tracker            *serverOps.Tracker
 	opHookExecutor     OpHookExecutor
-	persistenceFeed    command.MutationEmitter
-	snapshotInvoker    command.SnapshotInvoker
+	persistenceFeed command.MutationEmitter
 }
 
 func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Pipeline {
@@ -93,7 +93,7 @@ func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Regi
 		engine:             e,
 		transactionManager: transaction.NewManager(),
 		handlers:           make(map[string]command.Handler),
-		specs:              make(map[string]command.Spec),
+		specs:              make(map[string]apicommand.Spec),
 		requirePass:        requirePass,
 		blockingRegistry:   br,
 		watchManager:       wm,
@@ -123,7 +123,7 @@ func (b *Pipeline) SetPluginRouter(r *router.Router) {
 	b.pluginRouter = r
 }
 
-func (b *Pipeline) SetHookExecutor(e command.HookExecutor) {
+func (b *Pipeline) SetHookExecutor(e apicommand.HookExecutor) {
 	b.hookExecutor = e
 }
 
@@ -144,18 +144,26 @@ func (b *Pipeline) SetPersistenceFeed(f command.MutationEmitter) {
 	b.persistenceFeed = f
 }
 
-// SetSnapshotInvoker wires the persistence coordinator's SAVE/BGSAVE
-// entry point into the evaluator. fillCmdCtx threads it onto each
-// *command.Context so the snapshot handler doesn't have to import
-// pkg/persistence directly. Pass nil to disable snapshot commands —
-// the handler returns an error to the client when invoked without a
-// registered snapshotter.
-func (b *Pipeline) SetSnapshotInvoker(s command.SnapshotInvoker) {
-	b.snapshotInvoker = s
-}
-
 func (b *Pipeline) SetOpHookExecutor(e OpHookExecutor) {
 	b.opHookExecutor = e
+}
+
+// RegisterEmbeddedCommand registers a command provided by an embedded
+// plugin (e.g. persistence plugins). The handler function is wrapped in
+// a command.Handler adapter that routes through command.Dispatch for
+// proper shard locking and mutation emission.
+func (b *Pipeline) RegisterEmbeddedCommand(name string, fn func(context.Context, []string) (any, error), spec apicommand.Spec) {
+	handler := func(cmdCtx *command.Context) apicommand.Result {
+		executeFn := func() any {
+			val, err := fn(cmdCtx.Context(), cmdCtx.Args)
+			if err != nil {
+				return err
+			}
+			return val
+		}
+		return command.Dispatch(cmdCtx, executeFn)
+	}
+	b.Register(name, command.Registration{Handler: handler, Spec: spec})
 }
 
 func (b *Pipeline) CoreCommandNames() []string {
@@ -177,20 +185,20 @@ func (b *Pipeline) registerAll() {
 	}
 }
 
-func (b *Pipeline) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+func (b *Pipeline) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) apicommand.Result {
 	return b.evaluateCore(parentCtx, client, op, args, false, false)
 }
 
 // EvaluatePreLocked evaluates a command with ShardLocked=true, indicating
 // the target shard's lock is already held by the caller. Used by pipeline
 // batch coalescing where shard locks are pre-acquired.
-func (b *Pipeline) EvaluatePreLocked(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+func (b *Pipeline) EvaluatePreLocked(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) apicommand.Result {
 	return b.evaluateCore(parentCtx, client, op, args, false, true)
 }
 
 // SpecFor returns the argument spec for the given command name, or false
 // if the command is not a registered core command.
-func (b *Pipeline) SpecFor(op string) (command.Spec, bool) {
+func (b *Pipeline) SpecFor(op string) (apicommand.Spec, bool) {
 	spec, ok := b.specs[strings.ToUpper(op)]
 	return spec, ok
 }
@@ -198,11 +206,11 @@ func (b *Pipeline) SpecFor(op string) (command.Spec, bool) {
 // evaluateInternal is the EvalFn-compatible entry point used by EXEC to
 // re-enter the pipeline for queued commands. Delegates to evaluateCore
 // with shardLocked=false.
-func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) command.Result {
+func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) apicommand.Result {
 	return b.evaluateCore(parentCtx, ctx, op, args, inBatch, false)
 }
 
-func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, shardLocked bool) command.Result {
+func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, shardLocked bool) apicommand.Result {
 	op = strings.ToUpper(op)
 
 	handler, ok := b.handlers[op]
@@ -212,14 +220,14 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 			return b.routeToPlugin(parentCtx, ctx, op, args)
 		}
 		logger.DebugNoCtx().Str("command", op).Msg("unknown command")
-		return command.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
+		return apicommand.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 
 	spec, hasSpec := b.specs[op]
 	if hasSpec {
 		n := len(args)
 		if n < spec.Min || (spec.Max >= 0 && n > spec.Max) {
-			return command.Result{Value: resp.ErrArgs(strings.ToLower(op))}
+			return apicommand.Result{Value: resp.ErrArgs(strings.ToLower(op))}
 		}
 	}
 
@@ -229,10 +237,10 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		if op != resp.CmdMulti && op != resp.CmdExec && op != resp.CmdDiscard &&
 			op != resp.CmdHello && op != resp.CmdRexMeta {
 			if op == "QUIT" {
-				return command.Result{Value: "OK"}
+				return apicommand.Result{Value: "OK"}
 			}
 			ctx.EnqueueCommand(append([]string{op}, args...))
-			return command.Result{Value: "QUEUED"}
+			return apicommand.Result{Value: "QUEUED"}
 		}
 	}
 
@@ -265,10 +273,10 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	startNs := cmdOp.StartTime.UnixNano()
 
 	// Inject server context into operation.
-	cmdOp.Enrich(command.StartNs, strconv.FormatInt(startNs, 10))
-	cmdOp.Enrich(command.OperationID, cmdOp.ID)
-	cmdOp.Enrich(command.CommandKey, op)
-	cmdOp.Enrich(command.ArgCountKey, strconv.Itoa(len(args)))
+	cmdOp.Enrich(apicommand.StartNs, strconv.FormatInt(startNs, 10))
+	cmdOp.Enrich(apicommand.OperationID, cmdOp.ID)
+	cmdOp.Enrich(apicommand.CommandKey, op)
+	cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(len(args)))
 
 	// Inject REX metadata into operation context.
 	if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
@@ -313,7 +321,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 					b.opHookExecutor.RunCompleteHooks(cmdOp)
 				}
 				b.tracker.Fail(cmdOp.ID, "denied: "+pre.DenyReason)
-				return command.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
+				return apicommand.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
 			}
 			hookCtx = pre.Context
 			for k, v := range hookCtx {
@@ -328,7 +336,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// --- Command hooks (post) ---
 	if hasHooks && hookCtx != nil {
 		elapsedNs := time.Now().UnixNano() - startNs
-		hookCtx[command.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
+		hookCtx[apicommand.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
 		b.hookExecutor.RunPostHooks(opCtx, op, args, resultVal, resultErr, hookCtx)
 	}
@@ -338,10 +346,10 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	elapsedNs := uint64(cmdOp.Duration().Nanoseconds())
 	resultVal, resultErr := resultToHookStrings(result)
 
-	cmdOp.Enrich(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
-	cmdOp.Enrich(command.ResultKey, resultVal)
+	cmdOp.Enrich(apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+	cmdOp.Enrich(apicommand.ResultKey, resultVal)
 	if resultErr != "" {
-		cmdOp.Enrich(command.ErrorKey, resultErr)
+		cmdOp.Enrich(apicommand.ErrorKey, resultErr)
 	}
 
 	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
@@ -360,7 +368,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 // evaluateFast runs the handler with a bare *ops.Operation and no
 // instrumentation. Hot path when no sinks are attached. See hasAnySink for
 // the documented invariant on late-subscriber visibility.
-func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec command.Spec, shardLocked bool) command.Result {
+func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec apicommand.Spec, shardLocked bool) apicommand.Result {
 	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
 	opCtx := ops.WithContext(parentCtx, cmdOp)
 
@@ -387,7 +395,7 @@ func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.Client
 // command's Spec so command.Dispatch can decide whether to take a single
 // shard's lock (single-key), all shard locks (multi-key), or run inline
 // (keyless) — see command.Dispatch for the routing matrix.
-func (b *Pipeline) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, spec command.Spec) {
+func (b *Pipeline) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, spec apicommand.Spec) {
 	c.Client = ctx
 	c.Op = op
 	c.Args = args
@@ -415,13 +423,12 @@ func (b *Pipeline) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, 
 	c.EvalFn = b.evaluateInternal
 	c.Spec = spec
 	c.Coordinator = b.persistenceFeed
-	c.Snapshotter = b.snapshotInvoker
 }
 
 // routeToPlugin dispatches a command to a plugin via the router. The per-call
 // timeout is derived from parentCtx so connection-level cancellation also
 // aborts the plugin call.
-func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) command.Result {
+func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) apicommand.Result {
 	metadata := rex.BuildMetadata(client.RexMeta, client.CmdMeta)
 
 	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)
@@ -432,20 +439,20 @@ func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.Cl
 		// Known sentinels produce stable wire messages; the mapToResp pipeline
 		// formats the default "ERR <msg>" for anything else via Result.Err.
 		if errors.Is(err, router.ErrPluginTimeout) {
-			return command.Result{Value: resp.MarshalError("ERR plugin timeout")}
+			return apicommand.Result{Value: resp.MarshalError("ERR plugin timeout")}
 		}
 		if errors.Is(err, router.ErrPluginDown) {
-			return command.Result{Value: resp.MarshalError("ERR plugin unavailable")}
+			return apicommand.Result{Value: resp.MarshalError("ERR plugin unavailable")}
 		}
-		return command.Result{Err: err}
+		return apicommand.Result{Err: err}
 	}
 	if e, ok := val.(error); ok {
-		return command.Result{Err: e}
+		return apicommand.Result{Err: e}
 	}
-	return command.Result{Value: val}
+	return apicommand.Result{Value: val}
 }
 
-func resultToHookStrings(r command.Result) (string, string) {
+func resultToHookStrings(r apicommand.Result) (string, string) {
 	if r.Err != nil {
 		return "", r.Err.Error()
 	}

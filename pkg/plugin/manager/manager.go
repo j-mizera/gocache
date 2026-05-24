@@ -23,6 +23,7 @@ import (
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/cmdhooks"
 	"gocache/pkg/plugin/ophooks"
+	"gocache/api/scope"
 	"gocache/pkg/plugin/permissions"
 	"gocache/pkg/plugin/router"
 
@@ -439,7 +440,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	// Plugin self-describes critical, but YAML override takes precedence (already
 	// seeded during Discover). Honor the plugin's value only if no YAML override.
 	_, hasOverride := m.cfg.Overrides[reg.Name]
-	inst.Register(conn, reg.Version, reg.Commands, permissions.ScopeStrings(grantedScopes), reg.Critical, !hasOverride)
+	inst.Register(conn, reg.Version, reg.Commands, scope.ScopeStrings(grantedScopes), reg.Critical, !hasOverride)
 
 	// Register plugin commands with the router.
 	if len(reg.Commands) > 0 {
@@ -470,7 +471,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 	}
 
-	if len(reg.OperationHooks) > 0 && m.scopeRegistry.HasScope(reg.Name, permissions.ScopeOperationHook) {
+	if len(reg.OperationHooks) > 0 && m.scopeRegistry.HasScope(reg.Name, scope.ScopeOperationHook) {
 		patterns := make([]string, len(reg.OperationHooks))
 		for i, oh := range reg.OperationHooks {
 			patterns[i] = oh.Type
@@ -488,7 +489,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 
 	inst.SetState(StateRegistered)
 
-	grantedStrings := permissions.ScopeStrings(grantedScopes)
+	grantedStrings := scope.ScopeStrings(grantedScopes)
 	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings)); err != nil {
 		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
 		m.router.UnregisterPlugin(reg.Name)
@@ -519,16 +520,16 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 // validateScopes resolves the granted scopes for a plugin.
 // If the plugin requests scopes, they are validated against the config allowlist.
 // If the plugin does not request scopes, the config allowlist (or default) is granted directly.
-func (m *Manager) validateScopes(pluginName string, requested []string) ([]permissions.Scope, error) {
+func (m *Manager) validateScopes(pluginName string, requested []string) ([]scope.Scope, error) {
 	// Determine allowed scopes from config.
 	var allowedStrings []string
 	if override, ok := m.cfg.Overrides[pluginName]; ok && len(override.Scopes) > 0 {
 		allowedStrings = override.Scopes
 	} else {
-		allowedStrings = permissions.ScopeStrings(permissions.DefaultScopes())
+		allowedStrings = scope.ScopeStrings(scope.DefaultScopes())
 	}
 
-	allowed, err := permissions.ParseScopes(allowedStrings)
+	allowed, err := scope.ParseScopes(allowedStrings)
 	if err != nil {
 		return nil, fmt.Errorf("invalid allowed scopes in config: %w", err)
 	}
@@ -538,14 +539,14 @@ func (m *Manager) validateScopes(pluginName string, requested []string) ([]permi
 		return allowed, nil
 	}
 
-	requestedScopes, err := permissions.ParseScopes(requested)
+	requestedScopes, err := scope.ParseScopes(requested)
 	if err != nil {
 		return nil, fmt.Errorf("invalid requested scopes: %w", err)
 	}
 
-	granted, denied := permissions.ValidateRequest(requestedScopes, allowed)
+	granted, denied := scope.ValidateRequest(requestedScopes, allowed)
 	if len(denied) > 0 {
-		logger.WarnNoCtx().Str("plugin", pluginName).Strs("denied", permissions.ScopeStrings(denied)).
+		logger.WarnNoCtx().Str("plugin", pluginName).Strs("denied", scope.ScopeStrings(denied)).
 			Msg("some requested scopes were denied — plugin will operate with reduced capabilities")
 	}
 
@@ -557,8 +558,8 @@ func (m *Manager) validateScopes(pluginName string, requested []string) ([]permi
 // filterHooksByScope returns only the hooks the plugin has scope for.
 // Pre-hooks require hook:pre scope, post-hooks require hook:post scope.
 func (m *Manager) filterHooksByScope(pluginName string, hooks []*gcpcv1.HookDeclV1) []*gcpcv1.HookDeclV1 {
-	hasPre := m.scopeRegistry.HasScope(pluginName, permissions.ScopeHookPre)
-	hasPost := m.scopeRegistry.HasScope(pluginName, permissions.ScopeHookPost)
+	hasPre := m.scopeRegistry.HasScope(pluginName, scope.ScopeHookPre)
+	hasPost := m.scopeRegistry.HasScope(pluginName, scope.ScopeHookPost)
 
 	var filtered []*gcpcv1.HookDeclV1
 	for _, h := range hooks {
@@ -642,7 +643,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 			return
 		case *gcpcv1.EnvelopeV1_EventSubscribe:
 			sub := env.GetEventSubscribe()
-			if !m.scopeRegistry.HasScope(inst.Name, permissions.ScopeEvents) {
+			if !m.scopeRegistry.HasScope(inst.Name, scope.ScopeEvents) {
 				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("event subscription denied: missing 'events' scope")
 				continue
 			}
@@ -669,7 +670,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 			})
 		case *gcpcv1.EnvelopeV1_ServerQuery:
 			query := env.GetServerQuery()
-			requiredScope := permissions.ScopeForTopic(query.Topic)
+			requiredScope := scope.ScopeForTopic(query.Topic)
 			if !m.scopeRegistry.HasScope(inst.Name, requiredScope) {
 				_ = conn.Send(gcpcv1.NewServerQueryResponse(query.RequestId, nil,
 					fmt.Sprintf("permission denied: missing scope %q", requiredScope)))

@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	apiconfig "gocache/api/config"
 	"gocache/api/command"
 	"gocache/api/crashdump"
 	"gocache/api/embedded"
@@ -50,6 +49,7 @@ import (
 	// package is what actually registers init(). Pick which ones by
 	// setting the PLUGINS build arg on the Docker image, or by passing
 	// -tags=crashdump,otlp to `go build` directly.
+	_ "gocache/plugins/aof"
 	_ "gocache/plugins/crashdump"
 	_ "gocache/plugins/otlp"
 
@@ -254,21 +254,55 @@ func main() {
 	}
 	eventBus.Emit(events.NewOperationStart(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
 
-	// Persistence coordinator. Created unconditionally so the runtime
-	// mutation feed can be wired even when LoadOnStartup is off; the
-	// coordinator runs in pass-through mode (no sinks registered) until
-	// a future PR adds the AOF / snapshot sink plugins.
-	//
-	// The active snapshot backend comes from whichever embedded plugin
-	// was blank-imported above (ADR-0007). The plugin self-configures
-	// from the typed PluginConfig view; main.go knows nothing about
-	// formats, files, or per-plugin tunables.
-	snapSource, snapSnapshotter := buildSnapshotBackend(ctx)
-	coordinator := persistence.New(snapSource)
+	// Build all registered persistence providers generically. Each
+	// blank-imported plugin (plugins/snapshot, plugins/aof, …) called
+	// RegisterProvider in its init(). The server iterates them without
+	// knowing what any specific plugin does — it collects Sources,
+	// Sinks, and Snapshotters, then wires them into the coordinator.
+	var (
+		primarySource apipersistence.Source
+		sinks         []apipersistence.Sink
+		backends      []*apipersistence.Backend
+	)
+	for _, prov := range apipersistence.RegisteredProviders() {
+		pluginCfg := config.PluginConfigFor(prov.Name())
+		backend, err := prov.Build(pluginCfg, cacheInstance)
+		if err != nil {
+			logger.Error(ctx).Err(err).Str("plugin", prov.Name()).
+				Msg("persistence plugin Build failed; skipping")
+			continue
+		}
+		if backend.Source != nil && primarySource == nil {
+			primarySource = backend.Source
+		}
+		if backend.Sink != nil {
+			sinks = append(sinks, backend.Sink)
+		}
+		if backend.OnReload != nil {
+			config.OnPluginReload(prov.Name(), backend.OnReload.OnConfigReload)
+		}
+		backends = append(backends, backend)
+		logger.Info(ctx).Str("plugin", prov.Name()).Msg("persistence backend loaded")
+	}
+
+	coordinator := persistence.New(primarySource, sinks...)
 	coordinator.SetStore(cacheInstance)
-	coordinator.RegisterSnapshotter(snapSnapshotter)
+	for _, b := range backends {
+		if b.Snapshotter != nil {
+			coordinator.RegisterSnapshotter(b.Snapshotter)
+		}
+	}
 	srv.SetPersistenceFeed(coordinator)
-	srv.SetSnapshotInvoker(coordinator)
+
+	// Bind deferred plugin commands now that the coordinator is ready.
+	for _, b := range backends {
+		if b.Commands == nil {
+			continue
+		}
+		for _, cmd := range b.Commands(coordinator) {
+			srv.RegisterEmbeddedCommand(cmd.Name, cmd.Fn, cmd.Spec)
+		}
+	}
 
 	// LoadSnapshot operation.
 	_ = bootstate.Write(bootStateFile, stageSnapshotLoad)
@@ -314,7 +348,7 @@ func main() {
 	)
 	cleanupWorker := workers.NewCleanupWorker(cacheInstance, engineInstance, cfg.Workers.CleanupInterval)
 	cleanupWorker.SetPersistenceFeed(coordinator)
-	snapshotWorker.SetSnapshotInvoker(coordinator)
+	snapshotWorker.SetPersistenceAPI(coordinator)
 	snapshotWorker.SetTracker(tracker)
 	snapshotWorker.SetEmitter(eventBus)
 	if opHookExec != nil {
@@ -500,34 +534,3 @@ func handleShutdown(
 	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
 }
 
-// buildSnapshotBackend resolves the registered embedded snapshot
-// plugin (ADR-0008) and asks it to build the Source + Snapshotter pair.
-// The plugin owns its own configuration: where to read/write, what
-// format, what tunables. main.go knows nothing about any of it.
-//
-// Returns nil source + snapshotter when no plugin was compiled in;
-// the Coordinator handles nil gracefully (no recovery + ErrNoSnapshotter
-// from save calls). A warning surfaces the misbuild so it doesn't
-// pass silently.
-//
-// Plugins that want hot reload implement apiconfig.ReloadHandler — the
-// server type-asserts here and registers OnPluginReload on the plugin's
-// behalf. Plugins with no runtime-tunable knobs simply skip the
-// interface and the assertion fails cleanly.
-func buildSnapshotBackend(ctx context.Context) (apipersistence.Source, apipersistence.Snapshotter) {
-	provider := apipersistence.SnapshotProviderRegistered()
-	if provider == nil {
-		logger.Warn(ctx).Msg("persistence: no snapshot plugin compiled in; snapshots disabled")
-		return nil, nil
-	}
-	src, snap, err := provider.Build(config.PluginConfigFor(provider.Name()))
-	if err != nil {
-		logger.Error(ctx).Err(err).Str("plugin", provider.Name()).Msg("persistence: snapshot plugin Build failed; snapshots disabled")
-		return nil, nil
-	}
-	if rh, ok := provider.(apiconfig.ReloadHandler); ok {
-		config.OnPluginReload(provider.Name(), rh.OnConfigReload)
-	}
-	logger.Info(ctx).Str("plugin", provider.Name()).Msg("persistence: snapshot backend selected")
-	return src, snap
-}

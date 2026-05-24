@@ -91,15 +91,15 @@ func TestProvider_Build_ReadsScopedKey(t *testing.T) {
 	cfg.values[keyFile] = wantFile
 
 	p := &provider{}
-	src, snap, err := p.Build(cfg)
+	backend, err := p.Build(cfg, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if src == nil || snap == nil {
-		t.Fatalf("Build returned nil: src=%v snap=%v", src, snap)
+	if backend.Source == nil || backend.Snapshotter == nil {
+		t.Fatalf("Build returned nil fields: Source=%v Snapshotter=%v", backend.Source, backend.Snapshotter)
 	}
 
-	if err := snap.SaveSnapshot(context.Background(), emptySrc{}); err != nil {
+	if err := backend.Snapshotter.SaveSnapshot(context.Background(), emptySrc{}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
 	if _, err := os.Stat(wantFile); err != nil {
@@ -113,7 +113,7 @@ func TestProvider_Build_AppliesDefault(t *testing.T) {
 	cfg := newMapConfig()
 
 	p := &provider{}
-	if _, _, err := p.Build(cfg); err != nil {
+	if _, err := p.Build(cfg, nil); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestProvider_Build_RequiredKeyEmpty(t *testing.T) {
 	cfg.values[keyFile] = "" // explicit empty wins over the SetDefault inside Build
 
 	p := &provider{}
-	_, _, err := p.Build(cfg)
+	_, err := p.Build(cfg, nil)
 	if err == nil {
 		t.Error("expected error when file resolves to empty string, got none")
 	}
@@ -147,10 +147,11 @@ func TestProvider_OnConfigReload(t *testing.T) {
 	cfgInitial.values[keyFile] = first
 
 	p := &provider{}
-	_, snap, err := p.Build(cfgInitial)
+	backend, err := p.Build(cfgInitial, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
+	snap := backend.Snapshotter
 
 	if err := snap.SaveSnapshot(context.Background(), emptySrc{}); err != nil {
 		t.Fatalf("SaveSnapshot first: %v", err)

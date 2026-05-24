@@ -15,6 +15,7 @@ import (
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
+	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -96,7 +97,7 @@ func (srv *Server) SetPluginRouter(r *router.Router) {
 }
 
 // SetHookExecutor sets the hook executor on the pipeline.
-func (srv *Server) SetHookExecutor(e command.HookExecutor) {
+func (srv *Server) SetHookExecutor(e apicommand.HookExecutor) {
 	srv.pipeline.SetHookExecutor(e)
 }
 
@@ -125,10 +126,10 @@ func (srv *Server) SetPersistenceFeed(f command.MutationEmitter) {
 	srv.pipeline.SetPersistenceFeed(f)
 }
 
-// SetSnapshotInvoker wires the persistence coordinator's SAVE/BGSAVE
-// entry point into the pipeline. Pass nil to disable snapshot commands.
-func (srv *Server) SetSnapshotInvoker(s command.SnapshotInvoker) {
-	srv.pipeline.SetSnapshotInvoker(s)
+// RegisterEmbeddedCommand registers a plugin-provided command into
+// the pipeline. See Pipeline.RegisterEmbeddedCommand for details.
+func (srv *Server) RegisterEmbeddedCommand(name string, fn func(context.Context, []string) (any, error), spec apicommand.Spec) {
+	srv.pipeline.RegisterEmbeddedCommand(name, fn, spec)
 }
 
 // ServerStateProvider methods — used by the plugin manager for server query responses.
@@ -235,7 +236,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
-	connOp.Enrich(command.RemoteAddrKey, remoteAddr)
+	connOp.Enrich(apicommand.RemoteAddrKey, remoteAddr)
 	connCtx := ops.WithContext(serverCtx, connOp)
 	if srv.opHookExecutor != nil {
 		srv.opHookExecutor.RunStartHooks(connCtx, connOp)
@@ -490,7 +491,7 @@ func (srv *Server) runBatch(
 		}
 	}
 
-	results := make([]command.Result, len(batch))
+	results := make([]apicommand.Result, len(batch))
 	ctx.CmdMeta = cmdMeta
 	for i, e := range batch {
 		results[i] = srv.pipeline.EvaluatePreLocked(connCtx, ctx, e.op, e.args)
@@ -510,14 +511,14 @@ func (srv *Server) runBatch(
 	return overflow
 }
 
-func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res command.Result) resp.Value {
+func (srv *Server) mapToResp(ctx *clientctx.ClientContext, res apicommand.Result) resp.Value {
 	if res.Err != nil {
 		switch {
-		case errors.Is(res.Err, resp.ErrWrongType):
+		case errors.Is(res.Err, apicommand.ErrWrongType):
 			return resp.ErrWrongTypeValue()
-		case errors.Is(res.Err, resp.ErrNotInteger):
+		case errors.Is(res.Err, apicommand.ErrNotInteger):
 			return resp.ErrNotIntegerValue()
-		case errors.Is(res.Err, resp.ErrNotFloat):
+		case errors.Is(res.Err, apicommand.ErrNotFloat):
 			return resp.ErrNotFloatValue()
 		default:
 			return resp.MarshalError("ERR " + res.Err.Error())

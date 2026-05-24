@@ -4,9 +4,9 @@ import "time"
 
 // PluginConfig is the typed read-only view of a single embedded plugin's
 // configuration subsection. The server hands one to each plugin's
-// SnapshotProvider.Build (and re-hands a fresh view on every config
-// reload via ReloadHandler) — keys are scoped to the plugin's own
-// namespace, so the plugin reads "file" rather than the full path.
+// Provider.Build (and re-hands a fresh view on every config reload via
+// ReloadHandler) — keys are scoped to the plugin's own namespace, so
+// the plugin reads "file" rather than the full path.
 //
 // PluginConfig is intentionally library-agnostic. The server's choice
 // of underlying configuration store (viper today, anything else

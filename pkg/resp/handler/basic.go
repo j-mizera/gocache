@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
@@ -28,29 +29,29 @@ func constantTimeStringCompare(a, b string) bool {
 }
 
 // HandlePing returns PONG with no arguments, or echoes the first argument.
-func HandlePing(cmdCtx *command.Context) command.Result {
+func HandlePing(cmdCtx *command.Context) apicommand.Result {
 	if len(cmdCtx.Args) == 0 {
-		return command.Result{Value: "PONG"}
+		return apicommand.Result{Value: "PONG"}
 	}
-	return command.Result{Value: cmdCtx.Args[0]}
+	return apicommand.Result{Value: cmdCtx.Args[0]}
 }
 
 // HandleEcho returns the single argument as-is.
-func HandleEcho(cmdCtx *command.Context) command.Result {
-	return command.Result{Value: cmdCtx.Args[0]}
+func HandleEcho(cmdCtx *command.Context) apicommand.Result {
+	return apicommand.Result{Value: cmdCtx.Args[0]}
 }
 
 // HandleSelect accepts only DB 0; any other index is an error.
-func HandleSelect(cmdCtx *command.Context) command.Result {
+func HandleSelect(cmdCtx *command.Context) apicommand.Result {
 	idx, err := strconv.Atoi(cmdCtx.Args[0])
 	if err != nil || idx != 0 {
-		return command.Result{Value: resp.MarshalError("ERR DB index is out of range")}
+		return apicommand.Result{Value: resp.MarshalError("ERR DB index is out of range")}
 	}
-	return command.Result{Value: "OK"}
+	return apicommand.Result{Value: "OK"}
 }
 
 // HandleFlushDB clears the entire cache (single-DB server, equivalent to FLUSHALL).
-func HandleFlushDB(cmdCtx *command.Context) command.Result {
+func HandleFlushDB(cmdCtx *command.Context) apicommand.Result {
 	return command.Dispatch(cmdCtx, func() any {
 		cmdCtx.Cache.Clear(cmdCtx.Context())
 		return "OK"
@@ -59,24 +60,24 @@ func HandleFlushDB(cmdCtx *command.Context) command.Result {
 
 // HandleFlushAll is a Redis-compatibility alias for FLUSHDB. Multi-DB is not
 // supported, so there is nothing extra to flush.
-func HandleFlushAll(cmdCtx *command.Context) command.Result {
+func HandleFlushAll(cmdCtx *command.Context) apicommand.Result {
 	return HandleFlushDB(cmdCtx)
 }
 
 // HandleAuth validates a password against RequirePass.
-func HandleAuth(cmdCtx *command.Context) command.Result {
+func HandleAuth(cmdCtx *command.Context) apicommand.Result {
 	if cmdCtx.RequirePass == "" {
-		return command.Result{Value: resp.MarshalError("ERR Client sent AUTH, but no password is set")}
+		return apicommand.Result{Value: resp.MarshalError("ERR Client sent AUTH, but no password is set")}
 	}
 	if !constantTimeStringCompare(cmdCtx.Args[0], cmdCtx.RequirePass) {
-		return command.Result{Value: resp.MarshalError("WRONGPASS invalid username-password pair")}
+		return apicommand.Result{Value: resp.MarshalError("WRONGPASS invalid username-password pair")}
 	}
 	cmdCtx.Client.Authenticated = true
-	return command.Result{Value: "OK"}
+	return apicommand.Result{Value: "OK"}
 }
 
 // HandleIncr atomically increments the integer value stored at key by 1.
-func HandleIncr(cmdCtx *command.Context) command.Result {
+func HandleIncr(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, 1)
@@ -84,7 +85,7 @@ func HandleIncr(cmdCtx *command.Context) command.Result {
 }
 
 // HandleDecr atomically decrements the integer value stored at key by 1.
-func HandleDecr(cmdCtx *command.Context) command.Result {
+func HandleDecr(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, -1)
@@ -92,11 +93,11 @@ func HandleDecr(cmdCtx *command.Context) command.Result {
 }
 
 // HandleIncrBy increments by the supplied integer delta.
-func HandleIncrBy(cmdCtx *command.Context) command.Result {
+func HandleIncrBy(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	delta, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return command.Result{Value: resp.ErrNotIntegerValue()}
+		return apicommand.Result{Value: resp.ErrNotIntegerValue()}
 	}
 	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, delta)
@@ -104,11 +105,11 @@ func HandleIncrBy(cmdCtx *command.Context) command.Result {
 }
 
 // HandleDecrBy decrements by the supplied integer delta.
-func HandleDecrBy(cmdCtx *command.Context) command.Result {
+func HandleDecrBy(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	delta, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return command.Result{Value: resp.ErrNotIntegerValue()}
+		return apicommand.Result{Value: resp.ErrNotIntegerValue()}
 	}
 	return command.Dispatch(cmdCtx, func() any {
 		return incrByDelta(cmdCtx, key, -delta)
@@ -116,11 +117,11 @@ func HandleDecrBy(cmdCtx *command.Context) command.Result {
 }
 
 // HandleIncrByFloat increments the float value stored at key.
-func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
+func HandleIncrByFloat(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	incr, err := strconv.ParseFloat(cmdCtx.Args[1], 64)
 	if err != nil {
-		return command.Result{Value: resp.ErrNotFloatValue()}
+		return apicommand.Result{Value: resp.ErrNotFloatValue()}
 	}
 	return command.Dispatch(cmdCtx, func() any {
 		lazyExpire(cmdCtx.Cache, key)
@@ -128,12 +129,12 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 		existing := 0.0
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
 			if entry.ValueType != cache.ObjTypeBytes {
-				return resp.ErrWrongType
+				return apicommand.ErrWrongType
 			}
 			b := cmdCtx.Cache.ResolvePacked(entry)
 			existing, err = strconv.ParseFloat(string(b), 64)
 			if err != nil {
-				return resp.ErrNotFloat
+				return apicommand.ErrNotFloat
 			}
 		}
 
@@ -149,7 +150,7 @@ func HandleIncrByFloat(cmdCtx *command.Context) command.Result {
 
 // HandleAppend appends value to the string stored at key, creating it if absent.
 // Returns the new length of the string.
-func HandleAppend(cmdCtx *command.Context) command.Result {
+func HandleAppend(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	suffix := cmdCtx.Args[1]
 	return command.Dispatch(cmdCtx, func() any {
@@ -159,7 +160,7 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 		rawTTL := int64(0)
 		if entry, found := cmdCtx.Cache.RawGet(key); found {
 			if entry.ValueType != cache.ObjTypeBytes {
-				return resp.ErrWrongType
+				return apicommand.ErrWrongType
 			}
 			existing = cmdCtx.Cache.ResolvePacked(entry)
 			rawTTL = cmdCtx.Cache.RawTTL(key)
@@ -176,7 +177,7 @@ func HandleAppend(cmdCtx *command.Context) command.Result {
 }
 
 // HandleStrlen returns the length of the string stored at key, or 0 if absent.
-func HandleStrlen(cmdCtx *command.Context) command.Result {
+func HandleStrlen(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	return command.Dispatch(cmdCtx, func() any {
 		if lazyExpire(cmdCtx.Cache, key) {
@@ -188,14 +189,14 @@ func HandleStrlen(cmdCtx *command.Context) command.Result {
 			return int64(0)
 		}
 		if entry.ValueType != cache.ObjTypeBytes {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		return int64(len(cmdCtx.Cache.ResolvePacked(entry)))
 	})
 }
 
 // HandleMget returns the values for all specified keys (nil for absent/non-string).
-func HandleMget(cmdCtx *command.Context) command.Result {
+func HandleMget(cmdCtx *command.Context) apicommand.Result {
 	keys := cmdCtx.Args
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
 	return command.Dispatch(cmdCtx, func() any {
@@ -237,9 +238,9 @@ func HandleMget(cmdCtx *command.Context) command.Result {
 // every iteration — that cache-line churn was the dominant cost of
 // pipelined MSET at N>1, not lock acquisition (see #43/#46 for the
 // lock-cost finding).
-func HandleMset(cmdCtx *command.Context) command.Result {
+func HandleMset(cmdCtx *command.Context) apicommand.Result {
 	if len(cmdCtx.Args)%2 != 0 {
-		return command.Result{Value: resp.ErrArgs("mset")}
+		return apicommand.Result{Value: resp.ErrArgs("mset")}
 	}
 	shardCount := cmdCtx.Cache.ShardCount()
 	psp := msetPerShardPool.Get().(*[][]cache.BulkPair)
@@ -307,12 +308,12 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 	rawTTL := int64(0)
 	if entry, found := cmdCtx.Cache.RawGet(key); found {
 		if entry.ValueType != cache.ObjTypeBytes {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		b := cmdCtx.Cache.ResolvePacked(entry)
 		parsed, err := strconv.ParseInt(string(b), 10, 64)
 		if err != nil {
-			return resp.ErrNotInteger
+			return apicommand.ErrNotInteger
 		}
 		current = parsed
 		rawTTL = cmdCtx.Cache.RawTTL(key)
@@ -327,7 +328,7 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 }
 
 // HandleSet implements SET key value [NX|XX] [EX seconds|PX milliseconds] [KEEPTTL]
-func HandleSet(cmdCtx *command.Context) command.Result {
+func HandleSet(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	val := cmdCtx.Args[1]
 
@@ -349,26 +350,26 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 			keepTTL = true
 		case "EX":
 			if i+1 >= len(cmdCtx.Args) {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			i++
 			secs, err := strconv.ParseInt(cmdCtx.Args[i], 10, 64)
 			if err != nil || secs <= 0 {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			expiration = time.Now().Add(time.Duration(secs) * time.Second).UnixNano()
 		case "PX":
 			if i+1 >= len(cmdCtx.Args) {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			i++
 			ms, err := strconv.ParseInt(cmdCtx.Args[i], 10, 64)
 			if err != nil || ms <= 0 {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			expiration = time.Now().Add(time.Duration(ms) * time.Millisecond).UnixNano()
 		default:
-			return command.Result{Value: resp.ErrSyntax()}
+			return apicommand.Result{Value: resp.ErrSyntax()}
 		}
 	}
 
@@ -399,7 +400,7 @@ func HandleSet(cmdCtx *command.Context) command.Result {
 
 // HandleSetnx implements SETNX key value.
 // Returns 1 if set, 0 if key already exists (non-expired).
-func HandleSetnx(cmdCtx *command.Context) command.Result {
+func HandleSetnx(cmdCtx *command.Context) apicommand.Result {
 	key, val := cmdCtx.Args[0], cmdCtx.Args[1]
 	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
@@ -418,11 +419,11 @@ func HandleSetnx(cmdCtx *command.Context) command.Result {
 }
 
 // HandlePexpire implements PEXPIRE key milliseconds.
-func HandlePexpire(cmdCtx *command.Context) command.Result {
+func HandlePexpire(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	ms, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil {
-		return command.Result{Err: resp.ErrInvalidExpireTime}
+		return apicommand.Result{Err: apicommand.ErrInvalidExpireTime}
 	}
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -445,7 +446,7 @@ func HandlePexpire(cmdCtx *command.Context) command.Result {
 // HandlePttl implements PTTL key.
 // Returns remaining TTL in milliseconds, -1 if the key exists but has no TTL,
 // -2 if the key does not exist or has expired.
-func HandlePttl(cmdCtx *command.Context) command.Result {
+func HandlePttl(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
@@ -465,7 +466,7 @@ func HandlePttl(cmdCtx *command.Context) command.Result {
 }
 
 // HandleGet implements GET key.
-func HandleGet(cmdCtx *command.Context) command.Result {
+func HandleGet(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -476,7 +477,7 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeBytes {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		// Copy out — the returned slice must not alias the slab slot
 		// once the cache lock is released.
@@ -489,7 +490,7 @@ func HandleGet(cmdCtx *command.Context) command.Result {
 }
 
 // HandleDelete implements DEL key [key ...].
-func HandleDelete(cmdCtx *command.Context) command.Result {
+func HandleDelete(cmdCtx *command.Context) apicommand.Result {
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(cmdCtx.Args)
 	executeFn := func() any {
 		count := 0
@@ -509,7 +510,7 @@ func HandleDelete(cmdCtx *command.Context) command.Result {
 }
 
 // HandleExists implements EXISTS key.
-func HandleExists(cmdCtx *command.Context) command.Result {
+func HandleExists(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
@@ -525,11 +526,11 @@ func HandleExists(cmdCtx *command.Context) command.Result {
 }
 
 // HandleExpire implements EXPIRE key seconds.
-func HandleExpire(cmdCtx *command.Context) command.Result {
+func HandleExpire(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	secs, err := strconv.ParseInt(cmdCtx.Args[1], 10, 64)
 	if err != nil || secs < 0 {
-		return command.Result{Err: resp.ErrInvalidExpireTime}
+		return apicommand.Result{Err: apicommand.ErrInvalidExpireTime}
 	}
 	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
@@ -555,7 +556,7 @@ func HandleExpire(cmdCtx *command.Context) command.Result {
 // HandleTtl implements TTL key.
 // Returns remaining TTL in seconds, -1 if the key exists but has no TTL,
 // -2 if the key does not exist or has expired.
-func HandleTtl(cmdCtx *command.Context) command.Result {
+func HandleTtl(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		ttl, state := cmdCtx.Cache.TTLInternal(key)
@@ -575,7 +576,7 @@ func HandleTtl(cmdCtx *command.Context) command.Result {
 }
 
 // HandleDBSize implements DBSIZE.
-func HandleDBSize(cmdCtx *command.Context) command.Result {
+func HandleDBSize(cmdCtx *command.Context) apicommand.Result {
 	executeFn := func() any {
 		return cmdCtx.Cache.Len()
 	}
@@ -602,14 +603,14 @@ func humanBytes(n int64) string {
 }
 
 // HandleInfo implements INFO [section].
-func HandleInfo(cmdCtx *command.Context) command.Result {
+func HandleInfo(cmdCtx *command.Context) apicommand.Result {
 	section := ""
 	if len(cmdCtx.Args) > 0 {
 		section = strings.ToLower(cmdCtx.Args[0])
 	}
 
 	if section != "" && section != "memory" {
-		return command.Result{Value: ""}
+		return apicommand.Result{Value: ""}
 	}
 
 	executeFn := func() any {
@@ -634,10 +635,10 @@ func HandleInfo(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHello implements the HELLO command for protocol negotiation.
-func HandleHello(cmdCtx *command.Context) command.Result {
+func HandleHello(cmdCtx *command.Context) apicommand.Result {
 	version, err := strconv.Atoi(cmdCtx.Args[0])
 	if err != nil || (version != 2 && version != 3) {
-		return command.Result{Value: resp.MarshalError("NOPROTO unsupported protocol version")}
+		return apicommand.Result{Value: resp.MarshalError("NOPROTO unsupported protocol version")}
 	}
 
 	cmdCtx.Client.ProtoVersion = version
@@ -649,35 +650,35 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 		switch keyword {
 		case "AUTH":
 			if len(args) < 3 {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			// AUTH username password -- username is ignored for now (single-user)
 			if cmdCtx.RequirePass != "" && !constantTimeStringCompare(args[2], cmdCtx.RequirePass) {
-				return command.Result{Value: resp.MarshalError("WRONGPASS invalid password")}
+				return apicommand.Result{Value: resp.MarshalError("WRONGPASS invalid password")}
 			}
 			cmdCtx.Client.Authenticated = true
 			args = args[3:]
 		case "SETNAME":
 			if len(args) < 2 {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			// Client name is informational; not stored yet.
 			args = args[2:]
 		case "REXV":
 			if len(args) < 2 {
-				return command.Result{Value: resp.ErrSyntax()}
+				return apicommand.Result{Value: resp.ErrSyntax()}
 			}
 			rv, err := strconv.Atoi(args[1])
 			if err != nil || rv < 0 {
-				return command.Result{Value: resp.MarshalError("ERR invalid REXV version")}
+				return apicommand.Result{Value: resp.MarshalError("ERR invalid REXV version")}
 			}
 			if rv > 1 {
-				return command.Result{Value: resp.MarshalError("ERR unsupported REXV version")}
+				return apicommand.Result{Value: resp.MarshalError("ERR unsupported REXV version")}
 			}
 			cmdCtx.Client.RexVersion = rv
 			args = args[2:]
 		default:
-			return command.Result{Value: resp.ErrSyntax()}
+			return apicommand.Result{Value: resp.ErrSyntax()}
 		}
 	}
 
@@ -692,5 +693,5 @@ func HandleHello(cmdCtx *command.Context) command.Result {
 		info["rexv"] = cmdCtx.Client.RexVersion
 	}
 
-	return command.Result{Value: info}
+	return apicommand.Result{Value: info}
 }

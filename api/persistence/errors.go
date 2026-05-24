@@ -23,9 +23,9 @@ var ErrSinkFatal = errors.New("persistence: sink fatal — quarantine")
 // dropped.
 var ErrInvalidBootMode = errors.New("persistence: source returned invalid BootMode")
 
-// ErrNoSnapshotter is returned by Coordinator.Snapshot when no Snapshotter
-// has been registered. Distinct from "snapshot succeeded with zero entries"
-// — calling code (SAVE handler, scheduled worker, shutdown path) needs to
-// distinguish "configured but nothing to save" from "not configured at all"
-// because the second is a config bug, not a steady-state outcome.
+// ErrNoSnapshotter is returned by the coordinator's Snapshot method when
+// no Snapshotter has been registered. Distinct from "snapshot succeeded
+// with zero entries" — callers (scheduled worker, shutdown path) need to
+// distinguish "configured but nothing to save" from "not configured at
+// all" because the second is a config state, not a steady-state outcome.
 var ErrNoSnapshotter = errors.New("persistence: no snapshotter registered")

@@ -10,9 +10,6 @@ import (
 	apipersistence "gocache/api/persistence"
 )
 
-// fakeProvider is a test-only SnapshotProvider. Build returns a stub
-// Source/Snapshotter — registry tests don't exercise their behaviour,
-// only that registration and lookup correctly route the provider.
 type fakeProvider struct {
 	name      string
 	buildErr  error
@@ -20,16 +17,17 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) Name() string { return f.name }
-func (f *fakeProvider) Build(_ apiconfig.PluginConfig) (apipersistence.Source, apipersistence.Snapshotter, error) {
+func (f *fakeProvider) Build(_ apiconfig.PluginConfig, _ apipersistence.CacheStore) (*apipersistence.Backend, error) {
 	f.buildCall++
 	if f.buildErr != nil {
-		return nil, nil, f.buildErr
+		return nil, f.buildErr
 	}
-	return &fakeSource{}, &fakeSnap{}, nil
+	return &apipersistence.Backend{
+		Source:      &fakeSource{},
+		Snapshotter: &fakeSnap{},
+	}, nil
 }
 
-// noopConfig is a stand-in PluginConfig for registry tests — they
-// don't exercise key reads, just routing.
 type noopConfig struct{}
 
 func (noopConfig) GetString(string) string          { return "" }
@@ -56,70 +54,86 @@ func (*fakeSnap) SaveSnapshot(_ context.Context, _ apipersistence.SnapshotSource
 }
 
 func TestRegistry_NoProvider_ReturnsNil(t *testing.T) {
-	apipersistence.ResetSnapshotProviderForTest()
-	if got := apipersistence.SnapshotProviderRegistered(); got != nil {
+	apipersistence.ResetProvidersForTest()
+	if got := apipersistence.RegisteredProviders(); got != nil {
 		t.Errorf("expected nil before any registration, got %v", got)
 	}
 }
 
 func TestRegistry_Register_RoundTrip(t *testing.T) {
-	apipersistence.ResetSnapshotProviderForTest()
-	t.Cleanup(apipersistence.ResetSnapshotProviderForTest)
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
 
 	p := &fakeProvider{name: "test-provider"}
-	apipersistence.RegisterSnapshotProvider(p)
+	apipersistence.RegisterProvider(p)
 
-	got := apipersistence.SnapshotProviderRegistered()
-	if got == nil {
-		t.Fatal("registered provider not returned")
+	providers := apipersistence.RegisteredProviders()
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
 	}
+	got := providers[0]
 	if got.Name() != "test-provider" {
 		t.Errorf("name = %q, want test-provider", got.Name())
 	}
 
-	src, snap, err := got.Build(noopConfig{})
+	backend, err := got.Build(noopConfig{}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if src == nil || snap == nil {
-		t.Errorf("Build returned nils: src=%v snap=%v", src, snap)
+	if backend.Source == nil || backend.Snapshotter == nil {
+		t.Errorf("Build returned nil fields: Source=%v Snapshotter=%v", backend.Source, backend.Snapshotter)
 	}
 	if p.buildCall != 1 {
 		t.Errorf("buildCall = %d, want 1", p.buildCall)
 	}
 }
 
-func TestRegistry_DoubleRegister_Panics(t *testing.T) {
-	apipersistence.ResetSnapshotProviderForTest()
-	t.Cleanup(apipersistence.ResetSnapshotProviderForTest)
+func TestRegistry_MultipleProviders(t *testing.T) {
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
 
-	apipersistence.RegisterSnapshotProvider(&fakeProvider{name: "first"})
+	apipersistence.RegisterProvider(&fakeProvider{name: "snap"})
+	apipersistence.RegisterProvider(&fakeProvider{name: "aof"})
+
+	providers := apipersistence.RegisteredProviders()
+	if len(providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(providers))
+	}
+	if providers[0].Name() != "snap" || providers[1].Name() != "aof" {
+		t.Errorf("providers = [%s, %s], want [snap, aof]", providers[0].Name(), providers[1].Name())
+	}
+}
+
+func TestRegistry_DuplicateName_Panics(t *testing.T) {
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
+
+	apipersistence.RegisterProvider(&fakeProvider{name: "dup"})
 
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("expected panic on double-register, got none")
+			t.Fatal("expected panic on duplicate name, got none")
 		}
 		msg, ok := r.(string)
 		if !ok {
 			t.Fatalf("panic value not a string: %T", r)
 		}
-		// Both names should appear so misconfiguration is obvious.
-		if !strings.Contains(msg, "first") || !strings.Contains(msg, "second") {
-			t.Errorf("panic message missing names: %s", msg)
+		if !strings.Contains(msg, "dup") {
+			t.Errorf("panic message missing name: %s", msg)
 		}
 	}()
-	apipersistence.RegisterSnapshotProvider(&fakeProvider{name: "second"})
+	apipersistence.RegisterProvider(&fakeProvider{name: "dup"})
 }
 
 func TestRegistry_RegisterNil_Panics(t *testing.T) {
-	apipersistence.ResetSnapshotProviderForTest()
-	t.Cleanup(apipersistence.ResetSnapshotProviderForTest)
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
 
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic on nil provider, got none")
 		}
 	}()
-	apipersistence.RegisterSnapshotProvider(nil)
+	apipersistence.RegisterProvider(nil)
 }

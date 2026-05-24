@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
@@ -20,9 +21,9 @@ import (
 //             used by large zsets.
 
 // HandleZadd implements ZADD key score member [score member ...]
-func HandleZadd(cmdCtx *command.Context) command.Result {
+func HandleZadd(cmdCtx *command.Context) apicommand.Result {
 	if (len(cmdCtx.Args)-1)%2 != 0 {
-		return command.Result{Value: resp.ErrArgs("zadd")}
+		return apicommand.Result{Value: resp.ErrArgs("zadd")}
 	}
 
 	key := cmdCtx.Args[0]
@@ -32,7 +33,7 @@ func HandleZadd(cmdCtx *command.Context) command.Result {
 	for i := 1; i < len(cmdCtx.Args); i += 2 {
 		score, err := strconv.ParseFloat(cmdCtx.Args[i], 64)
 		if err != nil {
-			return command.Result{Err: resp.ErrNotFloat}
+			return apicommand.Result{Err: apicommand.ErrNotFloat}
 		}
 		pairs = append(pairs, cache.ScoredMember{Member: cmdCtx.Args[i+1], Score: score})
 	}
@@ -43,7 +44,7 @@ func HandleZadd(cmdCtx *command.Context) command.Result {
 			return zaddStartPacked(cmdCtx, key, pairs)
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -115,7 +116,7 @@ func zaddNative(cmdCtx *command.Context, key string, z *cache.SortedSet, pairs [
 }
 
 // HandleZrem implements ZREM key member [member ...]
-func HandleZrem(cmdCtx *command.Context) command.Result {
+func HandleZrem(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	members := cmdCtx.Args[1:]
 
@@ -125,7 +126,7 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -180,7 +181,7 @@ func HandleZrem(cmdCtx *command.Context) command.Result {
 }
 
 // HandleZscore implements ZSCORE key member
-func HandleZscore(cmdCtx *command.Context) command.Result {
+func HandleZscore(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
@@ -190,7 +191,7 @@ func HandleZscore(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -215,7 +216,7 @@ func HandleZscore(cmdCtx *command.Context) command.Result {
 }
 
 // HandleZcard implements ZCARD key
-func HandleZcard(cmdCtx *command.Context) command.Result {
+func HandleZcard(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -224,7 +225,7 @@ func HandleZcard(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -242,18 +243,18 @@ func HandleZcard(cmdCtx *command.Context) command.Result {
 }
 
 // HandleZrange implements ZRANGE key start stop [WITHSCORES]
-func HandleZrange(cmdCtx *command.Context) command.Result {
+func HandleZrange(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	start, err1 := strconv.Atoi(cmdCtx.Args[1])
 	stop, err2 := strconv.Atoi(cmdCtx.Args[2])
 	if err1 != nil || err2 != nil {
-		return command.Result{Err: resp.ErrNotInteger}
+		return apicommand.Result{Err: apicommand.ErrNotInteger}
 	}
 
 	withScores := false
 	if len(cmdCtx.Args) > 3 {
 		if strings.ToUpper(cmdCtx.Args[3]) != "WITHSCORES" {
-			return command.Result{Value: resp.ErrSyntax()}
+			return apicommand.Result{Value: resp.ErrSyntax()}
 		}
 		withScores = true
 	}
@@ -264,7 +265,7 @@ func HandleZrange(cmdCtx *command.Context) command.Result {
 			return []any{}
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		var members []cache.ScoredMember
@@ -297,7 +298,7 @@ func HandleZrange(cmdCtx *command.Context) command.Result {
 }
 
 // HandleZrank implements ZRANK key member
-func HandleZrank(cmdCtx *command.Context) command.Result {
+func HandleZrank(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	member := cmdCtx.Args[1]
 
@@ -307,7 +308,7 @@ func HandleZrank(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -332,12 +333,12 @@ func HandleZrank(cmdCtx *command.Context) command.Result {
 }
 
 // HandleZcount implements ZCOUNT key min max
-func HandleZcount(cmdCtx *command.Context) command.Result {
+func HandleZcount(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	min, err1 := strconv.ParseFloat(cmdCtx.Args[1], 64)
 	max, err2 := strconv.ParseFloat(cmdCtx.Args[2], 64)
 	if err1 != nil || err2 != nil {
-		return command.Result{Err: resp.ErrNotFloat}
+		return apicommand.Result{Err: apicommand.ErrNotFloat}
 	}
 
 	executeFn := func() any {
@@ -346,7 +347,7 @@ func HandleZcount(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeSortedSet {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:

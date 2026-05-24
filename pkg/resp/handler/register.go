@@ -1,6 +1,7 @@
 package handler
 
 import (
+	apicommand "gocache/api/command"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
@@ -9,7 +10,7 @@ import (
 // default for the vast majority of commands). Use this for simple
 // mutating handlers like SET, HSET, SADD, ZADD, INCR, etc.
 func reg(h command.Handler, min, max int) command.Registration {
-	return command.Registration{Handler: h, Spec: command.Spec{Min: min, Max: max}}
+	return command.Registration{Handler: h, Spec: apicommand.Spec{Min: min, Max: max}}
 }
 
 // regRO is reg with Spec.ReadOnly = true. Use only for handlers that
@@ -18,7 +19,7 @@ func reg(h command.Handler, min, max int) command.Registration {
 // Read-like commands with side effects (GETSET, GETDEL, GETEX, BLPOP,
 // LPOP, SPOP, SRANDMEMBER-with-count-equal-to-cardinality) must use reg.
 func regRO(h command.Handler, min, max int) command.Registration {
-	return command.Registration{Handler: h, Spec: command.Spec{Min: min, Max: max, ReadOnly: true}}
+	return command.Registration{Handler: h, Spec: apicommand.Spec{Min: min, Max: max, ReadOnly: true}}
 }
 
 // regKeyless builds a Registration for commands that do not address
@@ -27,12 +28,12 @@ func regRO(h command.Handler, min, max int) command.Registration {
 // sharded engine runs these inline without dispatching through any
 // shard's queue.
 func regKeyless(h command.Handler, min, max int) command.Registration {
-	return command.Registration{Handler: h, Spec: command.Spec{Min: min, Max: max, KeyArgIndex: -1}}
+	return command.Registration{Handler: h, Spec: apicommand.Spec{Min: min, Max: max, KeyArgIndex: -1}}
 }
 
 // regKeylessRO is regKeyless with ReadOnly = true. PING, ECHO, INFO.
 func regKeylessRO(h command.Handler, min, max int) command.Registration {
-	return command.Registration{Handler: h, Spec: command.Spec{Min: min, Max: max, ReadOnly: true, KeyArgIndex: -1}}
+	return command.Registration{Handler: h, Spec: apicommand.Spec{Min: min, Max: max, ReadOnly: true, KeyArgIndex: -1}}
 }
 
 // regMulti marks commands that touch multiple keys or iterate the
@@ -46,12 +47,12 @@ func regKeylessRO(h command.Handler, min, max int) command.Registration {
 // shard), SNAPSHOT, LOADSNAPSHOT, WATCH, UNWATCH (per-shard
 // watch.Manager updates).
 func regMulti(h command.Handler, min, max int) command.Registration {
-	return command.Registration{Handler: h, Spec: command.Spec{Min: min, Max: max, MultiKey: true}}
+	return command.Registration{Handler: h, Spec: apicommand.Spec{Min: min, Max: max, MultiKey: true}}
 }
 
 // regMultiRO is regMulti with ReadOnly = true.
 func regMultiRO(h command.Handler, min, max int) command.Registration {
-	return command.Registration{Handler: h, Spec: command.Spec{Min: min, Max: max, ReadOnly: true, MultiKey: true}}
+	return command.Registration{Handler: h, Spec: apicommand.Spec{Min: min, Max: max, ReadOnly: true, MultiKey: true}}
 }
 
 // Registrations returns all RESP command handlers with their argument specs.
@@ -59,7 +60,7 @@ func regMultiRO(h command.Handler, min, max int) command.Registration {
 // Spec.KeyArgIndex / Spec.MultiKey classification is used by the
 // sharded engine to route commands. Today the production single-engine
 // dispatcher ignores both; the metadata is in place so a sharded
-// engine can route without per-handler reflection. See api/command.Spec
+// engine can route without per-handler reflection. See api/apicommand.Spec
 // doc comments for classification rules.
 func Registrations() map[string]command.Registration {
 	return map[string]command.Registration{
@@ -122,12 +123,6 @@ func Registrations() map[string]command.Registration {
 		resp.CmdMulti:   regKeyless(HandleMulti, 0, 0),
 		resp.CmdDiscard: regKeyless(HandleDiscard, 0, 0),
 		resp.CmdExec:    regMulti(HandleExec, 0, 0),
-
-		// Persistence.
-		resp.CmdSnapshot: regMulti(HandleSnapshot, 0, 0),
-		resp.CmdSave:     regMulti(HandleSave, 0, 0),
-		resp.CmdBgsave:   regKeyless(HandleBgsave, 0, 0),
-		resp.CmdLastsave: regKeylessRO(HandleLastsave, 0, 0),
 
 		// Server / client-state commands.
 		resp.CmdDBSize:   regMultiRO(HandleDBSize, 0, 0), // counts every key

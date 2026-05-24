@@ -1,23 +1,8 @@
 package resp
 
-import (
-	"errors"
+import "errors"
 
-	apicommand "gocache/api/command"
-)
-
-// Sentinel errors aliased from api/command — the canonical definitions
-// live there so plugins can reference them without importing pkg/.
-// Aliases preserve errors.Is identity (same underlying pointer).
-var (
-	ErrWrongType         = apicommand.ErrWrongType
-	ErrNotInteger        = apicommand.ErrNotInteger
-	ErrNotFloat          = apicommand.ErrNotFloat
-	ErrInvalidExpireTime = apicommand.ErrInvalidExpireTime
-	ErrInvalidTimeout    = apicommand.ErrInvalidTimeout
-
-	ErrUnknownType = errors.New("unknown RESP value type")
-)
+var ErrUnknownType = errors.New("unknown RESP value type")
 
 func OK() Value     { return Value{Type: SimpleString, Str: "OK"} }
 func Queued() Value { return Value{Type: SimpleString, Str: "QUEUED"} }

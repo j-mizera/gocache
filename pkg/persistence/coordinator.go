@@ -283,7 +283,7 @@ func (c *Coordinator) BootInto(ctx context.Context) (apipersistence.LSN, error) 
 		if boot.Replay == nil {
 			return 0, fmt.Errorf("source %s declared BootModeReplay with nil Replay", c.source.Name())
 		}
-		last, applied, err := replayInto(ctx, boot.Replay)
+		last, applied, err := replayInto(ctx, boot.Replay, c.store)
 		if err != nil {
 			return 0, fmt.Errorf("source %s replay: %w", c.source.Name(), err)
 		}
@@ -328,13 +328,10 @@ func (c *Coordinator) loadSnapshotInto(ctx context.Context, it apipersistence.Sn
 	}
 }
 
-// replayInto drains a ReplayIterator. Returns the highest LSN observed
-// and the number of mutations applied. The mutation-replay path is a stub
-// in this PR — it advances the LSN cursor but does not yet re-execute
-// mutations against the cache (that requires the engine adapter wired in
-// feat/persistence-mutation-feed). Returning early is correct: the
-// snapshot path is the recovery path that ships now.
-func replayInto(ctx context.Context, it apipersistence.ReplayIterator) (apipersistence.LSN, int, error) {
+// replayInto drains a ReplayIterator, re-executing each mutation against
+// the cache via store.ApplyMutation (ADR-0017). Returns the highest LSN
+// observed and the number of mutations applied.
+func replayInto(ctx context.Context, it apipersistence.ReplayIterator, store apipersistence.CacheStore) (apipersistence.LSN, int, error) {
 	var last apipersistence.LSN
 	count := 0
 	for {
@@ -345,10 +342,14 @@ func replayInto(ctx context.Context, it apipersistence.ReplayIterator) (apipersi
 		if err != nil {
 			return last, count, fmt.Errorf("read mutation %d: %w", count, err)
 		}
-		// Advance the cursor; actual cache mutation re-execution lands
-		// in the next PR alongside the engine adapter.
 		if m.LSN > last {
 			last = m.LSN
+		}
+		if err := store.ApplyMutation(ctx, m); err != nil {
+			logger.Warn(ctx).Err(err).
+				Str("op", m.Op).Str("key", m.Key).
+				Int64("lsn", int64(m.LSN)).
+				Msg("persistence: skipping mutation during replay")
 		}
 		count++
 	}

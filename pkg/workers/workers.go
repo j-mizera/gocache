@@ -9,6 +9,7 @@ import (
 	"gocache/api/events"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
+	apipersistence "gocache/api/persistence"
 	"gocache/pkg/cache"
 	pkgcommand "gocache/pkg/command"
 	"gocache/pkg/engine"
@@ -125,7 +126,7 @@ func safeInterval(d time.Duration) time.Duration {
 // and operation lifecycle; the plugin owns where the snapshot lands.
 type SnapshotWorker struct {
 	baseWorker
-	snapshotter pkgcommand.SnapshotInvoker
+	snapshotter apipersistence.PersistenceAPI
 }
 
 func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration) *SnapshotWorker {
@@ -140,12 +141,11 @@ func NewSnapshotWorker(c *cache.Cache, e *engine.Engine, interval time.Duration)
 	}
 }
 
-// SetSnapshotInvoker wires the persistence coordinator's SAVE entry point
-// into the worker. Each tick calls Snapshot through this invoker. Pass
-// nil to disable scheduled saves (operation is failed with a clear
-// reason — never a silent no-op).
-func (w *SnapshotWorker) SetSnapshotInvoker(s pkgcommand.SnapshotInvoker) {
-	w.snapshotter = s
+// SetPersistenceAPI wires the persistence coordinator into the worker.
+// Each tick calls Snapshot through it. Pass nil to disable scheduled
+// saves (operation is failed with a clear reason — never a silent no-op).
+func (w *SnapshotWorker) SetPersistenceAPI(api apipersistence.PersistenceAPI) {
+	w.snapshotter = api
 }
 
 func (w *SnapshotWorker) Start(parentCtx context.Context) {

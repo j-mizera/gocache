@@ -8,10 +8,10 @@ import (
 
 	apiEvents "gocache/api/events"
 	ops "gocache/api/operations"
+	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
-	"gocache/pkg/command"
 	"gocache/pkg/engine"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/watch"
@@ -33,13 +33,13 @@ func newTestPipeline() (*Pipeline, *engine.Engine, *serverOps.Tracker) {
 // mockHookExecutor implements command.HookExecutor for testing.
 type mockHookExecutor struct {
 	hasAny      bool
-	preResult   *command.PreHookResult
+	preResult   *apicommand.PreHookResult
 	postCalled  atomic.Int32
 	lastHookCtx map[string]string
 }
 
 func (m *mockHookExecutor) HasAny() bool { return m.hasAny }
-func (m *mockHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, hookCtx map[string]string) *command.PreHookResult {
+func (m *mockHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, hookCtx map[string]string) *apicommand.PreHookResult {
 	m.lastHookCtx = hookCtx
 	return m.preResult
 }
@@ -273,7 +273,7 @@ func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
 	// Command hook should see the enriched context.
 	cmdHook := &mockHookExecutor{
 		hasAny:    true,
-		preResult: &command.PreHookResult{Denied: false},
+		preResult: &apicommand.PreHookResult{Denied: false},
 	}
 	eval.SetHookExecutor(cmdHook)
 
@@ -289,10 +289,10 @@ func TestEvaluate_WithTracker_CmdHooksDeriveFromOpContext(t *testing.T) {
 			cmdHook.lastHookCtx["shared.traceparent"])
 	}
 	// Should also contain server-injected keys.
-	if cmdHook.lastHookCtx[command.StartNs] == "" {
+	if cmdHook.lastHookCtx[apicommand.StartNs] == "" {
 		t.Error("hook context should contain _start_ns")
 	}
-	if cmdHook.lastHookCtx[command.OperationID] == "" {
+	if cmdHook.lastHookCtx[apicommand.OperationID] == "" {
 		t.Error("hook context should contain _operation_id")
 	}
 }
@@ -306,7 +306,7 @@ func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
 
 	cmdHook := &mockHookExecutor{
 		hasAny: true,
-		preResult: &command.PreHookResult{
+		preResult: &apicommand.PreHookResult{
 			Denied:     true,
 			DenyReason: "unauthorized",
 		},
@@ -342,7 +342,7 @@ func TestEvaluate_WithTracker_PreHookEnrichmentFlowsToOperation(t *testing.T) {
 	// Pre-hook adds context values.
 	cmdHook := &mockHookExecutor{
 		hasAny: true,
-		preResult: &command.PreHookResult{
+		preResult: &apicommand.PreHookResult{
 			Denied: false,
 			Context: map[string]string{
 				"_start_ns":      "12345",
@@ -470,7 +470,7 @@ func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
 	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
 	// The completed operation should have _elapsed_ns in context.
-	elapsed, ok := opHook.lastOp.Load().Get(command.ElapsedNs)
+	elapsed, ok := opHook.lastOp.Load().Get(apicommand.ElapsedNs)
 	if !ok || elapsed == "" {
 		t.Error("expected _elapsed_ns in operation context")
 	}
