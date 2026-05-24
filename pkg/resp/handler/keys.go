@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
@@ -22,7 +23,7 @@ const (
 )
 
 // HandleType implements TYPE key.
-func HandleType(cmdCtx *command.Context) command.Result {
+func HandleType(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -53,7 +54,7 @@ func HandleType(cmdCtx *command.Context) command.Result {
 }
 
 // HandleRename implements RENAME key newkey.
-func HandleRename(cmdCtx *command.Context) command.Result {
+func HandleRename(cmdCtx *command.Context) apicommand.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards([]string{src, dst})
@@ -74,7 +75,7 @@ func HandleRename(cmdCtx *command.Context) command.Result {
 }
 
 // HandleRenameNX implements RENAMENX key newkey.
-func HandleRenameNX(cmdCtx *command.Context) command.Result {
+func HandleRenameNX(cmdCtx *command.Context) apicommand.Result {
 	src := cmdCtx.Args[0]
 	dst := cmdCtx.Args[1]
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards([]string{src, dst})
@@ -104,7 +105,7 @@ func HandleRenameNX(cmdCtx *command.Context) command.Result {
 }
 
 // HandleKeys implements KEYS pattern.
-func HandleKeys(cmdCtx *command.Context) command.Result {
+func HandleKeys(cmdCtx *command.Context) apicommand.Result {
 	pattern := cmdCtx.Args[0]
 	executeFn := func() any {
 		var keys []string
@@ -131,11 +132,11 @@ func HandleKeys(cmdCtx *command.Context) command.Result {
 }
 
 // HandleScan implements SCAN cursor [MATCH pattern] [COUNT count].
-func HandleScan(cmdCtx *command.Context) command.Result {
+func HandleScan(cmdCtx *command.Context) apicommand.Result {
 	cursorStr := cmdCtx.Args[0]
 	cursor, err := strconv.Atoi(cursorStr)
 	if err != nil || cursor < 0 {
-		return command.Result{Value: resp.MarshalError("ERR value is not an integer or out of range")}
+		return apicommand.Result{Value: resp.MarshalError("ERR value is not an integer or out of range")}
 	}
 
 	// Parse optional MATCH and COUNT arguments.
@@ -209,7 +210,7 @@ func HandleScan(cmdCtx *command.Context) command.Result {
 }
 
 // HandleRandomKey implements RANDOMKEY.
-func HandleRandomKey(cmdCtx *command.Context) command.Result {
+func HandleRandomKey(cmdCtx *command.Context) apicommand.Result {
 	executeFn := func() any {
 		now := time.Now().UnixNano()
 		var found string
@@ -229,12 +230,12 @@ func HandleRandomKey(cmdCtx *command.Context) command.Result {
 }
 
 // HandleObject implements OBJECT subcommand [key].
-func HandleObject(cmdCtx *command.Context) command.Result {
+func HandleObject(cmdCtx *command.Context) apicommand.Result {
 	sub := strings.ToUpper(cmdCtx.Args[0])
 	switch sub {
 	case "ENCODING":
 		if len(cmdCtx.Args) < 2 {
-			return command.Result{Value: resp.ErrArgs("object")}
+			return apicommand.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
 		return command.Dispatch(cmdCtx, func() any {
@@ -266,7 +267,7 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 		})
 	case "IDLETIME":
 		if len(cmdCtx.Args) < 2 {
-			return command.Result{Value: resp.ErrArgs("object")}
+			return apicommand.Result{Value: resp.ErrArgs("object")}
 		}
 		key := cmdCtx.Args[1]
 		return command.Dispatch(cmdCtx, func() any {
@@ -281,12 +282,12 @@ func HandleObject(cmdCtx *command.Context) command.Result {
 			return idle
 		})
 	case "HELP":
-		return command.Result{Value: []string{
+		return apicommand.Result{Value: []string{
 			"OBJECT ENCODING <key> - Return the encoding of the object stored at <key>.",
 			"OBJECT IDLETIME <key> - Return the idle time of the object stored at <key>.",
 			"OBJECT HELP - Return help about the OBJECT command.",
 		}}
 	default:
-		return command.Result{Value: resp.MarshalError(fmt.Sprintf("ERR unknown subcommand '%s'", cmdCtx.Args[0]))}
+		return apicommand.Result{Value: resp.MarshalError(fmt.Sprintf("ERR unknown subcommand '%s'", cmdCtx.Args[0]))}
 	}
 }

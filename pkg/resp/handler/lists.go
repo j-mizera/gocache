@@ -6,12 +6,12 @@ import (
 
 	"github.com/gammazero/deque"
 
+	apicommand "gocache/api/command"
 	"gocache/api/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
 )
 
 
@@ -43,7 +43,7 @@ func listAppendSize(values []string) int64 {
 // list-max-listpack-size default, 8 KiB). Blocking ops (BLPOP/BRPOP) and
 // BLPOP wake-ups share the same dual-path.
 
-func HandleLpush(cmdCtx *command.Context) command.Result {
+func HandleLpush(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
 	executeFn := func() any {
@@ -52,7 +52,7 @@ func HandleLpush(cmdCtx *command.Context) command.Result {
 			return lpushStartPacked(cmdCtx, key, values)
 		}
 		if entry.ValueType != cache.ObjTypeList {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -125,7 +125,7 @@ func lpushNative(cmdCtx *command.Context, key string, dq *deque.Deque[string], v
 	return dq.Len()
 }
 
-func HandleRpush(cmdCtx *command.Context) command.Result {
+func HandleRpush(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	values := cmdCtx.Args[1:]
 	executeFn := func() any {
@@ -134,7 +134,7 @@ func HandleRpush(cmdCtx *command.Context) command.Result {
 			return rpushStartPacked(cmdCtx, key, values)
 		}
 		if entry.ValueType != cache.ObjTypeList {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -207,7 +207,7 @@ func rpushNative(cmdCtx *command.Context, key string, dq *deque.Deque[string], v
 	return dq.Len()
 }
 
-func HandleLpop(cmdCtx *command.Context) command.Result {
+func HandleLpop(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -215,7 +215,7 @@ func HandleLpop(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeList {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		val, err := popList(cmdCtx, key, entry, true, cmdCtx.Cache.RawTTL(key))
 		if err != nil {
@@ -226,7 +226,7 @@ func HandleLpop(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func HandleRpop(cmdCtx *command.Context) command.Result {
+func HandleRpop(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -234,7 +234,7 @@ func HandleRpop(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeList {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		val, err := popList(cmdCtx, key, entry, false, cmdCtx.Cache.RawTTL(key))
 		if err != nil {
@@ -300,7 +300,7 @@ func popList(cmdCtx *command.Context, key string, entry cache.Entry, fromLeft bo
 	}
 }
 
-func HandleLlen(cmdCtx *command.Context) command.Result {
+func HandleLlen(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -308,7 +308,7 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeList {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -324,15 +324,15 @@ func HandleLlen(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func HandleLRange(cmdCtx *command.Context) command.Result {
+func HandleLRange(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	start, err := strconv.Atoi(cmdCtx.Args[1])
 	if err != nil {
-		return command.Result{Err: resp.ErrNotInteger}
+		return apicommand.Result{Err: apicommand.ErrNotInteger}
 	}
 	stop, err := strconv.Atoi(cmdCtx.Args[2])
 	if err != nil {
-		return command.Result{Err: resp.ErrNotInteger}
+		return apicommand.Result{Err: apicommand.ErrNotInteger}
 	}
 	executeFn := func() any {
 		entry, found := cmdCtx.Cache.RawGet(key)
@@ -340,7 +340,7 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeList {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 		switch entry.Encoding {
 		case cache.EncPacked:
@@ -380,22 +380,22 @@ func HandleLRange(cmdCtx *command.Context) command.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-func HandleBlpop(cmdCtx *command.Context) command.Result {
+func HandleBlpop(cmdCtx *command.Context) apicommand.Result {
 	return handleBlockingPop(cmdCtx, true)
 }
 
-func HandleBrpop(cmdCtx *command.Context) command.Result {
+func HandleBrpop(cmdCtx *command.Context) apicommand.Result {
 	return handleBlockingPop(cmdCtx, false)
 }
 
 // handleBlockingPop implements the shared logic for BLPOP and BRPOP.
 // fromLeft=true pops from the head (BLPOP), fromLeft=false from the tail (BRPOP).
-func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
+func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) apicommand.Result {
 	// Last arg is the timeout in seconds (float64); 0 means block indefinitely.
 	timeoutStr := cmdCtx.Args[len(cmdCtx.Args)-1]
 	timeoutSec, err := strconv.ParseFloat(timeoutStr, 64)
 	if err != nil || timeoutSec < 0 {
-		return command.Result{Err: resp.ErrInvalidTimeout}
+		return apicommand.Result{Err: apicommand.ErrInvalidTimeout}
 	}
 	keys := cmdCtx.Args[:len(cmdCtx.Args)-1]
 	cmdCtx.TouchedShards = cmdCtx.Cache.TouchedShards(keys)
@@ -431,11 +431,11 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 
 	// Phase 2: do not block inside a MULTI/EXEC batch.
 	if cmdCtx.InBatch {
-		return command.Result{Value: nil}
+		return apicommand.Result{Value: nil}
 	}
 
 	if cmdCtx.BlockingRegistry == nil {
-		return command.Result{Value: nil}
+		return apicommand.Result{Value: nil}
 	}
 
 	// Register interest and wait.
@@ -445,9 +445,9 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	if timeoutSec == 0 {
 		select {
 		case wake := <-ch:
-			return command.Result{Value: []any{wake.Key, wake.Value}}
+			return apicommand.Result{Value: []any{wake.Key, wake.Value}}
 		case <-cmdCtx.BlockingRegistry.Done():
-			return command.Result{Value: nil}
+			return apicommand.Result{Value: nil}
 		}
 	}
 
@@ -455,11 +455,11 @@ func handleBlockingPop(cmdCtx *command.Context, fromLeft bool) command.Result {
 	defer timer.Stop()
 	select {
 	case wake := <-ch:
-		return command.Result{Value: []any{wake.Key, wake.Value}}
+		return apicommand.Result{Value: []any{wake.Key, wake.Value}}
 	case <-timer.C:
-		return command.Result{Value: nil}
+		return apicommand.Result{Value: nil}
 	case <-cmdCtx.BlockingRegistry.Done():
-		return command.Result{Value: nil}
+		return apicommand.Result{Value: nil}
 	}
 }
 

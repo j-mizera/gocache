@@ -3,6 +3,7 @@ package handler
 import (
 	"strings"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 	"gocache/pkg/rex"
@@ -11,7 +12,7 @@ import (
 // Registrations returns REX command handlers with their argument specs.
 func Registrations() map[string]command.Registration {
 	return map[string]command.Registration{
-		resp.CmdRexMeta: {Handler: HandleRexMeta, Spec: command.Spec{Min: 1, Max: -1}},
+		resp.CmdRexMeta: {Handler: HandleRexMeta, Spec: apicommand.Spec{Min: 1, Max: -1}},
 	}
 }
 
@@ -24,68 +25,68 @@ func Registrations() map[string]command.Registration {
 //	REX.META GET <key>                        -> bulk string or nil
 //	REX.META DEL <key>                        -> :1 or :0
 //	REX.META LIST                             -> map (RESP3) or flat array (RESP2)
-func HandleRexMeta(cmdCtx *command.Context) command.Result {
+func HandleRexMeta(cmdCtx *command.Context) apicommand.Result {
 	sub := strings.ToUpper(cmdCtx.Args[0])
 
 	switch sub {
 	case "SET":
 		if len(cmdCtx.Args) < 3 {
-			return command.Result{Value: resp.ErrArgs("rex.meta set")}
+			return apicommand.Result{Value: resp.ErrArgs("rex.meta set")}
 		}
 		key := cmdCtx.Args[1]
 		value := strings.Join(cmdCtx.Args[2:], " ")
 		store := ensureRexStore(cmdCtx)
 		if err := store.Set(key, value); err != nil {
-			return command.Result{Err: err}
+			return apicommand.Result{Err: err}
 		}
-		return command.Result{Value: "OK"}
+		return apicommand.Result{Value: "OK"}
 
 	case "MSET":
 		if len(cmdCtx.Args) < 3 || (len(cmdCtx.Args)-1)%2 != 0 {
-			return command.Result{Value: resp.ErrArgs("rex.meta mset")}
+			return apicommand.Result{Value: resp.ErrArgs("rex.meta mset")}
 		}
 		store := ensureRexStore(cmdCtx)
 		pairs := cmdCtx.Args[1:]
 		for i := 0; i < len(pairs); i += 2 {
 			if err := store.Set(pairs[i], pairs[i+1]); err != nil {
-				return command.Result{Err: err}
+				return apicommand.Result{Err: err}
 			}
 		}
-		return command.Result{Value: "OK"}
+		return apicommand.Result{Value: "OK"}
 
 	case "GET":
 		if len(cmdCtx.Args) != 2 {
-			return command.Result{Value: resp.ErrArgs("rex.meta get")}
+			return apicommand.Result{Value: resp.ErrArgs("rex.meta get")}
 		}
 		if cmdCtx.Client.RexMeta == nil {
-			return command.Result{Value: nil}
+			return apicommand.Result{Value: nil}
 		}
 		v, ok := cmdCtx.Client.RexMeta.Get(cmdCtx.Args[1])
 		if !ok {
-			return command.Result{Value: nil}
+			return apicommand.Result{Value: nil}
 		}
-		return command.Result{Value: v}
+		return apicommand.Result{Value: v}
 
 	case "DEL":
 		if len(cmdCtx.Args) != 2 {
-			return command.Result{Value: resp.ErrArgs("rex.meta del")}
+			return apicommand.Result{Value: resp.ErrArgs("rex.meta del")}
 		}
 		if cmdCtx.Client.RexMeta == nil {
-			return command.Result{Value: 0}
+			return apicommand.Result{Value: 0}
 		}
 		if cmdCtx.Client.RexMeta.Del(cmdCtx.Args[1]) {
-			return command.Result{Value: 1}
+			return apicommand.Result{Value: 1}
 		}
-		return command.Result{Value: 0}
+		return apicommand.Result{Value: 0}
 
 	case "LIST":
 		if cmdCtx.Client.RexMeta == nil || cmdCtx.Client.RexMeta.Len() == 0 {
-			return command.Result{Value: map[string]string{}}
+			return apicommand.Result{Value: map[string]string{}}
 		}
-		return command.Result{Value: cmdCtx.Client.RexMeta.All()}
+		return apicommand.Result{Value: cmdCtx.Client.RexMeta.All()}
 
 	default:
-		return command.Result{Value: resp.MarshalError("ERR unknown REX.META subcommand '" + sub + "'")}
+		return apicommand.Result{Value: resp.MarshalError("ERR unknown REX.META subcommand '" + sub + "'")}
 	}
 }
 

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
-	"gocache/pkg/resp"
 )
 
 func TestEvaluator_Set(t *testing.T) {
@@ -120,7 +120,7 @@ func TestEvaluator_Set(t *testing.T) {
 	// Test WRONGTYPE error
 	eval(t, c, e, ctx, "SET", []string{"stringkey", "value"})
 	res = eval(t, c, e, ctx, "SADD", []string{"stringkey", "member"})
-	if !errors.Is(res.Err, resp.ErrWrongType) {
+	if !errors.Is(res.Err, apicommand.ErrWrongType) {
 		t.Error("Expected WRONGTYPE error for SADD on string key")
 	}
 }

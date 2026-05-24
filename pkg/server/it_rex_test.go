@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
@@ -20,7 +21,7 @@ type fakeHookExecutor struct {
 
 func (f *fakeHookExecutor) HasAny() bool { return true }
 
-func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, hookCtx map[string]string) *command.PreHookResult {
+func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, hookCtx map[string]string) *apicommand.PreHookResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := make(map[string]string, len(hookCtx))
@@ -28,7 +29,7 @@ func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, 
 		cp[k] = v
 	}
 	f.preCalls = append(f.preCalls, cp)
-	return &command.PreHookResult{Denied: false, Context: hookCtx}
+	return &apicommand.PreHookResult{Denied: false, Context: hookCtx}
 }
 
 func (f *fakeHookExecutor) RunPostHooks(_ context.Context, _ string, _ []string, _, _ string, hookCtx map[string]string) {
@@ -86,7 +87,7 @@ func setupREXCapture(t *testing.T, srv *Server) func() map[string]string {
 	var mu sync.Mutex
 	var captured map[string]string
 
-	srv.pipeline.RegisterHandler("TEST.CAPTURE", func(cmdCtx *command.Context) command.Result {
+	srv.pipeline.RegisterHandler("TEST.CAPTURE", func(cmdCtx *command.Context) apicommand.Result {
 		mu.Lock()
 		defer mu.Unlock()
 		if cmdCtx.Client.CmdMeta != nil {
@@ -97,7 +98,7 @@ func setupREXCapture(t *testing.T, srv *Server) func() map[string]string {
 		} else {
 			captured = nil
 		}
-		return command.Result{Value: "OK"}
+		return apicommand.Result{Value: "OK"}
 	})
 
 	return func() map[string]string {
@@ -299,14 +300,14 @@ func TestServer_REXMeta_PrecedenceMetaOverridesConnDefaults(t *testing.T) {
 		connMu       sync.Mutex
 		connDefaults map[string]string
 	)
-	srv.pipeline.RegisterHandler("TEST.CAPTURE_BOTH", func(cmdCtx *command.Context) command.Result {
+	srv.pipeline.RegisterHandler("TEST.CAPTURE_BOTH", func(cmdCtx *command.Context) apicommand.Result {
 		connMu.Lock()
 		defer connMu.Unlock()
 		connDefaults = nil
 		if cmdCtx.Client.RexMeta != nil {
 			connDefaults = cmdCtx.Client.RexMeta.All()
 		}
-		return command.Result{Value: "OK"}
+		return apicommand.Result{Value: "OK"}
 	})
 	readConnDefaults := func() map[string]string {
 		connMu.Lock()
@@ -396,7 +397,7 @@ func TestServer_REX_HookContextEndToEnd(t *testing.T) {
 	}
 
 	// Server-injected key always present.
-	if _, ok := hookCtx[command.StartNs]; !ok {
+	if _, ok := hookCtx[apicommand.StartNs]; !ok {
 		t.Errorf("missing _start_ns in hook context: %v", hookCtx)
 	}
 

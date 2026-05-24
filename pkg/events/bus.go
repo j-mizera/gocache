@@ -18,9 +18,6 @@ import (
 	"gocache/api/logger"
 )
 
-// DefaultReplayCapacity aliases the config-layer constant so callers of
-// NewBus() get the same default as the YAML config path.
-const DefaultReplayCapacity = apiconfig.DefaultEventsReplayCapacity
 
 // Handler is a function that processes an event. Must be non-blocking.
 type Handler func(apiEvents.Event)
@@ -48,7 +45,7 @@ type Bus struct {
 
 // NewBus creates a server-wide event bus with the default replay capacity.
 func NewBus() *Bus {
-	return NewBusWithCapacity(DefaultReplayCapacity)
+	return NewBusWithCapacity(apiconfig.DefaultEventsReplayCapacity)
 }
 
 // NewBusWithCapacity creates a bus whose replay ring holds up to capacity

@@ -1,7 +1,4 @@
 // Package command provides server-side command types for GoCache.
-//
-// Shared types (Result, Spec) are re-exported from api/command.
-// This package adds server-only types: Handler, Context, Dispatch, Registration.
 package command
 
 import (
@@ -30,25 +27,8 @@ type MutationEmitter interface {
 	AllocateAndEmit(op, key string, args [][]byte) apipersistence.LSN
 }
 
-// SnapshotInvoker is the SAVE/BGSAVE handler-side hook into the
-// persistence coordinator. Distinct from MutationEmitter so the snapshot
-// command path doesn't drag mutation-feed concerns and vice versa: both
-// are implemented by *pkg/persistence.Coordinator, but consumers see only
-// the surface they need.
-//
-// Nil means "no snapshotter wired" — handler returns an error to the
-// client rather than silently no-oping a SAVE command.
-type SnapshotInvoker interface {
-	Snapshot(ctx context.Context) error
-	LastSaveUnix() int64
-}
-
-// Re-export shared types from api/command so existing importers don't break.
-type Result = apicommand.Result
-type Spec = apicommand.Spec
-
 // Handler is a function that handles a single cache command.
-type Handler func(ctx *Context) Result
+type Handler func(ctx *Context) apicommand.Result
 
 // Context carries all dependencies needed to execute a command.
 //
@@ -100,12 +80,12 @@ type Context struct {
 	// EvalFn re-enters the evaluator pipeline. Used by EXEC to execute
 	// queued commands in a batch. parentCtx is the connection-scoped ctx
 	// from the outer Evaluate call.
-	EvalFn func(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string, inBatch bool) Result
+	EvalFn func(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string, inBatch bool) apicommand.Result
 
 	// Spec is the command's classification, populated by the evaluator
 	// from the command registration. Dispatch reads Spec.ReadOnly to
 	// decide whether to wrap fn with persistence emission.
-	Spec Spec
+	Spec apicommand.Spec
 
 	// Coordinator is the persistence mutation-feed entry point, set by
 	// the evaluator from the server's coordinator instance. May be nil
@@ -113,12 +93,6 @@ type Context struct {
 	// non-read-only fn closures with HasSinks-gated emission inside the
 	// shard lock so LSN allocation order matches lock order.
 	Coordinator MutationEmitter
-
-	// Snapshotter is the SAVE/BGSAVE entry point. Set by the evaluator
-	// from the same coordinator instance. May be nil when persistence
-	// has no snapshot writer registered — the SAVE handler treats nil
-	// as a configuration error and surfaces it to the client.
-	Snapshotter SnapshotInvoker
 }
 
 // Context returns the ambient context.Context carrying the current
@@ -166,9 +140,8 @@ func (c *Context) Reset() {
 	c.MultiKey = false
 	c.TouchedShards = nil
 	c.EvalFn = nil
-	c.Spec = Spec{}
+	c.Spec = apicommand.Spec{}
 	c.Coordinator = nil
-	c.Snapshotter = nil
 }
 
 // Dispatch runs fn under the appropriate locking discipline for the
@@ -186,7 +159,7 @@ func (c *Context) Reset() {
 // Wraps the result into a Result, propagating any error. If the engine
 // is stopped or the command context is cancelled before fn runs, the
 // returned Result carries that error.
-func Dispatch(ctx *Context, fn func() any) Result {
+func Dispatch(ctx *Context, fn func() any) apicommand.Result {
 	// Wrap fn with persistence-feed emission when (a) the command writes
 	// (Spec.ReadOnly is false) and (b) a coordinator is attached. The
 	// HasSinks check inside the wrapper is what gates the per-command
@@ -284,22 +257,22 @@ func argsAsBytes(args []string) [][]byte {
 	return out
 }
 
-func wrapInline(fn func() any) Result {
+func wrapInline(fn func() any) apicommand.Result {
 	res := fn()
 	if err, ok := res.(error); ok {
-		return Result{Err: err}
+		return apicommand.Result{Err: err}
 	}
-	return Result{Value: res}
+	return apicommand.Result{Value: res}
 }
 
-func wrapDispatch(res any, err error) Result {
+func wrapDispatch(res any, err error) apicommand.Result {
 	if err != nil {
-		return Result{Err: err}
+		return apicommand.Result{Err: err}
 	}
 	if resultErr, ok := res.(error); ok {
-		return Result{Err: resultErr}
+		return apicommand.Result{Err: resultErr}
 	}
-	return Result{Value: res}
+	return apicommand.Result{Value: res}
 }
 
 // Registration bundles a command handler with its argument spec.
@@ -307,5 +280,5 @@ func wrapDispatch(res any, err error) Result {
 // validate args without hardcoding spec knowledge.
 type Registration struct {
 	Handler Handler
-	Spec    Spec
+	Spec    apicommand.Spec
 }

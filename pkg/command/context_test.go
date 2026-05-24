@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -32,8 +33,8 @@ func TestContext_Reset(t *testing.T) {
 		BlockingRegistry: blocking.NewRegistry(),
 		WatchManager:     watch.NewManager(),
 		RequirePass:      "secret",
-		EvalFn: func(_ context.Context, _ *clientctx.ClientContext, _ string, _ []string, _ bool) Result {
-			return Result{}
+		EvalFn: func(_ context.Context, _ *clientctx.ClientContext, _ string, _ []string, _ bool) apicommand.Result {
+			return apicommand.Result{}
 		},
 	}
 	type testKey struct{}

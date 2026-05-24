@@ -1,6 +1,7 @@
 package handler
 
 import (
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
@@ -21,9 +22,9 @@ import (
 // No demotion — matches Valkey semantics.
 
 // HandleHset implements HSET key field value [field value ...]
-func HandleHset(cmdCtx *command.Context) command.Result {
+func HandleHset(cmdCtx *command.Context) apicommand.Result {
 	if (len(cmdCtx.Args)-1)%2 != 0 {
-		return command.Result{Value: resp.ErrArgs("hset")}
+		return apicommand.Result{Value: resp.ErrArgs("hset")}
 	}
 
 	key := cmdCtx.Args[0]
@@ -36,7 +37,7 @@ func HandleHset(cmdCtx *command.Context) command.Result {
 			return hsetStartPacked(cmdCtx, key, cmdCtx.Args[1:])
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -129,7 +130,7 @@ func hashMapSize(hash map[string]string) int64 {
 }
 
 // HandleHget implements HGET key field
-func HandleHget(cmdCtx *command.Context) command.Result {
+func HandleHget(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	field := cmdCtx.Args[1]
 
@@ -139,7 +140,7 @@ func HandleHget(cmdCtx *command.Context) command.Result {
 			return nil
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -166,7 +167,7 @@ func HandleHget(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHdel implements HDEL key field [field ...]
-func HandleHdel(cmdCtx *command.Context) command.Result {
+func HandleHdel(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	fields := cmdCtx.Args[1:]
 
@@ -176,7 +177,7 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -231,7 +232,7 @@ func HandleHdel(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHexists implements HEXISTS key field
-func HandleHexists(cmdCtx *command.Context) command.Result {
+func HandleHexists(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 	field := cmdCtx.Args[1]
 
@@ -241,7 +242,7 @@ func HandleHexists(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -267,7 +268,7 @@ func HandleHexists(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHgetall implements HGETALL key
-func HandleHgetall(cmdCtx *command.Context) command.Result {
+func HandleHgetall(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -276,7 +277,7 @@ func HandleHgetall(cmdCtx *command.Context) command.Result {
 			return map[string]string{}
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -296,7 +297,7 @@ func HandleHgetall(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHkeys implements HKEYS key
-func HandleHkeys(cmdCtx *command.Context) command.Result {
+func HandleHkeys(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -305,7 +306,7 @@ func HandleHkeys(cmdCtx *command.Context) command.Result {
 			return []any{}
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -333,7 +334,7 @@ func HandleHkeys(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHvals implements HVALS key
-func HandleHvals(cmdCtx *command.Context) command.Result {
+func HandleHvals(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -342,7 +343,7 @@ func HandleHvals(cmdCtx *command.Context) command.Result {
 			return []any{}
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {
@@ -370,7 +371,7 @@ func HandleHvals(cmdCtx *command.Context) command.Result {
 }
 
 // HandleHlen implements HLEN key
-func HandleHlen(cmdCtx *command.Context) command.Result {
+func HandleHlen(cmdCtx *command.Context) apicommand.Result {
 	key := cmdCtx.Args[0]
 
 	executeFn := func() any {
@@ -379,7 +380,7 @@ func HandleHlen(cmdCtx *command.Context) command.Result {
 			return 0
 		}
 		if entry.ValueType != cache.ObjTypeHash {
-			return resp.ErrWrongType
+			return apicommand.ErrWrongType
 		}
 
 		switch entry.Encoding {

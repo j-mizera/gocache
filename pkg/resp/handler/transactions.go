@@ -1,33 +1,34 @@
 package handler
 
 import (
+	apicommand "gocache/api/command"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
 
-func HandleMulti(cmdCtx *command.Context) command.Result {
+func HandleMulti(cmdCtx *command.Context) apicommand.Result {
 	res, err := cmdCtx.Transaction.Multi(cmdCtx.Client)
 	if err != nil {
-		return command.Result{Err: err}
+		return apicommand.Result{Err: err}
 	}
-	return command.Result{Value: res}
+	return apicommand.Result{Value: res}
 }
 
-func HandleDiscard(cmdCtx *command.Context) command.Result {
+func HandleDiscard(cmdCtx *command.Context) apicommand.Result {
 	res, err := cmdCtx.Transaction.Discard(cmdCtx.Client)
 	if err != nil {
-		return command.Result{Err: err}
+		return apicommand.Result{Err: err}
 	}
 	if cmdCtx.WatchManager != nil {
 		cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
 	}
-	return command.Result{Value: res}
+	return apicommand.Result{Value: res}
 }
 
-func HandleExec(cmdCtx *command.Context) command.Result {
+func HandleExec(cmdCtx *command.Context) apicommand.Result {
 	if !cmdCtx.Client.InTransaction {
-		return command.Result{Err: clientctx.ErrExecWithoutMulti}
+		return apicommand.Result{Err: clientctx.ErrExecWithoutMulti}
 	}
 
 	if cmdCtx.Client.IsWatchDirty() {
@@ -35,7 +36,7 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 		if cmdCtx.WatchManager != nil {
 			cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
 		}
-		return command.Result{Value: nil}
+		return apicommand.Result{Value: nil}
 	}
 
 	cmdCtx.Client.InTransaction = false
@@ -46,7 +47,7 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 		if cmdCtx.WatchManager != nil {
 			cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
 		}
-		return command.Result{Value: []any{}}
+		return apicommand.Result{Value: []any{}}
 	}
 
 	batchCtx := cmdCtx.Context()
@@ -73,27 +74,27 @@ func HandleExec(cmdCtx *command.Context) command.Result {
 	}
 
 	if err != nil {
-		return command.Result{Err: err}
+		return apicommand.Result{Err: err}
 	}
 	if results == nil {
-		return command.Result{Value: nil}
+		return apicommand.Result{Value: nil}
 	}
-	return command.Result{Value: results}
+	return apicommand.Result{Value: results}
 }
 
-func HandleWatch(cmdCtx *command.Context) command.Result {
+func HandleWatch(cmdCtx *command.Context) apicommand.Result {
 	if cmdCtx.Client.InTransaction {
-		return command.Result{Value: resp.MarshalError("ERR WATCH inside MULTI is not allowed")}
+		return apicommand.Result{Value: resp.MarshalError("ERR WATCH inside MULTI is not allowed")}
 	}
 	if cmdCtx.WatchManager != nil {
 		cmdCtx.WatchManager.Watch(cmdCtx.Client, cmdCtx.Args)
 	}
-	return command.Result{Value: "OK"}
+	return apicommand.Result{Value: "OK"}
 }
 
-func HandleUnwatch(cmdCtx *command.Context) command.Result {
+func HandleUnwatch(cmdCtx *command.Context) apicommand.Result {
 	if cmdCtx.WatchManager != nil {
 		cmdCtx.WatchManager.Unwatch(cmdCtx.Client)
 	}
-	return command.Result{Value: "OK"}
+	return apicommand.Result{Value: "OK"}
 }

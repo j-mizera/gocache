@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
@@ -53,7 +54,7 @@ func valueAsString(v any) string {
 
 // eval dispatches a command through the handler map, mimicking the evaluator
 // pipeline for test convenience.
-func eval(t *testing.T, c *cache.Cache, e *engine.Engine, ctx *clientctx.ClientContext, op string, args []string) command.Result {
+func eval(t *testing.T, c *cache.Cache, e *engine.Engine, ctx *clientctx.ClientContext, op string, args []string) apicommand.Result {
 	t.Helper()
 	op = strings.ToUpper(op)
 	h, ok := handlers[op]

@@ -153,21 +153,17 @@ type Cache struct {
 	OnMutateAll func()
 }
 
-// DefaultShards aliases the config-layer default so cache constructors
-// that don't take an explicit shard count stay in sync with the YAML
-// config path. Must be a positive power of two.
-const DefaultShards = apiconfig.DefaultCacheShards
 
 // New constructs a Cache with the default shard count, no memory limit,
 // and LRU eviction.
 func New() *Cache {
-	return newCache(DefaultShards, 0, EvictionLRU)
+	return newCache(apiconfig.DefaultCacheShards, 0, EvictionLRU)
 }
 
 // NewWithConfig constructs a Cache with the default shard count from a
 // megabyte limit. Use NewWithShards to override the shard count.
 func NewWithConfig(maxMemoryMB int64, policy EvictionPolicy) *Cache {
-	return NewWithShards(DefaultShards, maxMemoryMB, policy)
+	return NewWithShards(apiconfig.DefaultCacheShards, maxMemoryMB, policy)
 }
 
 // NewWithShards constructs a Cache with a specific shard count and

@@ -45,11 +45,6 @@ const (
 	CmdExec    = "EXEC"
 	CmdDiscard = "DISCARD"
 
-	CmdSnapshot = "SNAPSHOT"
-	CmdSave     = "SAVE"
-	CmdBgsave   = "BGSAVE"
-	CmdLastsave = "LASTSAVE"
-
 	CmdDBSize = "DBSIZE"
 	CmdInfo   = "INFO"
 	CmdHello  = "HELLO"
