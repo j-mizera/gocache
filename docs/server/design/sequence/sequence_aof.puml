@@ -1,0 +1,122 @@
+@startuml sequence_aof
+!include ../../../design/theme.iuml
+
+mainframe **sd** AOF Plugin — Write, Boot, Recovery, Rewrite
+
+participant "sinkChannel" as SC
+participant "AOFSink" as Sink
+participant "bufio.Writer" as BW
+participant "OS file" as FS
+participant "fsyncLoop\n(EverySec)" as Fsync
+
+participant "AOFSource" as Src
+participant "aofIterator" as Iter
+participant "CacheStore" as Store
+
+== Write Path (AOFSink.Apply) ==
+
+SC -> Sink : Apply(ctx, batch)
+activate Sink
+
+loop for each Mutation in batch
+    Sink -> Sink : encodeRecord(bw, m, scratch)\n[varint bodyLen + body]
+    note right
+      body = 8-byte LE LSN
+           + varint Op
+           + varint ArgCount
+           + varint Arg₁Len + Arg₁
+           + …
+    end note
+end
+
+Sink -> BW : Flush()
+BW -> FS : write buffered bytes
+
+alt FsyncAlways
+    Sink -> FS : Sync()
+else FsyncEverySec
+    note over Fsync : background goroutine\nsyncs every ~1 s
+else FsyncNo
+    note over FS : rely on OS page cache
+end
+
+Sink --> SC : nil
+deactivate Sink
+
+== Background Fsync (EverySec policy) ==
+
+Fsync -> Fsync : ticker.C (1 s)
+Fsync -> FS : Sync()
+alt error
+    Fsync -> Fsync : log warning, continue
+end
+
+== Boot Path (AOFSource.Boot) ==
+
+[-> Src : Boot(ctx)
+activate Src
+
+Src -> FS : os.Open(path)
+alt file missing
+    Src --> [: BootModeInitial
+else file empty or header-only
+    Src -> Src : validate header\n[magic "GOCAOF" + v1]
+    Src --> [: BootModeInitial
+else file has records
+    Src -> Src : readHeader → validate
+    Src --> [: BootModeReplay\n+ aofIterator
+end
+
+deactivate Src
+
+== Replay (Coordinator calls iterator) ==
+
+loop aofIterator.Next
+    Iter -> Iter : decodeRecord(br)
+    alt success
+        Iter -> Iter : update goodOffset\n= file pos − buffered
+        Iter --> Store : Mutation
+        Store -> Store : ApplyMutation\n(re-execute command)
+    else io.EOF
+        Iter --> Store : EOF (done)
+    else decode error
+        note over Iter #FFFDE7
+          Torn record detected
+          (crash mid-write)
+        end note
+        Iter -> FS : Truncate(goodOffset)
+        note right : Discard partial record,\nkeep all intact mutations
+        Iter --> Store : EOF
+    end
+end
+
+== BGREWRITEAOF (compaction) ==
+
+[-> Sink : Rewrite(ctx, store, sink, path)
+activate Sink
+
+Sink -> Store : CaptureSnapshot()
+Store --> Sink : []SnapshotEntry
+
+Sink -> FS : create path.rewrite.tmp
+Sink -> FS : writeHeader
+
+loop for each SnapshotEntry
+    Sink -> Sink : synthesizeMutation(entry)\n[Hash→HSET, Set→SADD,\nList→RPUSH, Bytes→SET]
+    Sink -> FS : encodeRecord(mutation)
+end
+
+Sink -> FS : Flush + Sync
+Sink -> FS : Close tmp
+
+Sink -> Sink : ReplaceFile(tmpPath)
+note right
+  flush old bufio → close old file
+  rename tmp → live path
+  reopen for append
+end note
+
+Sink --> [: nil
+deactivate Sink
+
+@enduml

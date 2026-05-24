@@ -15,12 +15,12 @@ import (
 // Rewrite compacts the AOF by capturing a snapshot and writing the
 // minimal set of mutations needed to reconstruct the current state.
 // The rewritten file replaces the current AOF via atomic rename.
-func Rewrite(ctx context.Context, store apipersistence.CacheStore, sink *AOFSink) error {
+func Rewrite(ctx context.Context, store apipersistence.CacheStore, sink *AOFSink, aofPath string) error {
 	logger.Info(ctx).Msg("aof: rewrite started")
 
 	entries := store.CaptureSnapshot()
 
-	tmpPath := sink.file.Name() + ".rewrite.tmp"
+	tmpPath := aofPath + ".rewrite.tmp"
 	tmp, err := os.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("aof: rewrite create temp: %w", err)

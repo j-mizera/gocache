@@ -119,9 +119,17 @@ func (c *Cache) ApplyMutation(ctx context.Context, m apipersistence.Mutation) er
 		}
 		c.RawLoad(key, m.Args[1], parseSetExpiration(m.Args[2:]))
 
-	case "SETNX", "GETSET":
+	case "SETNX":
 		if len(m.Args) < 2 {
-			return fmt.Errorf("apply %s: need >= 2 args, got %d", m.Op, len(m.Args))
+			return fmt.Errorf("apply SETNX: need >= 2 args, got %d", len(m.Args))
+		}
+		if _, ok := c.RawGet(key); !ok {
+			c.RawLoad(key, m.Args[1], 0)
+		}
+
+	case "GETSET":
+		if len(m.Args) < 2 {
+			return fmt.Errorf("apply GETSET: need >= 2 args, got %d", len(m.Args))
 		}
 		c.RawLoad(key, m.Args[1], 0)
 

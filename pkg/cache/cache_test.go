@@ -419,6 +419,77 @@ func TestApplyMutation(t *testing.T) {
 		}
 	})
 
+	t.Run("SETNX", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SETNX", "nx", "first"))
+		_ = c.ApplyMutation(ctx, mut("SETNX", "nx", "second"))
+		e, _ := c.RawGet("nx")
+		if got := string(c.ResolvePacked(e)); got != "first" {
+			t.Errorf("got %q, want %q", got, "first")
+		}
+	})
+
+	t.Run("GETSET", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SET", "gs", "old"))
+		_ = c.ApplyMutation(ctx, mut("GETSET", "gs", "new"))
+		e, _ := c.RawGet("gs")
+		if got := string(c.ResolvePacked(e)); got != "new" {
+			t.Errorf("got %q, want %q", got, "new")
+		}
+	})
+
+	t.Run("GETDEL", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SET", "gd", "val"))
+		_ = c.ApplyMutation(ctx, mut("GETDEL", "gd"))
+		if _, ok := c.RawGet("gd"); ok {
+			t.Error("key should be deleted after GETDEL")
+		}
+	})
+
+	t.Run("INCRBYFLOAT", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SET", "f", "10.5"))
+		_ = c.ApplyMutation(ctx, mut("INCRBYFLOAT", "f", "0.1"))
+		e, _ := c.RawGet("f")
+		got := string(c.ResolvePacked(e))
+		if got != "10.6" {
+			t.Errorf("got %q, want %q", got, "10.6")
+		}
+	})
+
+	t.Run("EXPIRE", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SET", "ex", "val"))
+		_ = c.ApplyMutation(ctx, mut("EXPIRE", "ex", "60"))
+		ttl := c.RawTTL("ex")
+		if ttl <= 0 {
+			t.Errorf("expected positive TTL, got %d", ttl)
+		}
+	})
+
+	t.Run("PEXPIRE", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SET", "px", "val"))
+		_ = c.ApplyMutation(ctx, mut("PEXPIRE", "px", "60000"))
+		ttl := c.RawTTL("px")
+		if ttl <= 0 {
+			t.Errorf("expected positive TTL, got %d", ttl)
+		}
+	})
+
+	t.Run("SPOP", func(t *testing.T) {
+		c := cache.New()
+		_ = c.ApplyMutation(ctx, mut("SADD", "sp", "a", "b", "c"))
+		_ = c.ApplyMutation(ctx, mut("SPOP", "sp"))
+		e, _ := c.RawGet("sp")
+		s := e.Value.(map[string]struct{})
+		if len(s) != 2 {
+			t.Errorf("set len = %d, want 2", len(s))
+		}
+	})
+
 	t.Run("unknown op returns error", func(t *testing.T) {
 		c := cache.New()
 		err := c.ApplyMutation(ctx, mut("XYZZY", "k"))

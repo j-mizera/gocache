@@ -91,9 +91,11 @@ func (it *aofIterator) Next(_ context.Context) (apipersistence.Mutation, error) 
 		return apipersistence.Mutation{}, io.EOF
 	}
 
-	pos, _ := it.file.Seek(0, 1)
-	buffered := it.br.Buffered()
-	it.goodOffset = pos - int64(buffered)
+	pos, err := it.file.Seek(0, 1)
+	if err != nil {
+		return apipersistence.Mutation{}, fmt.Errorf("aof: seek: %w", err)
+	}
+	it.goodOffset = pos - int64(it.br.Buffered())
 
 	return m, nil
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	apicommand "gocache/api/command"
 	apiconfig "gocache/api/config"
@@ -26,8 +27,9 @@ const (
 )
 
 type provider struct {
-	src  *AOFSource
-	sink *AOFSink
+	src       *AOFSource
+	sink      *AOFSink
+	rewriting sync.Mutex
 }
 
 func (provider) Name() string { return "aof" }
@@ -70,8 +72,13 @@ func (p *provider) commands(store apipersistence.CacheStore) []apipersistence.Co
 		{
 			Name: "BGREWRITEAOF",
 			Fn: func(_ context.Context, _ []string) (any, error) {
+				if !p.rewriting.TryLock() {
+					return "Background append only file rewriting already in progress", nil
+				}
+				aofPath := sink.FilePath()
 				go func() {
-					if err := Rewrite(context.Background(), store, sink); err != nil {
+					defer p.rewriting.Unlock()
+					if err := Rewrite(context.Background(), store, sink, aofPath); err != nil {
 						logger.ErrorNoCtx().Err(err).Msg("BGREWRITEAOF failed")
 					}
 				}()

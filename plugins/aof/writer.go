@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"gocache/api/logger"
 	apipersistence "gocache/api/persistence"
 )
 
@@ -20,6 +21,7 @@ type AOFSink struct {
 	bw      *bufio.Writer
 	scratch []byte
 
+	fsyncMu   sync.Mutex
 	policy    apipersistence.FsyncPolicy
 	fsyncStop chan struct{}
 	fsyncWg   sync.WaitGroup
@@ -103,10 +105,14 @@ func (s *AOFSink) Apply(_ context.Context, batch []apipersistence.Mutation) erro
 
 // Close flushes, syncs, and closes the file.
 func (s *AOFSink) Close(_ context.Context) error {
+	s.fsyncMu.Lock()
 	if s.fsyncStop != nil {
 		close(s.fsyncStop)
 		s.fsyncWg.Wait()
+		s.fsyncStop = nil
 	}
+	s.fsyncMu.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -123,6 +129,9 @@ func (s *AOFSink) Close(_ context.Context) error {
 
 // SetFsyncPolicy swaps the fsync policy at runtime (hot reload).
 func (s *AOFSink) SetFsyncPolicy(p apipersistence.FsyncPolicy) {
+	s.fsyncMu.Lock()
+	defer s.fsyncMu.Unlock()
+
 	s.mu.Lock()
 	old := s.policy
 	s.policy = p
@@ -140,6 +149,13 @@ func (s *AOFSink) SetFsyncPolicy(p apipersistence.FsyncPolicy) {
 		s.fsyncWg.Add(1)
 		go s.fsyncLoop()
 	}
+}
+
+// FilePath returns the current AOF file path under the mutex.
+func (s *AOFSink) FilePath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.file.Name()
 }
 
 // ReplaceFile atomically swaps the underlying file (used by rewrite).
@@ -177,7 +193,9 @@ func (s *AOFSink) fsyncLoop() {
 			return
 		case <-ticker.C:
 			s.mu.Lock()
-			_ = s.file.Sync()
+			if err := s.file.Sync(); err != nil {
+				logger.WarnNoCtx().Err(err).Msg("aof: everysec fsync failed")
+			}
 			s.mu.Unlock()
 		}
 	}
