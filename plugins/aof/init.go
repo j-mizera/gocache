@@ -37,6 +37,8 @@ func (provider) Name() string { return "aof" }
 func (p *provider) Build(cfg apiconfig.PluginConfig, store apipersistence.CacheStore) (*apipersistence.Backend, error) {
 	cfg.SetDefault(keyFile, defaultFile)
 	cfg.SetDefault(keyFsync, defaultFsync)
+	cfg.BindEnv(keyFile, "GOCACHE_AOF_FILE")
+	cfg.BindEnv(keyFsync, "GOCACHE_AOF_FSYNC")
 
 	file := cfg.GetString(keyFile)
 	if file == "" {

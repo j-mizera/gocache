@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/viper"
@@ -44,6 +46,28 @@ func (p pluginView) GetStringSlice(key string) []string      { return p.v.GetStr
 func (p pluginView) IsSet(key string) bool                   { return p.v.IsSet(p.qualified(key)) }
 func (p pluginView) SetDefault(key string, value any)        { p.v.SetDefault(p.qualified(key), value) }
 
+func (p pluginView) BindEnv(key string, envVars ...string) {
+	_ = p.v.BindEnv(append([]string{p.qualified(key)}, envVars...)...)
+}
+
+func (p pluginView) MergeFile(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	tmp := viper.New()
+	tmp.SetConfigFile(path)
+	if err := tmp.ReadInConfig(); err != nil {
+		return fmt.Errorf("plugin config merge: %w", err)
+	}
+	for _, key := range tmp.AllKeys() {
+		qualified := p.qualified(key)
+		if !p.v.IsSet(qualified) {
+			p.v.SetDefault(qualified, tmp.Get(key))
+		}
+	}
+	return nil
+}
+
 // Compile-time check that pluginView satisfies the contract.
 var _ apiconfig.PluginConfig = pluginView{}
 
@@ -65,5 +89,7 @@ func (nopConfig) GetDuration(string) time.Duration    { return 0 }
 func (nopConfig) GetStringSlice(string) []string      { return nil }
 func (nopConfig) IsSet(string) bool                   { return false }
 func (nopConfig) SetDefault(string, any)              {}
+func (nopConfig) BindEnv(string, ...string)           {}
+func (nopConfig) MergeFile(string) error              { return nil }
 
 var _ apiconfig.PluginConfig = nopConfig{}

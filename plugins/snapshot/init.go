@@ -26,6 +26,7 @@ func (provider) Name() string { return "snapshot" }
 
 func (p *provider) Build(cfg apiconfig.PluginConfig, _ apipersistence.CacheStore) (*apipersistence.Backend, error) {
 	cfg.SetDefault(keyFile, defaultFile)
+	cfg.BindEnv(keyFile, "GOCACHE_SNAPSHOT_FILE")
 	file := cfg.GetString(keyFile)
 	if file == "" {
 		return nil, fmt.Errorf("snapshot: %q is required", keyFile)

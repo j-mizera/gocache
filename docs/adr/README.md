@@ -47,6 +47,7 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0015](0015-mset-allocation-reduction.md) | MSET allocation reduction | accepted | 2026-05-19 |
 | [0016](0016-aof-wire-and-file-format.md) | AOF wire and file format | accepted | 2026-05-21 |
 | [0017](0017-mutation-replay-execution-path.md) | Mutation replay execution path | accepted | 2026-05-21 |
+| [0018](0018-plugin-config-autonomy.md) | Plugin config autonomy (BindEnv + MergeFile) | proposed | 2026-05-24 |
 
 ## Writing a new ADR
 

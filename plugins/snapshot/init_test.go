@@ -6,80 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
-
 	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
 )
-
-// mapConfig is the test stand-in for apiconfig.PluginConfig. It keeps
-// values in a plain map so tests can construct a config view with
-// canned values and pass it directly to Build / OnConfigReload — no
-// global state, no swap-and-restore on a process-wide handle.
-type mapConfig struct {
-	values   map[string]any
-	defaults map[string]any
-}
-
-func newMapConfig() *mapConfig {
-	return &mapConfig{values: map[string]any{}, defaults: map[string]any{}}
-}
-
-func (m *mapConfig) lookup(key string) any {
-	if v, ok := m.values[key]; ok {
-		return v
-	}
-	if v, ok := m.defaults[key]; ok {
-		return v
-	}
-	return nil
-}
-
-func (m *mapConfig) GetString(key string) string {
-	if v, ok := m.lookup(key).(string); ok {
-		return v
-	}
-	return ""
-}
-func (m *mapConfig) GetInt(key string) int {
-	if v, ok := m.lookup(key).(int); ok {
-		return v
-	}
-	return 0
-}
-func (m *mapConfig) GetInt64(key string) int64 {
-	if v, ok := m.lookup(key).(int64); ok {
-		return v
-	}
-	return 0
-}
-func (m *mapConfig) GetBool(key string) bool {
-	if v, ok := m.lookup(key).(bool); ok {
-		return v
-	}
-	return false
-}
-func (m *mapConfig) GetDuration(key string) time.Duration {
-	if v, ok := m.lookup(key).(time.Duration); ok {
-		return v
-	}
-	return 0
-}
-func (m *mapConfig) GetStringSlice(key string) []string {
-	if v, ok := m.lookup(key).([]string); ok {
-		return v
-	}
-	return nil
-}
-func (m *mapConfig) IsSet(key string) bool {
-	_, ok := m.values[key]
-	return ok
-}
-func (m *mapConfig) SetDefault(key string, value any) {
-	m.defaults[key] = value
-}
-
-var _ apiconfig.PluginConfig = (*mapConfig)(nil)
 
 // TestProvider_Build_ReadsScopedKey verifies the plugin pulls its
 // filename from the scoped "file" key (no full path).
@@ -87,8 +16,8 @@ func TestProvider_Build_ReadsScopedKey(t *testing.T) {
 	dir := t.TempDir()
 	wantFile := filepath.Join(dir, "configured.snap")
 
-	cfg := newMapConfig()
-	cfg.values[keyFile] = wantFile
+	cfg := apiconfig.NewMapConfig()
+	cfg.Values[keyFile] = wantFile
 
 	p := &provider{}
 	backend, err := p.Build(cfg, nil)
@@ -110,7 +39,7 @@ func TestProvider_Build_ReadsScopedKey(t *testing.T) {
 // TestProvider_Build_AppliesDefault verifies the plugin's SetDefault
 // call provides a fallback when the operator hasn't set "file".
 func TestProvider_Build_AppliesDefault(t *testing.T) {
-	cfg := newMapConfig()
+	cfg := apiconfig.NewMapConfig()
 
 	p := &provider{}
 	if _, err := p.Build(cfg, nil); err != nil {
@@ -125,8 +54,8 @@ func TestProvider_Build_AppliesDefault(t *testing.T) {
 // TestProvider_Build_RequiredKeyEmpty verifies that an empty filename
 // (e.g. operator explicitly set the key to "") surfaces as an error.
 func TestProvider_Build_RequiredKeyEmpty(t *testing.T) {
-	cfg := newMapConfig()
-	cfg.values[keyFile] = "" // explicit empty wins over the SetDefault inside Build
+	cfg := apiconfig.NewMapConfig()
+	cfg.Values[keyFile] = "" // explicit empty wins over the SetDefault inside Build
 
 	p := &provider{}
 	_, err := p.Build(cfg, nil)
@@ -143,8 +72,8 @@ func TestProvider_OnConfigReload(t *testing.T) {
 	first := filepath.Join(dir, "first.snap")
 	second := filepath.Join(dir, "second.snap")
 
-	cfgInitial := newMapConfig()
-	cfgInitial.values[keyFile] = first
+	cfgInitial := apiconfig.NewMapConfig()
+	cfgInitial.Values[keyFile] = first
 
 	p := &provider{}
 	backend, err := p.Build(cfgInitial, nil)
@@ -160,8 +89,8 @@ func TestProvider_OnConfigReload(t *testing.T) {
 		t.Errorf("first snapshot missing: %v", err)
 	}
 
-	cfgReloaded := newMapConfig()
-	cfgReloaded.values[keyFile] = second
+	cfgReloaded := apiconfig.NewMapConfig()
+	cfgReloaded.Values[keyFile] = second
 	p.OnConfigReload(cfgReloaded)
 
 	if err := snap.SaveSnapshot(context.Background(), emptySrc{}); err != nil {
