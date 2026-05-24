@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
@@ -27,17 +26,6 @@ func (f *fakeProvider) Build(_ apiconfig.PluginConfig, _ apipersistence.CacheSto
 		Snapshotter: &fakeSnap{},
 	}, nil
 }
-
-type noopConfig struct{}
-
-func (noopConfig) GetString(string) string          { return "" }
-func (noopConfig) GetInt(string) int                { return 0 }
-func (noopConfig) GetInt64(string) int64            { return 0 }
-func (noopConfig) GetBool(string) bool              { return false }
-func (noopConfig) GetDuration(string) time.Duration { return 0 }
-func (noopConfig) GetStringSlice(string) []string   { return nil }
-func (noopConfig) IsSet(string) bool                { return false }
-func (noopConfig) SetDefault(string, any)           {}
 
 type fakeSource struct{}
 
@@ -76,7 +64,7 @@ func TestRegistry_Register_RoundTrip(t *testing.T) {
 		t.Errorf("name = %q, want test-provider", got.Name())
 	}
 
-	backend, err := got.Build(noopConfig{}, nil)
+	backend, err := got.Build(apiconfig.NewMapConfig(), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

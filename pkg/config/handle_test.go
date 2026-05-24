@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -163,6 +165,115 @@ func TestOnPluginReload_NopWhenHandleUnset(t *testing.T) {
 
 	if _, ok := observed.(nopConfig); !ok {
 		t.Errorf("expected nopConfig when handle unset, got %T", observed)
+	}
+}
+
+func TestPluginBindEnv(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	t.Setenv("GOCACHE_AOF_FILE", "from-env.aof")
+
+	v := viper.New()
+	installHandle(v)
+
+	cfg := PluginConfigFor("aof")
+	cfg.BindEnv("file", "GOCACHE_AOF_FILE")
+
+	if got := cfg.GetString("file"); got != "from-env.aof" {
+		t.Errorf("BindEnv: got %q, want %q", got, "from-env.aof")
+	}
+}
+
+func TestPluginBindEnv_OverridesDefault(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	t.Setenv("GOCACHE_AOF_FILE", "env-wins.aof")
+
+	v := viper.New()
+	installHandle(v)
+
+	cfg := PluginConfigFor("aof")
+	cfg.SetDefault("file", "default.aof")
+	cfg.BindEnv("file", "GOCACHE_AOF_FILE")
+
+	if got := cfg.GetString("file"); got != "env-wins.aof" {
+		t.Errorf("env should override default: got %q", got)
+	}
+}
+
+func TestPluginMergeFile(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	dir := t.TempDir()
+	pluginFile := filepath.Join(dir, "aof.yaml")
+	os.WriteFile(pluginFile, []byte("file: merged.aof\nfsync: always\n"), 0644)
+
+	v := viper.New()
+	installHandle(v)
+
+	cfg := PluginConfigFor("aof")
+	if err := cfg.MergeFile(pluginFile); err != nil {
+		t.Fatalf("MergeFile: %v", err)
+	}
+	if got := cfg.GetString("file"); got != "merged.aof" {
+		t.Errorf("merged key: got %q, want %q", got, "merged.aof")
+	}
+	if got := cfg.GetString("fsync"); got != "always" {
+		t.Errorf("merged key: got %q, want %q", got, "always")
+	}
+}
+
+func TestPluginMergeFile_ServerConfigWins(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	dir := t.TempDir()
+	pluginFile := filepath.Join(dir, "aof.yaml")
+	os.WriteFile(pluginFile, []byte("file: from-plugin.aof\n"), 0644)
+
+	v := viper.New()
+	v.Set("plugins.config.aof.file", "from-server.aof")
+	installHandle(v)
+
+	cfg := PluginConfigFor("aof")
+	if err := cfg.MergeFile(pluginFile); err != nil {
+		t.Fatalf("MergeFile: %v", err)
+	}
+	if got := cfg.GetString("file"); got != "from-server.aof" {
+		t.Errorf("server config should win: got %q, want %q", got, "from-server.aof")
+	}
+}
+
+func TestPluginMergeFile_MissingFile(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	v := viper.New()
+	installHandle(v)
+
+	cfg := PluginConfigFor("aof")
+	if err := cfg.MergeFile("/nonexistent/path/aof.yaml"); err != nil {
+		t.Errorf("missing file should not error: %v", err)
+	}
+}
+
+func TestPluginMergeFile_InvalidFile(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	dir := t.TempDir()
+	pluginFile := filepath.Join(dir, "bad.yaml")
+	os.WriteFile(pluginFile, []byte(":\n  :\n    - :\n  bad: [unmatched"), 0644)
+
+	v := viper.New()
+	installHandle(v)
+
+	cfg := PluginConfigFor("aof")
+	if err := cfg.MergeFile(pluginFile); err == nil {
+		t.Error("expected error for invalid YAML, got nil")
 	}
 }
 

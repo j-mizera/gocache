@@ -9,13 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
 )
-
-var _ apiconfig.PluginConfig = (*mapConfig)(nil)
 
 func TestSinkAndSource_RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.aof")
@@ -141,8 +138,8 @@ func TestProvider_Build(t *testing.T) {
 	t.Cleanup(apipersistence.ResetProvidersForTest)
 
 	p := &provider{}
-	cfg := newMapConfig()
-	cfg.values[keyFile] = filepath.Join(t.TempDir(), "test.aof")
+	cfg := apiconfig.NewMapConfig()
+	cfg.Values[keyFile] = filepath.Join(t.TempDir(), "test.aof")
 
 	backend, err := p.Build(cfg, nil)
 	if err != nil {
@@ -172,7 +169,7 @@ func TestProvider_Build_AppliesDefaults(t *testing.T) {
 	apipersistence.ResetProvidersForTest()
 	t.Cleanup(apipersistence.ResetProvidersForTest)
 
-	cfg := newMapConfig()
+	cfg := apiconfig.NewMapConfig()
 	p := &provider{}
 	backend, err := p.Build(cfg, nil)
 	if err != nil {
@@ -190,8 +187,8 @@ func TestProvider_Build_AppliesDefaults(t *testing.T) {
 }
 
 func TestProvider_Build_EmptyFile_Errors(t *testing.T) {
-	cfg := newMapConfig()
-	cfg.values[keyFile] = ""
+	cfg := apiconfig.NewMapConfig()
+	cfg.Values[keyFile] = ""
 
 	p := &provider{}
 	_, err := p.Build(cfg, nil)
@@ -202,9 +199,9 @@ func TestProvider_Build_EmptyFile_Errors(t *testing.T) {
 
 func TestProvider_OnConfigReload(t *testing.T) {
 	dir := t.TempDir()
-	cfg := newMapConfig()
-	cfg.values[keyFile] = filepath.Join(dir, "test.aof")
-	cfg.values[keyFsync] = "no"
+	cfg := apiconfig.NewMapConfig()
+	cfg.Values[keyFile] = filepath.Join(dir, "test.aof")
+	cfg.Values[keyFsync] = "no"
 
 	p := &provider{}
 	backend, err := p.Build(cfg, nil)
@@ -218,8 +215,8 @@ func TestProvider_OnConfigReload(t *testing.T) {
 		t.Fatalf("initial policy = %v, want FsyncNo", sink.FsyncPolicy())
 	}
 
-	reloadCfg := newMapConfig()
-	reloadCfg.values[keyFsync] = "always"
+	reloadCfg := apiconfig.NewMapConfig()
+	reloadCfg.Values[keyFsync] = "always"
 	p.OnConfigReload(reloadCfg)
 
 	if sink.FsyncPolicy() != apipersistence.FsyncAlways {
@@ -466,9 +463,9 @@ func TestBGREWRITEAOF_ConcurrentRejection(t *testing.T) {
 	t.Cleanup(apipersistence.ResetProvidersForTest)
 
 	dir := t.TempDir()
-	cfg := newMapConfig()
-	cfg.values[keyFile] = filepath.Join(dir, "test.aof")
-	cfg.values[keyFsync] = "no"
+	cfg := apiconfig.NewMapConfig()
+	cfg.Values[keyFile] = filepath.Join(dir, "test.aof")
+	cfg.Values[keyFsync] = "no"
 
 	store := &fakeStore{
 		entries: []apipersistence.SnapshotEntry{
@@ -508,39 +505,6 @@ func TestBGREWRITEAOF_ConcurrentRejection(t *testing.T) {
 }
 
 // --- test helpers ---
-
-type mapConfig struct {
-	values   map[string]any
-	defaults map[string]any
-}
-
-func newMapConfig() *mapConfig {
-	return &mapConfig{values: map[string]any{}, defaults: map[string]any{}}
-}
-
-func (m *mapConfig) lookup(key string) any {
-	if v, ok := m.values[key]; ok {
-		return v
-	}
-	if v, ok := m.defaults[key]; ok {
-		return v
-	}
-	return nil
-}
-
-func (m *mapConfig) GetString(key string) string {
-	if v, ok := m.lookup(key).(string); ok {
-		return v
-	}
-	return ""
-}
-func (m *mapConfig) GetInt(string) int                     { return 0 }
-func (m *mapConfig) GetInt64(string) int64                 { return 0 }
-func (m *mapConfig) GetBool(string) bool                   { return false }
-func (m *mapConfig) GetDuration(string) time.Duration      { return 0 }
-func (m *mapConfig) GetStringSlice(string) []string        { return nil }
-func (m *mapConfig) IsSet(key string) bool                 { _, ok := m.values[key]; return ok }
-func (m *mapConfig) SetDefault(key string, value any)      { m.defaults[key] = value }
 
 type fakeStore struct {
 	entries []apipersistence.SnapshotEntry
