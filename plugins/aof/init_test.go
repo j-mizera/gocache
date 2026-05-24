@@ -335,7 +335,7 @@ func TestRewrite_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := Rewrite(context.Background(), store, sink); err != nil {
+	if err := Rewrite(context.Background(), store, sink, aofPath); err != nil {
 		t.Fatalf("Rewrite: %v", err)
 	}
 	sink.Close(context.Background())
