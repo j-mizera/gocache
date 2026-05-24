@@ -13,7 +13,6 @@ import (
 
 	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
-	"gocache/pkg/cache"
 )
 
 var _ apiconfig.PluginConfig = (*mapConfig)(nil)
@@ -410,7 +409,7 @@ func TestIntegration_WriteBootReplayVerify(t *testing.T) {
 		t.Fatalf("mode = %v, want Replay", boot.Mode)
 	}
 
-	c := cache.New()
+	store := apipersistence.NewMemoryStore()
 	count := 0
 	for {
 		m, err := boot.Replay.Next(ctx)
@@ -420,7 +419,7 @@ func TestIntegration_WriteBootReplayVerify(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Next: %v", err)
 		}
-		if err := c.ApplyMutation(ctx, m); err != nil {
+		if err := store.ApplyMutation(ctx, m); err != nil {
 			t.Fatalf("ApplyMutation(%s): %v", m.Op, err)
 		}
 		count++
@@ -431,33 +430,33 @@ func TestIntegration_WriteBootReplayVerify(t *testing.T) {
 		t.Errorf("replayed %d mutations, want %d", count, len(mutations))
 	}
 
-	e, ok := c.RawGet("k1")
+	got, ok := store.GetString("k1")
 	if !ok {
 		t.Fatal("k1 not found after replay")
 	}
-	if got := string(c.ResolvePacked(e)); got != "updated" {
+	if got != "updated" {
 		t.Errorf("k1 = %q, want %q", got, "updated")
 	}
 
-	e, ok = c.RawGet("h1")
+	hv, ok := store.Get("h1")
 	if !ok {
 		t.Fatal("h1 not found after replay")
 	}
-	h := e.Value.(map[string]string)
+	h := hv.(map[string]string)
 	if h["f1"] != "v1" || h["f2"] != "v2" {
 		t.Errorf("h1 = %v, want {f1:v1, f2:v2}", h)
 	}
 
-	e, ok = c.RawGet("s1")
+	sv, ok := store.Get("s1")
 	if !ok {
 		t.Fatal("s1 not found after replay")
 	}
-	s := e.Value.(map[string]struct{})
+	s := sv.(map[string]struct{})
 	if len(s) != 2 {
 		t.Errorf("s1 len = %d, want 2", len(s))
 	}
 
-	if _, ok := c.RawGet("k2"); ok {
+	if _, ok := store.Get("k2"); ok {
 		t.Error("k2 should not exist (DEL'd a non-existent key)")
 	}
 }
