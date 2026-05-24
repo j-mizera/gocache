@@ -13,6 +13,7 @@ import (
 
 	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
+	"gocache/pkg/cache"
 )
 
 var _ apiconfig.PluginConfig = (*mapConfig)(nil)
@@ -376,6 +377,135 @@ func TestRewrite_RoundTrip(t *testing.T) {
 			t.Errorf("key %q: op = %q, want %q", key, ops[key], wantOp)
 		}
 	}
+}
+
+func TestIntegration_WriteBootReplayVerify(t *testing.T) {
+	dir := t.TempDir()
+	aofPath := filepath.Join(dir, "integration.aof")
+	ctx := context.Background()
+
+	mutations := []apipersistence.Mutation{
+		{LSN: 1, Op: "SET", Key: "k1", Args: [][]byte{[]byte("k1"), []byte("hello")}},
+		{LSN: 2, Op: "HSET", Key: "h1", Args: [][]byte{[]byte("h1"), []byte("f1"), []byte("v1"), []byte("f2"), []byte("v2")}},
+		{LSN: 3, Op: "SADD", Key: "s1", Args: [][]byte{[]byte("s1"), []byte("a"), []byte("b")}},
+		{LSN: 4, Op: "SET", Key: "k1", Args: [][]byte{[]byte("k1"), []byte("updated")}},
+		{LSN: 5, Op: "DEL", Key: "k2", Args: [][]byte{[]byte("k2")}},
+	}
+
+	sink, err := NewSink(aofPath, apipersistence.FsyncAlways)
+	if err != nil {
+		t.Fatalf("NewSink: %v", err)
+	}
+	if err := sink.Apply(ctx, mutations); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	sink.Close(ctx)
+
+	src := NewSource(aofPath)
+	boot, err := src.Boot(ctx)
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+	if boot.Mode != apipersistence.BootModeReplay {
+		t.Fatalf("mode = %v, want Replay", boot.Mode)
+	}
+
+	c := cache.New()
+	count := 0
+	for {
+		m, err := boot.Replay.Next(ctx)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if err := c.ApplyMutation(ctx, m); err != nil {
+			t.Fatalf("ApplyMutation(%s): %v", m.Op, err)
+		}
+		count++
+	}
+	boot.Replay.Close()
+
+	if count != len(mutations) {
+		t.Errorf("replayed %d mutations, want %d", count, len(mutations))
+	}
+
+	e, ok := c.RawGet("k1")
+	if !ok {
+		t.Fatal("k1 not found after replay")
+	}
+	if got := string(c.ResolvePacked(e)); got != "updated" {
+		t.Errorf("k1 = %q, want %q", got, "updated")
+	}
+
+	e, ok = c.RawGet("h1")
+	if !ok {
+		t.Fatal("h1 not found after replay")
+	}
+	h := e.Value.(map[string]string)
+	if h["f1"] != "v1" || h["f2"] != "v2" {
+		t.Errorf("h1 = %v, want {f1:v1, f2:v2}", h)
+	}
+
+	e, ok = c.RawGet("s1")
+	if !ok {
+		t.Fatal("s1 not found after replay")
+	}
+	s := e.Value.(map[string]struct{})
+	if len(s) != 2 {
+		t.Errorf("s1 len = %d, want 2", len(s))
+	}
+
+	if _, ok := c.RawGet("k2"); ok {
+		t.Error("k2 should not exist (DEL'd a non-existent key)")
+	}
+}
+
+func TestBGREWRITEAOF_ConcurrentRejection(t *testing.T) {
+	apipersistence.ResetProvidersForTest()
+	t.Cleanup(apipersistence.ResetProvidersForTest)
+
+	dir := t.TempDir()
+	cfg := newMapConfig()
+	cfg.values[keyFile] = filepath.Join(dir, "test.aof")
+	cfg.values[keyFsync] = "no"
+
+	store := &fakeStore{
+		entries: []apipersistence.SnapshotEntry{
+			{Key: "k1", Value: []byte("v1"), ValueType: apipersistence.ValueTypeBytes},
+		},
+	}
+
+	p := &provider{}
+	backend, err := p.Build(cfg, store)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	t.Cleanup(func() { backend.Sink.Close(context.Background()) })
+
+	cmds := backend.Commands(nil)
+	if len(cmds) == 0 {
+		t.Fatal("no commands returned")
+	}
+
+	rewriteCmd := cmds[0]
+
+	p.rewriting.Lock()
+
+	result, err := rewriteCmd.Fn(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msg, ok := result.(string)
+	if !ok {
+		t.Fatalf("result type = %T, want string", result)
+	}
+	if msg != "Background append only file rewriting already in progress" {
+		t.Errorf("got %q, want rejection message", msg)
+	}
+
+	p.rewriting.Unlock()
 }
 
 // --- test helpers ---
