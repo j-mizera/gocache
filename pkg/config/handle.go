@@ -20,6 +20,7 @@ var serverConfig atomic.Pointer[viper.Viper]
 // once viper is fully wired (defaults + flags + env + file + watch).
 func installHandle(v *viper.Viper) {
 	serverConfig.Store(v)
+	apiconfig.SetPluginConfigProvider(PluginConfigFor)
 }
 
 // PluginConfigFor returns a typed read-only view of the named plugin's

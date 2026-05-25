@@ -61,13 +61,12 @@ Plugin declares a Go struct with `yaml:"..."` tags. Server decodes the plugin's 
 - **Cons**: Rejected by ADR-0008 — the server would need to know the plugin's struct type at compile time, or use reflection to decode into an `any`. Either approach couples the server to plugin internals. The interface-based approach keeps the server generic.
 - **Why not**: Violates plugin isolation. The server must remain ignorant of plugin-specific types.
 
-### Alternative 3: Unify lifecycle plugins onto PluginConfig
+### Alternative 3: Fully defer lifecycle plugin config to ConfigLoaded
 
-Make otlp/crashdump use `PluginConfig` instead of `os.Getenv()`.
+Originally considered impossible because `BootInit` runs before `config.Load()`. Revisited: crashdump's `BootInit` only stores config — all work happens in `ConfigLoaded`. So config reading can move entirely to `ConfigLoaded` using `PluginConfigFor`. OTLP's `BootInit` genuinely creates the exporter (timing constraint is real), so it keeps env-var bootstrap with `PluginConfig` registration in `ConfigLoaded` for consistency.
 
-- **Pros**: One config system for all plugins.
-- **Cons**: `BootInit` runs before `config.Load()` — `PluginConfig` is not available yet. Would require either reordering boot (breaking OTLP's t=0 span coverage) or a two-phase init (complexity for no gain).
-- **Why not**: The timing constraint is real and justified. Document it; don't fight it.
+- **Adopted for crashdump**: full migration to PluginConfig in ConfigLoaded.
+- **Adopted for OTLP**: BootInit keeps `applyEnv()`; ConfigLoaded registers BindEnv + SetDefault so the config schema is documented and YAML-discoverable.
 
 ## Consequences
 
@@ -76,10 +75,13 @@ Make otlp/crashdump use `PluginConfig` instead of `os.Getenv()`.
 - Operators use ergonomic env var names: `GOCACHE_AOF_FILE` instead of `GOCACHE_PLUGINS_CONFIG_AOF_FILE`.
 - Plugins can ship their own config file as a self-contained default.
 - Test helper consolidation eliminates ~80 lines of duplicated `mapConfig` implementations.
+- Embedded plugins (crashdump, OTLP) use the same config pattern as persistence plugins — `SetDefault` + `BindEnv` + `Get*` via `PluginConfigFor`.
+- `api/config.PluginConfigFor` gives all plugins a single entry point to their scoped config, regardless of plugin type.
 
 ### Negative
 
 - `PluginConfig` interface grows by two methods. Every implementation (pluginView, nopConfig, test helpers) must add them.
+- `api/config` gains mutable package-level state (`pluginConfigProvider`). Acceptable: set once by `pkg/config` during load, read-only thereafter.
 
 ### Risks
 

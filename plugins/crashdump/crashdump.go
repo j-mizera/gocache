@@ -15,8 +15,6 @@ package crashdump
 
 import (
 	"context"
-	"os"
-	"strconv"
 
 	"gocache/api/config"
 	"gocache/api/crashdump"
@@ -24,9 +22,10 @@ import (
 	"gocache/api/logger"
 )
 
-// Env var overrides. Evaluated in BootInit so they take effect even when
-// config.Load hasn't run yet.
 const (
+	keyDir      = "dir"
+	keyDisabled = "disabled"
+
 	envDir      = "GOCACHE_CRASHDUMP_DIR"
 	envDisabled = "GOCACHE_CRASHDUMP_DISABLED"
 	defaultDir  = crashdump.DefaultCrashdumpDir
@@ -43,24 +42,18 @@ func init() {
 
 func (p *plugin) Name() string { return "crashdump" }
 
-func (p *plugin) BootInit(_ context.Context) error {
-	if v := os.Getenv(envDir); v != "" {
-		p.dir = v
-	}
-	if v := os.Getenv(envDisabled); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			p.disabled = parsed
-		}
-	}
-	return nil
-}
+func (p *plugin) BootInit(_ context.Context) error { return nil }
 
-// ConfigLoaded is where scan-and-report runs. We wait for the proper
-// logger to be initialized (with the configured level + writer) so the
-// WARN lines flow through the log collector into the event bus and then
-// out to observability plugins. Scanning in BootInit would predate that
-// wiring and the entries would only hit stderr.
 func (p *plugin) ConfigLoaded(ctx context.Context, _ *config.Config) error {
+	cfg := config.PluginConfigFor("crashdump")
+	cfg.SetDefault(keyDir, defaultDir)
+	cfg.SetDefault(keyDisabled, false)
+	cfg.BindEnv(keyDir, envDir)
+	cfg.BindEnv(keyDisabled, envDisabled)
+
+	p.dir = cfg.GetString(keyDir)
+	p.disabled = cfg.GetBool(keyDisabled)
+
 	if p.disabled {
 		return nil
 	}

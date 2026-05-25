@@ -168,6 +168,20 @@ func TestOnPluginReload_NopWhenHandleUnset(t *testing.T) {
 	}
 }
 
+func TestAPIPluginConfigFor_DelegatesToPkgConfig(t *testing.T) {
+	prev := serverConfig.Load()
+	t.Cleanup(func() { serverConfig.Store(prev) })
+
+	v := viper.New()
+	v.Set("plugins.config.myplugin.key", "value-from-server")
+	installHandle(v)
+
+	cfg := apiconfig.PluginConfigFor("myplugin")
+	if got := cfg.GetString("key"); got != "value-from-server" {
+		t.Errorf("api-level PluginConfigFor: got %q, want %q", got, "value-from-server")
+	}
+}
+
 func TestPluginBindEnv(t *testing.T) {
 	prev := serverConfig.Load()
 	t.Cleanup(func() { serverConfig.Store(prev) })
