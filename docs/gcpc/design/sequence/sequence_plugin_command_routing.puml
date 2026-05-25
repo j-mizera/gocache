@@ -28,12 +28,13 @@ actor "Redis Client" as Client
     Router -> Router : Validate arg count\nmin=2, max=2 -> OK
 
     Router -> Router : requestID = "req-42"
-    Router -> PC : Send(CommandRequestV1{\n  command: "PUBLISH",\n  args: ["mychan", "hello"],\n  request_id: "req-42",\n  metadata: {traceparent: "...", tenant: "..."}\n})
+    Router -> Router : opCtx = op.FilteredContext("pubsub")
+    Router -> PC : Send(CommandRequestV1{\n  command: "PUBLISH",\n  args: ["mychan", "hello"],\n  request_id: "req-42",\n  metadata: {traceparent: "...", tenant: "..."},\n  context: {_operation_id: "op-7", shared.*: ...}\n})
 
     PC -> Plugin : EnvelopeV1 over Unix socket
     activate Plugin
 
-    Plugin -> Plugin : HandleCommand(ctx, "PUBLISH", args, metadata)\n(goroutine)
+    Plugin -> Plugin : Reconstruct operation from context map\nHandleCommand(ctx+op, "PUBLISH", args, metadata)\n(goroutine)
 
     Plugin --> PC : CommandResponseV1{\n  request_id: "req-42",\n  result: Integer(2)\n}
     deactivate Plugin

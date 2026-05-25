@@ -11,6 +11,7 @@ participant "OS Signal" as Signal
     participant "Background\nWorkers" as Workers
 
     Signal -> Server : SIGTERM / SIGINT
+    Server -> Server : shutdownOp = ops.New(TypeShutdown)
 
     == Step 1: Stop New Connections ==
 
@@ -19,7 +20,7 @@ participant "OS Signal" as Signal
     == Step 2: Plugin Shutdown ==
 
     Server -> PluginMgr : Initiate plugin shutdown
-    PluginMgr -> Plugin : SHUTDOWN (timeout=5s)
+    PluginMgr -> Plugin : SHUTDOWN (timeout=5s)\ncontext carries shutdownOp
     activate Plugin
     Plugin -> Plugin : Stop workers
     Plugin --> PluginMgr : SHUTDOWN_ACK

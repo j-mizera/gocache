@@ -20,25 +20,28 @@ note right of M
   embedded.ShutdownAll.
 end note
 
-M -> ER : BootAll(ctx)
+M -> M : embBootOp = ops.New(TypeStartup)\nenrich("_boot_stage", "embedded_boot")
+M -> ER : BootAll(ctx + embBootOp)
 activate ER
-ER -> ER : for each registered:\n  invoke(BootInit)\n  Strict panic → Fatal\n  Default panic → log + continue
+ER -> ER : for each registered:\n  invoke() creates per-plugin child op\n  (plugin name + phase in op context)\n  Strict panic → Fatal\n  Default panic → log + continue
 ER --> M
 deactivate ER
-M -> M : defer { embedded.ShutdownAll }
+M -> M : embBootOp.Complete()
+M -> M : defer { embShutOp = ops.New(TypeShutdown)\n  embedded.ShutdownAll(ctx + embShutOp)\n  embShutOp.Complete() }
 
 M -> BS : Write(stage=config_load)
 M -> C : Load(flags)
 alt Config parse OK
   C --> M : cfg
-  M -> ER : ConfigLoadedAll(ctx, cfg)
+  M -> M : cfgOp = ops.New(TypeConfigReload)\n  enrich("_boot_stage", "config_loaded")
+  M -> ER : ConfigLoadedAll(ctx + cfgOp, cfg)
   note right of ER
-    Crashdump embedded plugin scans
-    <dir>/crashes/ here (logger ready)
-    and emits events.
-    OTLP embedded plugin upgrades
-    endpoint from env to YAML.
+    Each plugin gets a child operation
+    with _plugin and _phase enrichment.
+    Crashdump scans <dir>/crashes/ here.
+    OTLP upgrades endpoint from env to YAML.
   end note
+  M -> M : cfgOp.Complete()
 else Panic during Load
   C ->> M : panic
   M -> M : deferred recover

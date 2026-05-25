@@ -14,8 +14,13 @@ participant "Metrics Plugin\n(non-critical, pri=100)" as Metrics
 Eval -> Eval : ctx = command.NewHookCtx()
 note right : ctx = {}
 
-Eval -> Eval : ctx["_start_ns"] = "1712700000000000000"
-note right : ctx = {\n  _start_ns: "171..."\n}
+Eval -> Eval : op = tracker.Start(TypeCommand)\nctx["_operation_id"] = op.ID\nctx["_start_ns"] = "1712700000000000000"
+note right : ctx = {\n  _operation_id: "op-42",\n  _start_ns: "171..."\n}
+
+== Operation Hooks (Phase 1 — before command hooks) ==
+
+Exec -> Exec : OpHook executor fires\nstart hooks synchronously
+note right : Operation hooks enrich\nop context (e.g. traceparent)\nbefore command hooks see it
 
 == Pre-Hook: Auth (priority 1) ==
 

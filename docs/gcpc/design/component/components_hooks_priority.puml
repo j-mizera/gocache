@@ -4,8 +4,10 @@
 frame "Plugin Hook & Priority System" as F {
 
     rectangle "Hook System" as hook_sys {
+        component [OpHook Registry] as ophook_reg <<Type Match>>
+        component [OpHook Executor] as ophook_exec <<Phase 1: Operation Hooks>>
         component [Hook Registry] as hook_reg <<Pattern Match>>
-        component [Hook Executor] as hook_exec <<Sync/Async Dispatch>>
+        component [Hook Executor] as hook_exec <<Phase 2: Command Hooks>>
         component [PluginConn\n(multiplexed)] as pconn <<IPC>>
     }
 
@@ -16,6 +18,8 @@ frame "Plugin Hook & Priority System" as F {
     }
 
     ' -- Executor flow --
+    ophook_exec --> ophook_reg : MatchByType\n(returns priority-sorted)
+    ophook_exec --> pconn : OperationHookRequestV1
     hook_exec --> hook_reg : MatchPre / MatchPost\n(returns priority-sorted)
     hook_exec --> pconn : HookRequestV1
 
@@ -24,13 +28,19 @@ frame "Plugin Hook & Priority System" as F {
     pconn --> aof : Priority 5 (second)
     pconn --> audit : Priority 10 (last)
 
+    note bottom of ophook_exec
+      **Phase 1 — Operation hooks**:
+      Fired synchronously on op.Start/Complete.
+      Plugins enrich op context (e.g. traceparent).
+      Runs BEFORE command hooks.
+    end note
+
     note bottom of hook_exec
-      **Critical hooks**: blocking, sequential by priority.
+      **Phase 2 — Command hooks**:
+      **Critical**: blocking, sequential by priority.
       Server waits for HookResponseV1.
       Pre-hook can deny (abort command).
-
-      **Non-critical hooks**: fire-and-forget.
-      SendFireAndForget() — no wait.
+      **Non-critical**: fire-and-forget.
     end note
 }
 
