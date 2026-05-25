@@ -11,6 +11,7 @@ import (
 	apicommand "gocache/api/command"
 	apiconfig "gocache/api/config"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
 )
 
@@ -73,15 +74,19 @@ func (p *provider) commands(store apipersistence.CacheStore) []apipersistence.Co
 	return []apipersistence.Command{
 		{
 			Name: "BGREWRITEAOF",
-			Fn: func(_ context.Context, _ []string) (any, error) {
+			Fn: func(ctx context.Context, _ []string) (any, error) {
 				if !p.rewriting.TryLock() {
 					return "Background append only file rewriting already in progress", nil
+				}
+				bgCtx := context.Background()
+				if op := ops.FromContext(ctx); op != nil {
+					bgCtx = ops.WithContext(bgCtx, op)
 				}
 				aofPath := sink.FilePath()
 				go func() {
 					defer p.rewriting.Unlock()
-					if err := Rewrite(context.Background(), store, sink, aofPath); err != nil {
-						logger.ErrorNoCtx().Err(err).Msg("BGREWRITEAOF failed")
+					if err := Rewrite(bgCtx, store, sink, aofPath); err != nil {
+						logger.Error(bgCtx).Err(err).Msg("BGREWRITEAOF failed")
 					}
 				}()
 				return "Background append only file rewriting started", nil

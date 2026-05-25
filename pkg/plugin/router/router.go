@@ -10,6 +10,7 @@ import (
 
 	gcpc "gocache/api/gcpc/v1"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 	"gocache/api/transport"
 )
 
@@ -322,7 +323,11 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 	}
 
 	requestID := NextRequestID()
-	env := gcpc.NewCommandRequest(route.Command, args, requestID, metadata)
+	var opCtx map[string]string
+	if ctxOp := ops.FromContext(ctx); ctxOp != nil {
+		opCtx = ctxOp.FilteredContext(route.PluginName, false)
+	}
+	env := gcpc.NewCommandRequest(route.Command, args, requestID, metadata, opCtx)
 
 	respCh, err := pc.Send(ctx, env, requestID)
 	if err != nil {

@@ -56,7 +56,7 @@ func TestSession_QueryServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	data, err := session.QueryServer(ctx, "health")
+	data, err := session.QueryServer(ctx, "health", nil)
 	if err != nil {
 		t.Fatalf("QueryServer error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSession_QueryServer_Error(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := session.QueryServer(ctx, "health")
+	_, err := session.QueryServer(ctx, "health", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -123,7 +123,7 @@ func TestSession_QueryServer_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := session.QueryServer(ctx, "health")
+	_, err := session.QueryServer(ctx, "health", nil)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}

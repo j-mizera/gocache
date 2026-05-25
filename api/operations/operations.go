@@ -9,6 +9,7 @@
 package operations
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -103,6 +104,18 @@ func New(opType Type, parentID string) *Operation {
 		Status:    StatusRunning,
 		Context:   opctx.NewContext(),
 	}
+}
+
+// Begin creates a running operation parented to any operation in ctx,
+// and returns a new context carrying it. Convenience wrapper for embedded
+// plugins starting their own operations.
+func Begin(ctx context.Context, opType Type) (context.Context, *Operation) {
+	var parentID string
+	if parent := FromContext(ctx); parent != nil {
+		parentID = parent.ID
+	}
+	op := New(opType, parentID)
+	return WithContext(ctx, op), op
 }
 
 // Enrich adds a single key-value to the context. Thread-safe.

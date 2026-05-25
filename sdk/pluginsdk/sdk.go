@@ -9,8 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"gocache/api/command"
+	apiconfig "gocache/api/config"
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
+	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
 	"gocache/api/transport"
 )
@@ -85,6 +88,15 @@ type EventPlugin interface {
 	// The EventV1 proto carries strongly-typed data in a oneof field.
 	// Called concurrently — must be goroutine-safe.
 	HandleEvent(ctx context.Context, evt *gcpc.EventV1)
+}
+
+// ConfigPlugin is an optional interface for plugins that want to react
+// to server config reloads. OnConfigReload is called when the server
+// pushes a PluginConfigV1 update. The provided PluginConfig reflects
+// the latest server-side values.
+type ConfigPlugin interface {
+	Plugin
+	OnConfigReload(cfg apiconfig.PluginConfig)
 }
 
 // OperationHookPlugin extends Plugin with operation lifecycle hooks.
@@ -183,6 +195,17 @@ type HookResponse struct {
 	ContextValues map[string]string // pre-hook: values to add to command context
 }
 
+// ctxFromOpMap reconstructs a local operation from a context map containing
+// _operation_id. If no operation ID is present, returns ctx unchanged.
+func ctxFromOpMap(ctx context.Context, m map[string]string) context.Context {
+	if opID := m[command.OperationID]; opID != "" {
+		op := ops.New(ops.TypeCommand, "")
+		op.ID = opID
+		return ops.WithContext(ctx, op)
+	}
+	return ctx
+}
+
 // Run connects to the GoCache server's plugin socket, registers the plugin,
 // and enters the message loop. It blocks until shutdown or context cancellation.
 // If the plugin implements CommandPlugin, its commands are registered.
@@ -216,6 +239,7 @@ func Run(ctx context.Context, p Plugin) error {
 	qp, isQueryPlugin := p.(QueryPlugin)
 	ep, isEventPlugin := p.(EventPlugin)
 	ohp, isOperationHookPlugin := p.(OperationHookPlugin)
+	cfgp, isConfigPlugin := p.(ConfigPlugin)
 
 	// Build registration message.
 	var cmdDecls []*gcpc.CommandDeclV1
@@ -314,6 +338,9 @@ func Run(ctx context.Context, p Plugin) error {
 		}
 	}
 
+	// Build RemoteConfig from server-delivered config map.
+	remoteCfg := NewRemoteConfig(ack.Config)
+
 	// Set up session for server queries.
 	session := newSession(tc)
 	if isQueryPlugin {
@@ -345,7 +372,11 @@ func Run(ctx context.Context, p Plugin) error {
 
 		switch env.Payload.(type) {
 		case *gcpc.EnvelopeV1_HealthCheck:
-			hErr := p.OnHealthCheck(ctx)
+			hcOp := ops.New(ops.TypeCommand, "")
+			hcOp.Enrich("_type", "health_check")
+			hcCtx := ops.WithContext(ctx, hcOp)
+			hErr := p.OnHealthCheck(hcCtx)
+			hcOp.Complete()
 			ok := hErr == nil
 			status := ""
 			if hErr != nil {
@@ -358,8 +389,10 @@ func Run(ctx context.Context, p Plugin) error {
 		case *gcpc.EnvelopeV1_Shutdown:
 			sd := env.GetShutdown()
 			deadline := time.Unix(0, int64(sd.DeadlineNs))
-			sdCtx, cancel := context.WithDeadline(ctx, deadline)
+			shutOp := ops.New(ops.TypeShutdown, "")
+			sdCtx, cancel := context.WithDeadline(ops.WithContext(ctx, shutOp), deadline)
 			_ = p.OnShutdown(sdCtx)
+			shutOp.Complete()
 			cancel()
 
 			if err := tc.Send(gcpc.NewShutdownAck()); err != nil {
@@ -375,7 +408,8 @@ func Run(ctx context.Context, p Plugin) error {
 			handlerWg.Add(1)
 			go func() {
 				defer handlerWg.Done()
-				result := cp.HandleCommand(ctx, req.Command, req.Args, req.Metadata)
+				cmdCtx := ctxFromOpMap(ctx, req.Context)
+				result := cp.HandleCommand(cmdCtx, req.Command, req.Args, req.Metadata)
 				var protoResult *gcpc.ResultV1
 				if result != nil {
 					protoResult = gcpc.ResultFromInterface(result.Value)
@@ -402,10 +436,16 @@ func Run(ctx context.Context, p Plugin) error {
 				Replayed:          req.Replayed,
 				ReplayStartUnixNs: req.ReplayStartUnixNs,
 			}
+			ohCtx := ctx
+			if req.OperationId != "" {
+				ohOp := ops.New(ops.TypeCommand, "")
+				ohOp.ID = req.OperationId
+				ohCtx = ops.WithContext(ctx, ohOp)
+			}
 			switch {
 			case req.Phase == apiplugin.PhaseStart && !req.Replayed:
 				// Live start: synchronous — server is waiting for response.
-				result := ohp.HandleOperationHook(ctx, hookReq)
+				result := ohp.HandleOperationHook(ohCtx, hookReq)
 				var ctxValues map[string]string
 				if result != nil {
 					ctxValues = result.ContextValues
@@ -423,7 +463,7 @@ func Run(ctx context.Context, p Plugin) error {
 				handlerWg.Add(1)
 				go func() {
 					defer handlerWg.Done()
-					ohp.HandleOperationHook(ctx, hookReq)
+					ohp.HandleOperationHook(ohCtx, hookReq)
 				}()
 			}
 
@@ -458,7 +498,8 @@ func Run(ctx context.Context, p Plugin) error {
 					Context:     req.Context,
 					Metadata:    req.Metadata,
 				}
-				result := hp.HandleHook(ctx, hookReq)
+				hookCtx := ctxFromOpMap(ctx, req.Context)
+				result := hp.HandleHook(hookCtx, hookReq)
 				deny := false
 				denyReason := ""
 				var ctxValues map[string]string
@@ -472,6 +513,13 @@ func Run(ctx context.Context, p Plugin) error {
 					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command).Msg("failed to send hook response")
 				}
 			}()
+
+		case *gcpc.EnvelopeV1_ConfigUpdate:
+			cu := env.GetConfigUpdate()
+			remoteCfg.Replace(cu.Entries)
+			if isConfigPlugin {
+				cfgp.OnConfigReload(remoteCfg)
+			}
 		}
 	}
 }

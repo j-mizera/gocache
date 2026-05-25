@@ -7,6 +7,7 @@ import (
 	apicommand "gocache/api/command"
 	apiconfig "gocache/api/config"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
 )
 
@@ -53,10 +54,14 @@ func (p *provider) commands(api apipersistence.PersistenceAPI) []apipersistence.
 		return "OK", nil
 	}
 
-	bgsave := func(_ context.Context, _ []string) (any, error) {
+	bgsave := func(ctx context.Context, _ []string) (any, error) {
+		bgCtx := context.Background()
+		if op := ops.FromContext(ctx); op != nil {
+			bgCtx = ops.WithContext(bgCtx, op)
+		}
 		go func() {
-			if err := api.Snapshot(context.Background()); err != nil {
-				logger.ErrorNoCtx().Err(err).Msg("BGSAVE failed")
+			if err := api.Snapshot(bgCtx); err != nil {
+				logger.Error(bgCtx).Err(err).Msg("BGSAVE failed")
 			}
 		}()
 		return "Background saving started", nil

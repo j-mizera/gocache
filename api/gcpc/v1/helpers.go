@@ -30,7 +30,7 @@ func NewRegister(name, version string, critical bool, commands []*CommandDeclV1,
 	}
 }
 
-func NewRegisterAck(accepted bool, reason string, grantedScopes []string) *EnvelopeV1 {
+func NewRegisterAck(accepted bool, reason string, grantedScopes []string, cfg map[string]string) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
@@ -39,6 +39,19 @@ func NewRegisterAck(accepted bool, reason string, grantedScopes []string) *Envel
 				Accepted:      accepted,
 				Reason:        reason,
 				GrantedScopes: grantedScopes,
+				Config:        cfg,
+			},
+		},
+	}
+}
+
+func NewConfigUpdate(entries map[string]string) *EnvelopeV1 {
+	return &EnvelopeV1{
+		Version: ProtocolVersion,
+		Id:      envelopeID(),
+		Payload: &EnvelopeV1_ConfigUpdate{
+			ConfigUpdate: &PluginConfigV1{
+				Entries: entries,
 			},
 		},
 	}
@@ -125,7 +138,7 @@ func NewHookResponse(requestID string, deny bool, denyReason string, contextValu
 	}
 }
 
-func NewCommandRequest(command string, args []string, requestID string, metadata map[string]string) *EnvelopeV1 {
+func NewCommandRequest(command string, args []string, requestID string, metadata, opContext map[string]string) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
@@ -135,6 +148,7 @@ func NewCommandRequest(command string, args []string, requestID string, metadata
 				Args:      args,
 				RequestId: requestID,
 				Metadata:  metadata,
+				Context:   opContext,
 			},
 		},
 	}
@@ -153,7 +167,7 @@ func NewCommandResponse(requestID string, result *ResultV1) *EnvelopeV1 {
 	}
 }
 
-func NewServerQuery(requestID, topic string) *EnvelopeV1 {
+func NewServerQuery(requestID, topic string, params map[string]string) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
@@ -161,6 +175,7 @@ func NewServerQuery(requestID, topic string) *EnvelopeV1 {
 			ServerQuery: &ServerQueryV1{
 				RequestId: requestID,
 				Topic:     topic,
+				Params:    params,
 			},
 		},
 	}

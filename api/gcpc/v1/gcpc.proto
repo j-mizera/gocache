@@ -24,6 +24,7 @@ message EnvelopeV1 {
     EventV1               event                 = 71;
     OperationHookRequestV1  operation_hook_request  = 80;
     OperationHookResponseV1 operation_hook_response = 81;
+    PluginConfigV1          config_update           = 90;
   }
 }
 
@@ -66,6 +67,12 @@ message RegisterAckV1 {
   bool   accepted = 1;
   string reason   = 2;
   repeated string granted_scopes = 3; // scopes actually granted (intersection of requested and allowed)
+  map<string, string> config = 4;     // plugin's YAML config section (flat keys)
+}
+
+// PluginConfigV1 is sent by the server to push config updates on hot reload.
+message PluginConfigV1 {
+  map<string, string> entries = 1;
 }
 
 // HealthCheckV1 is sent by the server periodically to verify plugin liveness.
@@ -93,6 +100,7 @@ message CommandRequestV1 {
   repeated string args       = 2; // command arguments as strings
   string          request_id = 3; // correlation ID for multiplexed responses
   map<string, string> metadata = 4; // REX metadata (bare keys, no shared.rex. prefix)
+  map<string, string> context  = 5; // operation context (filtered for plugin visibility)
 }
 
 // CommandResponseV1 is the plugin's response to a CommandRequestV1.
@@ -154,8 +162,9 @@ message ResultEntryV1 {
 
 // ServerQueryV1 is sent by a plugin to query server state.
 message ServerQueryV1 {
-  string request_id = 1; // correlation ID for response matching
-  string topic      = 2; // query topic: "health", "plugins", "stats"
+  string              request_id = 1; // correlation ID for response matching
+  string              topic      = 2; // query topic: "health", "plugins", "stats"
+  map<string, string> params     = 3; // topic-specific parameters
 }
 
 // ServerQueryResponseV1 is the server's response to a ServerQueryV1.

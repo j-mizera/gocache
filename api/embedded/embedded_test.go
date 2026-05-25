@@ -36,7 +36,7 @@ func (p *recordingPlugin) BootInit(ctx context.Context) error {
 	return p.bootErr
 }
 
-func (p *recordingPlugin) ConfigLoaded(_ context.Context, _ *config.Config) error {
+func (p *recordingPlugin) ConfigLoaded(_ context.Context, _ *config.Config, _ config.PluginConfig) error {
 	p.configs++
 	p.configured = true
 	return p.cfgErr
@@ -170,7 +170,7 @@ type orderedPlugin struct {
 
 func (p *orderedPlugin) Name() string                                        { return p.name }
 func (p *orderedPlugin) BootInit(context.Context) error                      { return nil }
-func (p *orderedPlugin) ConfigLoaded(context.Context, *config.Config) error  { return nil }
+func (p *orderedPlugin) ConfigLoaded(context.Context, *config.Config, config.PluginConfig) error { return nil }
 func (p *orderedPlugin) ProcessShutdown(context.Context) error {
 	*p.order = append(*p.order, p.name)
 	return nil

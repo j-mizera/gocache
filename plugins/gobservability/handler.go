@@ -31,7 +31,7 @@ func healthzHandler(p *gobservabilityPlugin) http.Handler {
 			return
 		}
 
-		data, err := p.session.QueryServer(r.Context(), "health")
+		data, err := p.session.QueryServer(r.Context(), "health", nil)
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_ = json.NewEncoder(w).Encode(map[string]string{
@@ -65,7 +65,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 			return
 		}
 
-		healthData, err := p.session.QueryServer(r.Context(), "health")
+		healthData, err := p.session.QueryServer(r.Context(), "health", nil)
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -76,7 +76,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 			return
 		}
 
-		pluginData, err := p.session.QueryServer(r.Context(), "plugins")
+		pluginData, err := p.session.QueryServer(r.Context(), "plugins", nil)
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_ = json.NewEncoder(w).Encode(map[string]any{

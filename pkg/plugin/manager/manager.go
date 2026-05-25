@@ -11,19 +11,21 @@ import (
 	"time"
 
 	apicommand "gocache/api/command"
+	apiconfig "gocache/api/config"
 	opctx "gocache/api/context"
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
+	"gocache/api/scope"
 	"gocache/api/transport"
+	pkgconfig "gocache/pkg/config"
 	serverEvents "gocache/pkg/events"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/cmdhooks"
 	"gocache/pkg/plugin/ophooks"
-	"gocache/api/scope"
 	"gocache/pkg/plugin/permissions"
 	"gocache/pkg/plugin/router"
 
@@ -408,7 +410,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	reg := env.GetRegister()
 	if reg == nil {
 		logger.ErrorNoCtx().Msg("first message was not Register")
-		_ = conn.Send(gcpcv1.NewRegisterAck(false, "expected Register message", nil))
+		_ = conn.Send(gcpcv1.NewRegisterAck(false, "expected Register message", nil, nil))
 		_ = conn.Close()
 		return
 	}
@@ -417,7 +419,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	inst, ok := m.registry.Get(reg.Name)
 	if !ok {
 		logger.WarnNoCtx().Str("name", reg.Name).Msg("unknown plugin tried to register")
-		_ = conn.Send(gcpcv1.NewRegisterAck(false, "unknown plugin", nil))
+		_ = conn.Send(gcpcv1.NewRegisterAck(false, "unknown plugin", nil, nil))
 		_ = conn.Close()
 		return
 	}
@@ -431,7 +433,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	grantedScopes, err := m.validateScopes(reg.Name, reg.RequestedScopes)
 	if err != nil {
 		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("scope validation failed")
-		_ = conn.Send(gcpcv1.NewRegisterAck(false, "scope validation failed: "+err.Error(), nil))
+		_ = conn.Send(gcpcv1.NewRegisterAck(false, "scope validation failed: "+err.Error(), nil, nil))
 		_ = conn.Close()
 		return
 	}
@@ -447,7 +449,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		if err := m.router.RegisterPlugin(reg.Name, conn, reg.Commands); err != nil {
 			logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("command registration failed")
 			m.scopeRegistry.Unregister(reg.Name)
-			_ = conn.Send(gcpcv1.NewRegisterAck(false, "command registration failed: "+err.Error(), nil))
+			_ = conn.Send(gcpcv1.NewRegisterAck(false, "command registration failed: "+err.Error(), nil, nil))
 			_ = conn.Close()
 			return
 		}
@@ -490,7 +492,8 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	inst.SetState(StateRegistered)
 
 	grantedStrings := scope.ScopeStrings(grantedScopes)
-	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings)); err != nil {
+	pluginCfgMap := pkgconfig.FlatPluginConfig(reg.Name)
+	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings, pluginCfgMap)); err != nil {
 		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
 		m.router.UnregisterPlugin(reg.Name)
 		m.scopeRegistry.Unregister(reg.Name)
@@ -499,6 +502,10 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	}
 
 	inst.SetState(StateRunning)
+	pkgconfig.OnPluginReload(reg.Name, func(_ apiconfig.PluginConfig) {
+		updated := pkgconfig.FlatPluginConfig(reg.Name)
+		_ = conn.Send(gcpcv1.NewConfigUpdate(updated))
+	})
 	critical := inst.Critical()
 	logger.Info(pluginCtx).Str("plugin", reg.Name).Str("version", reg.Version).Bool("critical", critical).Int("commands", len(reg.Commands)).Strs("scopes", grantedStrings).Msg("plugin registered")
 
@@ -676,7 +683,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 					fmt.Sprintf("permission denied: missing scope %q", requiredScope)))
 				continue
 			}
-			data, qErr := m.queryRegistry.Handle(query.Topic)
+			data, qErr := m.queryRegistry.Handle(query.Topic, query.Params)
 			errMsg := ""
 			if qErr != nil {
 				errMsg = qErr.Error()

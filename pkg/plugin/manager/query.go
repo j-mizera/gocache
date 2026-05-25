@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	ops "gocache/api/operations"
 )
 
 // ServerStateProvider is the interface the plugin manager uses to query
@@ -20,7 +22,7 @@ type ServerStateProvider interface {
 }
 
 // QueryHandlerFunc handles a server query topic and returns key-value data.
-type QueryHandlerFunc func() (map[string]string, error)
+type QueryHandlerFunc func(params map[string]string) (map[string]string, error)
 
 // QueryRegistry maps query topics to handler functions.
 type QueryRegistry struct {
@@ -42,14 +44,14 @@ func (r *QueryRegistry) Register(topic string, handler QueryHandlerFunc) {
 }
 
 // Handle executes the handler for a topic and returns the result.
-func (r *QueryRegistry) Handle(topic string) (map[string]string, error) {
+func (r *QueryRegistry) Handle(topic string, params map[string]string) (map[string]string, error) {
 	r.mu.RLock()
 	h, ok := r.handlers[topic]
 	r.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("unknown query topic %q", topic)
 	}
-	return h()
+	return h(params)
 }
 
 // Topics returns the list of registered topic names.
@@ -73,7 +75,7 @@ func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, sp ServerSta
 }
 
 func healthHandler(sp ServerStateProvider) QueryHandlerFunc {
-	return func() (map[string]string, error) {
+	return func(_ map[string]string) (map[string]string, error) {
 		status := "ok"
 		if sp.IsShuttingDown() {
 			status = "shutting_down"
@@ -88,7 +90,7 @@ func healthHandler(sp ServerStateProvider) QueryHandlerFunc {
 }
 
 func statsHandler(sp ServerStateProvider) QueryHandlerFunc {
-	return func() (map[string]string, error) {
+	return func(_ map[string]string) (map[string]string, error) {
 		return map[string]string{
 			"keys":             strconv.Itoa(sp.CacheKeys()),
 			"memory_bytes":     strconv.FormatInt(sp.CacheUsedBytes(), 10),
@@ -98,7 +100,7 @@ func statsHandler(sp ServerStateProvider) QueryHandlerFunc {
 }
 
 func pluginsHandler(registry *Registry) QueryHandlerFunc {
-	return func() (map[string]string, error) {
+	return func(_ map[string]string) (map[string]string, error) {
 		plugins := registry.All()
 		data := make(map[string]string, len(plugins)*2)
 		for _, p := range plugins {
@@ -107,4 +109,33 @@ func pluginsHandler(registry *Registry) QueryHandlerFunc {
 		}
 		return data, nil
 	}
+}
+
+// OperationTracker is the subset of pkg/operations.Tracker needed by
+// plugin-initiated operation management queries.
+type OperationTracker interface {
+	Start(opType ops.Type, parentID string) *ops.Operation
+	Complete(id string)
+	Fail(id, reason string)
+}
+
+// RegisterOperationHandlers registers query topics for plugin-initiated
+// operation lifecycle management.
+func RegisterOperationHandlers(qr *QueryRegistry, tracker OperationTracker) {
+	qr.Register("operation.start", func(params map[string]string) (map[string]string, error) {
+		opType := ops.Type(params["type"])
+		if opType == "" {
+			opType = ops.TypeCommand
+		}
+		op := tracker.Start(opType, params["parent_id"])
+		return op.ContextSnapshot(false), nil
+	})
+	qr.Register("operation.complete", func(params map[string]string) (map[string]string, error) {
+		tracker.Complete(params["_operation_id"])
+		return nil, nil
+	})
+	qr.Register("operation.fail", func(params map[string]string) (map[string]string, error) {
+		tracker.Fail(params["_operation_id"], params["_fail_reason"])
+		return nil, nil
+	})
 }
