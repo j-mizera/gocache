@@ -8,6 +8,7 @@ related:
   - ADR-0001-persistence-as-pluggable-log-snapshot
   - ADR-0002-source-sink-contract
   - ADR-0008-plugin-config-and-reload-contract
+  - ADR-0019-unified-plugin-config-delivery
   - Plugins
   - GCPC
 ---
@@ -32,7 +33,7 @@ Built-in persistence plugins **ship as embedded plugins** (compile-time-linked, 
 - `snapshot` build tag — built-in snapshot Source/Sink (the gob replacement using ADR-0005's format)
 - `aof` build tag — built-in AOF Source/Sink with the group-commit/fsync model from ADR-0003
 
-Third-party persistence providers **run as IPC plugins** over GCPC, implementing the same `api/persistence/` Source/Sink contract surfaced through the GCPC v1 protocol's plugin-callable methods. The contract is transport-neutral — a Source method has the same signature whether it's invoked in-process (embedded) or over a UDS (IPC).
+Third-party persistence providers **run as IPC plugins** over GCPC, implementing the same `api/persistence/` Source/Sink contract surfaced through the GCPC v1 protocol's plugin-callable methods. The contract is transport-neutral — a Source method has the same signature whether it's invoked in-process (embedded) or over a UDS (IPC). IPC plugins receive their configuration via the `config` map in `RegisterAckV1` and hot-reload updates via `PluginConfigV1` pushes (see ADR-0019).
 
 Default release builds include `snapshot` (matches the existing default behaviour). `aof` is opt-in. Stripped builds (`-tags ''`) ship without persistence and rely on a configured IPC provider — useful for niche deployments (test rigs, ephemeral caches, external-source-of-truth setups).
 

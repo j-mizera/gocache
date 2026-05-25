@@ -39,9 +39,9 @@ frame "GoCache Server-Plugin IPC" as F {
     }
 
     ' -- Server side --
-    CmdRouter --> PluginConn : CommandRequestV1\n(+ metadata)
+    CmdRouter --> PluginConn : CommandRequestV1\n(+ metadata + op context)
     HookExec --> PluginConn : HookRequestV1\n(+ context + metadata)
-    PluginMgr --> PluginConn : Health/Shutdown
+    PluginMgr --> PluginConn : Health/Shutdown/\nOperationHookRequestV1
     HookExec --> HookReg : MatchPre / MatchPost
 
     ' -- Wire --
@@ -50,10 +50,10 @@ frame "GoCache Server-Plugin IPC" as F {
 
     ' -- Plugin side --
     PluginSDK --> Framing : Send/Recv EnvelopeV1
-    PluginSDK --> PluginImpl : HandleCommand()\nHandleHook()
+    PluginSDK --> PluginImpl : HandleCommand()\nHandleHook()\nHandleOperationHook()
 
     ' -- Response flow --
-    PluginSDK ..> PluginConn : CommandResponseV1\nHookResponseV1
+    PluginSDK ..> PluginConn : CommandResponseV1\nHookResponseV1\nOperationHookResponseV1\nServerQueryV1 (params)
 }
 
 @enduml

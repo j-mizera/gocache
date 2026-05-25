@@ -32,6 +32,7 @@ frame "Plugin Command Registration & Routing" as F {
 
     Fallback --> RouteTable : HasCommand(op)?
     RouteTable --> REX : Try direct,\nthen split "PLUGIN:CMD"
+    RouteTable ..> RouteTable : Extract op context\nvia op.FilteredContext(plugin)
 
     ' -- Registration --
     Shadow ..> CoreHandlers : Validates no overlap\nwith core commands
@@ -40,8 +41,8 @@ frame "Plugin Command Registration & Routing" as F {
     ' -- IPC --
     RouteTable --> PC1 : "PUBLISH" -> pubsub
     RouteTable --> PC2 : "KAFKA:PRODUCE" -> kafka
-    PC1 --> P1 : CommandRequestV1\n(+ metadata, Unix socket)
-    PC2 --> P2 : CommandRequestV1\n(+ metadata, Unix socket)
+    PC1 --> P1 : CommandRequestV1\n(+ metadata + context map,\nUnix socket)
+    PC2 --> P2 : CommandRequestV1\n(+ metadata + context map,\nUnix socket)
 
     note bottom of RouteTable
       **Main namespace** (no prefix):

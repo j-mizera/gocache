@@ -111,6 +111,7 @@ Embedded plugins are not scope-checked — they run with full server privilege. 
 
 ## See also
 
+- [docs/plugins/sdk-guide.md](sdk-guide.md) — Full SDK guide: writing IPC and embedded plugins, interfaces, config, operations, logging.
 - [docs/server/README.md](../server/README.md) — Server overview, build, run, configuration, env vars.
 - [docs/server/design/component/](../server/design/component/) — Component diagrams (core, memory eviction, event bus ring).
 - [docs/server/design/sequence/](../server/design/sequence/) — Sequence diagrams (command flow, persistence, transactions, graceful shutdown).

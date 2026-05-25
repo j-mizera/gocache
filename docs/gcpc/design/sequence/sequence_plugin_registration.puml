@@ -80,7 +80,13 @@ participant "Plugin Manager" as Mgr
         end
 
         Mgr -> PluginReg : SetState(Registered)
-        Mgr -> Conn : RegisterAckV1{accepted: true}
+        Mgr -> Conn : RegisterAckV1{\n  accepted: true,\n  granted_scopes: [...],\n  config: {key: "val", ...}\n}
+        note right
+          Config map delivers scoped
+          plugin config from YAML
+          (plugins.overrides.<name>.config).
+          SDK builds RemoteConfig from it.
+        end note
         Mgr -> PluginReg : SetState(Running)
 
         Conn -> SDK : Accepted

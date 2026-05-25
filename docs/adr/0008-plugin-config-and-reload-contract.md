@@ -9,6 +9,8 @@ related:
   - ADR-0002-source-sink-contract
   - ADR-0006-builtin-vs-third-party-transport
   - ADR-0007-embedded-persistence-plugin-self-config
+  - ADR-0018-plugin-config-autonomy
+  - ADR-0019-unified-plugin-config-delivery
 supersedes:
   - ADR-0007-embedded-persistence-plugin-self-config
 ---
@@ -48,6 +50,16 @@ type PluginConfig interface {
     // the key required, and Build should return an error if Get*
     // comes back empty.
     SetDefault(key string, value any)
+
+    // BindEnv binds a config key to one or more environment variables.
+    // When resolving, env vars take highest priority (above YAML and
+    // defaults). Added by ADR-0018.
+    BindEnv(key string, envVars ...string)
+
+    // MergeFile merges an external config file into the plugin's config
+    // namespace. No-op for IPC plugins (config is server-delivered).
+    // Added by ADR-0018.
+    MergeFile(path string) error
 }
 
 // ReloadHandler is the optional capability a Provider implements to
@@ -111,6 +123,7 @@ func (provider) Name() string { return "snapshot" }
 
 func (p *provider) Build(cfg apiconfig.PluginConfig) (apipersistence.Source, apipersistence.Snapshotter, error) {
     cfg.SetDefault(keyFile, defaultFile)
+    cfg.BindEnv(keyFile, "GOCACHE_SNAPSHOT_FILE")
     file := cfg.GetString(keyFile)
     if file == "" {
         return nil, nil, fmt.Errorf("snapshot: %q is required", keyFile)
