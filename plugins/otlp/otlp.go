@@ -22,13 +22,18 @@ import (
 	"gocache/api/logger"
 )
 
-// Env var overrides. Plugin reads them in BootInit, before config.Load.
 const (
-	envEndpoint    = "GOCACHE_EMBEDDED_OTLP_ENDPOINT"
-	envService     = "GOCACHE_EMBEDDED_OTLP_SERVICE"
-	envTimeoutMs   = "GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS"
-	envInsecure    = "GOCACHE_EMBEDDED_OTLP_INSECURE"
-	envDisabled    = "GOCACHE_EMBEDDED_OTLP_DISABLED"
+	keyEndpoint  = "endpoint"
+	keyService   = "service"
+	keyTimeoutMs = "timeout_ms"
+	keyInsecure  = "insecure"
+	keyDisabled  = "disabled"
+
+	envEndpoint  = "GOCACHE_EMBEDDED_OTLP_ENDPOINT"
+	envService   = "GOCACHE_EMBEDDED_OTLP_SERVICE"
+	envTimeoutMs = "GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS"
+	envInsecure  = "GOCACHE_EMBEDDED_OTLP_INSECURE"
+	envDisabled  = "GOCACHE_EMBEDDED_OTLP_DISABLED"
 	defaultService = "gocache"
 	defaultTimeout = 3 * time.Second
 	shutdownGrace  = 2 * time.Second
@@ -121,11 +126,19 @@ func (p *plugin) BootInit(ctx context.Context) error {
 	return nil
 }
 
-// ConfigLoaded emits a short child span under the process span to mark
-// the boundary. Optional endpoint override from config is NOT applied
-// here — changing the exporter after BootInit is too risky (we'd need
-// to drain the pending batcher first). Env-var-only wins.
 func (p *plugin) ConfigLoaded(ctx context.Context, cfg *config.Config) error {
+	pcfg := config.PluginConfigFor("otlp_embedded")
+	pcfg.SetDefault(keyEndpoint, "")
+	pcfg.SetDefault(keyService, defaultService)
+	pcfg.SetDefault(keyTimeoutMs, int(defaultTimeout.Milliseconds()))
+	pcfg.SetDefault(keyInsecure, false)
+	pcfg.SetDefault(keyDisabled, false)
+	pcfg.BindEnv(keyEndpoint, envEndpoint)
+	pcfg.BindEnv(keyService, envService)
+	pcfg.BindEnv(keyTimeoutMs, envTimeoutMs)
+	pcfg.BindEnv(keyInsecure, envInsecure)
+	pcfg.BindEnv(keyDisabled, envDisabled)
+
 	if p.tracer == nil || p.processSpan == nil {
 		return nil
 	}
