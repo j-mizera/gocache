@@ -48,6 +48,7 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0016](0016-aof-wire-and-file-format.md) | AOF wire and file format | accepted | 2026-05-21 |
 | [0017](0017-mutation-replay-execution-path.md) | Mutation replay execution path | accepted | 2026-05-21 |
 | [0018](0018-plugin-config-autonomy.md) | Plugin config autonomy (BindEnv + MergeFile) | proposed | 2026-05-24 |
+| [0019](0019-unified-plugin-config-delivery.md) | Unified plugin config delivery | proposed | 2026-05-25 |
 
 ## Writing a new ADR
 

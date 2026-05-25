@@ -23,7 +23,7 @@ func (m *mockStateProvider) CacheMaxBytes() int64   { return m.maxBytes }
 
 func TestQueryRegistry_UnknownTopic(t *testing.T) {
 	qr := NewQueryRegistry()
-	_, err := qr.Handle("nonexistent")
+	_, err := qr.Handle("nonexistent", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown topic")
 	}
@@ -31,11 +31,11 @@ func TestQueryRegistry_UnknownTopic(t *testing.T) {
 
 func TestQueryRegistry_RegisterAndHandle(t *testing.T) {
 	qr := NewQueryRegistry()
-	qr.Register("test", func() (map[string]string, error) {
+	qr.Register("test", func(_ map[string]string) (map[string]string, error) {
 		return map[string]string{"key": "value"}, nil
 	})
 
-	data, err := qr.Handle("test")
+	data, err := qr.Handle("test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,8 +46,8 @@ func TestQueryRegistry_RegisterAndHandle(t *testing.T) {
 
 func TestQueryRegistry_Topics(t *testing.T) {
 	qr := NewQueryRegistry()
-	qr.Register("a", func() (map[string]string, error) { return nil, nil })
-	qr.Register("b", func() (map[string]string, error) { return nil, nil })
+	qr.Register("a", func(_ map[string]string) (map[string]string, error) { return nil, nil })
+	qr.Register("b", func(_ map[string]string) (map[string]string, error) { return nil, nil })
 
 	topics := qr.Topics()
 	if len(topics) != 2 {
@@ -61,7 +61,7 @@ func TestHealthHandler_Ok(t *testing.T) {
 		connections: 5,
 	}
 	handler := healthHandler(sp)
-	data, err := handler()
+	data, err := handler(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestHealthHandler_ShuttingDown(t *testing.T) {
 		startTime:    time.Now(),
 	}
 	handler := healthHandler(sp)
-	data, err := handler()
+	data, err := handler(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestStatsHandler(t *testing.T) {
 		maxBytes:  10485760,
 	}
 	handler := statsHandler(sp)
-	data, err := handler()
+	data, err := handler(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPluginsHandler(t *testing.T) {
 	reg.Add(metricsInst)
 
 	handler := pluginsHandler(reg)
-	data, err := handler()
+	data, err := handler(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,10 +158,10 @@ func TestRegisterBuiltinHandlers_NilStateProvider(t *testing.T) {
 	RegisterBuiltinHandlers(qr, reg, nil)
 
 	// Only "plugins" should be registered when state provider is nil.
-	if _, err := qr.Handle("plugins"); err != nil {
+	if _, err := qr.Handle("plugins", nil); err != nil {
 		t.Errorf("plugins handler should be registered: %v", err)
 	}
-	if _, err := qr.Handle("health"); err == nil {
+	if _, err := qr.Handle("health", nil); err == nil {
 		t.Error("health handler should NOT be registered without state provider")
 	}
 }

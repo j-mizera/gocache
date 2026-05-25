@@ -25,6 +25,7 @@ import (
 
 	"gocache/api/config"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 )
 
 // Plugin is the interface an embedded plugin implements.
@@ -46,7 +47,7 @@ import (
 type Plugin interface {
 	Name() string
 	BootInit(ctx context.Context) error
-	ConfigLoaded(ctx context.Context, cfg *config.Config) error
+	ConfigLoaded(ctx context.Context, cfg *config.Config, pcfg config.PluginConfig) error
 	ProcessShutdown(ctx context.Context) error
 }
 
@@ -94,7 +95,7 @@ func Names() []string {
 // iteration continues; strict plugins halt the process via Fatal.
 func BootAll(ctx context.Context) {
 	for _, r := range registry {
-		invoke(ctx, r, "boot_init", func() error { return r.plugin.BootInit(ctx) })
+		invoke(ctx, r, "boot_init", func(pctx context.Context) error { return r.plugin.BootInit(pctx) })
 	}
 }
 
@@ -103,7 +104,8 @@ func BootAll(ctx context.Context) {
 // as BootAll.
 func ConfigLoadedAll(ctx context.Context, cfg *config.Config) {
 	for _, r := range registry {
-		invoke(ctx, r, "config_loaded", func() error { return r.plugin.ConfigLoaded(ctx, cfg) })
+		pcfg := config.PluginConfigFor(r.plugin.Name())
+		invoke(ctx, r, "config_loaded", func(pctx context.Context) error { return r.plugin.ConfigLoaded(pctx, cfg, pcfg) })
 	}
 }
 
@@ -115,7 +117,7 @@ func ConfigLoadedAll(ctx context.Context, cfg *config.Config) {
 func ShutdownAll(ctx context.Context) {
 	for i := len(registry) - 1; i >= 0; i-- {
 		r := registry[i]
-		invoke(ctx, r, "process_shutdown", func() error { return r.plugin.ProcessShutdown(ctx) })
+		invoke(ctx, r, "process_shutdown", func(pctx context.Context) error { return r.plugin.ProcessShutdown(pctx) })
 	}
 }
 
@@ -129,26 +131,39 @@ func ShutdownAll(ctx context.Context) {
 // we don't want a strict failure to silently degrade into the non-strict
 // "continue" log line below. The redundant return makes the contract
 // explicit at the callsite.
-func invoke(ctx context.Context, r registration, phase string, fn func() error) {
+func invoke(ctx context.Context, r registration, phase string, fn func(context.Context) error) {
+	var parentID string
+	if parent := ops.FromContext(ctx); parent != nil {
+		parentID = parent.ID
+	}
+	pluginOp := ops.New(ops.TypePluginStart, parentID)
+	pluginOp.Enrich("_plugin", r.plugin.Name())
+	pluginOp.Enrich("_phase", phase)
+	pluginCtx := ops.WithContext(ctx, pluginOp)
+
 	defer func() {
 		if rec := recover(); rec != nil {
+			pluginOp.Fail(fmt.Sprintf("panic: %v", rec))
 			if r.mustSucceed {
-				logger.Fatal(ctx).Str("embedded_plugin", r.plugin.Name()).Str("phase", phase).
+				logger.Fatal(pluginCtx).Str("embedded_plugin", r.plugin.Name()).Str("phase", phase).
 					Interface("panic", rec).Msg("strict embedded plugin panicked")
 				return
 			}
-			logger.Error(ctx).Str("embedded_plugin", r.plugin.Name()).Str("phase", phase).
+			logger.Error(pluginCtx).Str("embedded_plugin", r.plugin.Name()).Str("phase", phase).
 				Interface("panic", rec).Msg("embedded plugin panicked — continuing")
 		}
 	}()
-	if err := fn(); err != nil {
+	if err := fn(pluginCtx); err != nil {
+		pluginOp.Fail(err.Error())
 		wrapped := fmt.Errorf("embedded plugin %q %s: %w", r.plugin.Name(), phase, err)
 		if r.mustSucceed {
-			logger.Fatal(ctx).Err(wrapped).Msg("strict embedded plugin failed")
+			logger.Fatal(pluginCtx).Err(wrapped).Msg("strict embedded plugin failed")
 			return
 		}
-		logger.Error(ctx).Err(wrapped).Msg("embedded plugin failed — continuing")
+		logger.Error(pluginCtx).Err(wrapped).Msg("embedded plugin failed — continuing")
+		return
 	}
+	pluginOp.Complete()
 }
 
 // ResetForTesting clears the registry. Test-only.

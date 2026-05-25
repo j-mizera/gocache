@@ -44,15 +44,14 @@ func (p *plugin) Name() string { return "crashdump" }
 
 func (p *plugin) BootInit(_ context.Context) error { return nil }
 
-func (p *plugin) ConfigLoaded(ctx context.Context, _ *config.Config) error {
-	cfg := config.PluginConfigFor("crashdump")
-	cfg.SetDefault(keyDir, defaultDir)
-	cfg.SetDefault(keyDisabled, false)
-	cfg.BindEnv(keyDir, envDir)
-	cfg.BindEnv(keyDisabled, envDisabled)
+func (p *plugin) ConfigLoaded(ctx context.Context, _ *config.Config, pcfg config.PluginConfig) error {
+	pcfg.SetDefault(keyDir, defaultDir)
+	pcfg.SetDefault(keyDisabled, false)
+	pcfg.BindEnv(keyDir, envDir)
+	pcfg.BindEnv(keyDisabled, envDisabled)
 
-	p.dir = cfg.GetString(keyDir)
-	p.disabled = cfg.GetBool(keyDisabled)
+	p.dir = pcfg.GetString(keyDir)
+	p.disabled = pcfg.GetBool(keyDisabled)
 
 	if p.disabled {
 		return nil

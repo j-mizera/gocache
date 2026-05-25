@@ -20,6 +20,7 @@ import (
 	"gocache/api/config"
 	"gocache/api/embedded"
 	"gocache/api/logger"
+	ops "gocache/api/operations"
 )
 
 const (
@@ -126,8 +127,7 @@ func (p *plugin) BootInit(ctx context.Context) error {
 	return nil
 }
 
-func (p *plugin) ConfigLoaded(ctx context.Context, cfg *config.Config) error {
-	pcfg := config.PluginConfigFor("otlp_embedded")
+func (p *plugin) ConfigLoaded(ctx context.Context, cfg *config.Config, pcfg config.PluginConfig) error {
 	pcfg.SetDefault(keyEndpoint, "")
 	pcfg.SetDefault(keyService, defaultService)
 	pcfg.SetDefault(keyTimeoutMs, int(defaultTimeout.Milliseconds()))
@@ -158,14 +158,17 @@ func (p *plugin) ConfigLoaded(ctx context.Context, cfg *config.Config) error {
 // Grafana without a restart: main()'s deferred chain runs this during
 // panic unwind, and ForceFlush pushes whatever's in the batcher out
 // before the process exits.
-func (p *plugin) ProcessShutdown(_ context.Context) error {
+func (p *plugin) ProcessShutdown(ctx context.Context) error {
 	if p.provider == nil {
 		return nil
 	}
 	// Use a fresh context with a tight timeout — the main ctx may already
 	// be cancelled, and we don't want a slow telemetry backend to delay
-	// process exit.
+	// process exit. Propagate the operation for log correlation.
 	flushCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	if op := ops.FromContext(ctx); op != nil {
+		flushCtx = ops.WithContext(flushCtx, op)
+	}
 	defer cancel()
 
 	if p.processSpan != nil {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -39,6 +40,31 @@ func PluginConfigFor(name string) apiconfig.PluginConfig {
 		return nopConfig{}
 	}
 	return pluginView{v: v, prefix: pluginKeyPrefix(name)}
+}
+
+// FlatPluginConfig returns all keys under plugins.config.<name> as a
+// flat string map. Used by the plugin manager to deliver config to IPC
+// plugins via GCPC. Returns nil if Load has not run or the plugin has
+// no config keys.
+func FlatPluginConfig(name string) map[string]string {
+	v := serverConfig.Load()
+	if v == nil {
+		return nil
+	}
+	prefix := pluginKeyPrefix(name)
+	sub := v.Sub(prefix)
+	if sub == nil {
+		return nil
+	}
+	all := sub.AllSettings()
+	if len(all) == 0 {
+		return nil
+	}
+	flat := make(map[string]string, len(all))
+	for k, val := range all {
+		flat[k] = fmt.Sprintf("%v", val)
+	}
+	return flat
 }
 
 // ConfigFileUsed returns the path to the configuration file that was

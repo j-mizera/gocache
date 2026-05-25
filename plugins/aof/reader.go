@@ -79,13 +79,13 @@ type aofIterator struct {
 	goodOffset int64
 }
 
-func (it *aofIterator) Next(_ context.Context) (apipersistence.Mutation, error) {
+func (it *aofIterator) Next(ctx context.Context) (apipersistence.Mutation, error) {
 	m, err := decodeRecord(it.br, it.br)
 	if err == io.EOF {
 		return apipersistence.Mutation{}, io.EOF
 	}
 	if err != nil {
-		logger.WarnNoCtx().Str("file", it.path).Int64("offset", it.goodOffset).
+		logger.Warn(ctx).Str("file", it.path).Int64("offset", it.goodOffset).
 			Err(err).Msg("aof: torn record detected, truncating")
 		it.truncate()
 		return apipersistence.Mutation{}, io.EOF

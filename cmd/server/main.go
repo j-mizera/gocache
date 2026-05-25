@@ -146,8 +146,16 @@ func main() {
 	// ShutdownAll immediately so it fires on normal exit AND during a panic
 	// unwind — giving exporters a final flush even if main() crashes.
 	_ = bootstate.Write(bootStateFile, stageEmbeddedBoot)
-	embedded.BootAll(ctx)
-	defer embedded.ShutdownAll(ctx)
+	embBootOp := ops.New(ops.TypeStartup, "")
+	embBootOp.Enrich("_boot_stage", "embedded_boot")
+	embedded.BootAll(ops.WithContext(ctx, embBootOp))
+	embBootOp.Complete()
+	defer func() {
+		embShutOp := ops.New(ops.TypeShutdown, "")
+		embShutOp.Enrich("_scope", "embedded_plugins")
+		embedded.ShutdownAll(ops.WithContext(ctx, embShutOp))
+		embShutOp.Complete()
+	}()
 
 	// Load configuration: CLI flags > env vars (GOCACHE_*) > config file > defaults
 	_ = bootstate.Write(bootStateFile, stageConfigLoad)
@@ -177,7 +185,10 @@ func main() {
 
 	// Hand the parsed config to embedded plugins so they can upgrade
 	// env-var-only defaults with YAML-backed values (e.g. OTLP endpoint).
-	embedded.ConfigLoadedAll(ctx, cfg)
+	cfgOp := ops.New(ops.TypeConfigReload, "")
+	cfgOp.Enrich("_boot_stage", "config_loaded")
+	embedded.ConfigLoadedAll(ops.WithContext(ctx, cfgOp), cfg)
+	cfgOp.Complete()
 
 	logger.InfoNoCtx().Str("version", version.String()).Msg("starting gocache server")
 	if n := embedded.Count(); n > 0 {
@@ -228,6 +239,7 @@ func main() {
 		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
 		pluginManager.SetLogCollector(logCollector)
 		pluginManager.SetTracker(tracker)
+		pluginmgr.RegisterOperationHandlers(pluginManager.QueryRegistry(), tracker)
 		if err := pluginManager.Start(ctx); err != nil {
 			logger.FatalNoCtx().Err(err).Msg("failed to start plugin manager")
 		}

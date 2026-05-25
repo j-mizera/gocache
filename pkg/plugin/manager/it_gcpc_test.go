@@ -366,7 +366,7 @@ func TestGCPC_ServerQuery(t *testing.T) {
 	}
 
 	// Query health topic.
-	p.send(gcpc.NewServerQuery("q-1", "health"))
+	p.send(gcpc.NewServerQuery("q-1", "health", nil))
 
 	env := p.recv()
 	queryResp := env.GetServerQueryResponse()
@@ -395,7 +395,7 @@ func TestGCPC_ServerQuery_DeniedScope(t *testing.T) {
 	}
 
 	// Query should be denied.
-	p.send(gcpc.NewServerQuery("q-2", "health"))
+	p.send(gcpc.NewServerQuery("q-2", "health", nil))
 
 	env := p.recv()
 	queryResp := env.GetServerQueryResponse()
@@ -417,7 +417,7 @@ func TestGCPC_ServerQuery_Plugins(t *testing.T) {
 	p.register("test-plugin", []string{"read", "server:query"}, nil, nil)
 
 	// Query plugins topic.
-	p.send(gcpc.NewServerQuery("q-3", "plugins"))
+	p.send(gcpc.NewServerQuery("q-3", "plugins", nil))
 
 	env := p.recv()
 	queryResp := env.GetServerQueryResponse()

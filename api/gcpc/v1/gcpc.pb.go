@@ -95,6 +95,7 @@ type EnvelopeV1 struct {
 	//	*EnvelopeV1_Event
 	//	*EnvelopeV1_OperationHookRequest
 	//	*EnvelopeV1_OperationHookResponse
+	//	*EnvelopeV1_ConfigUpdate
 	Payload       isEnvelopeV1_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -295,6 +296,15 @@ func (x *EnvelopeV1) GetOperationHookResponse() *OperationHookResponseV1 {
 	return nil
 }
 
+func (x *EnvelopeV1) GetConfigUpdate() *PluginConfigV1 {
+	if x != nil {
+		if x, ok := x.Payload.(*EnvelopeV1_ConfigUpdate); ok {
+			return x.ConfigUpdate
+		}
+	}
+	return nil
+}
+
 type isEnvelopeV1_Payload interface {
 	isEnvelopeV1_Payload()
 }
@@ -363,6 +373,10 @@ type EnvelopeV1_OperationHookResponse struct {
 	OperationHookResponse *OperationHookResponseV1 `protobuf:"bytes,81,opt,name=operation_hook_response,json=operationHookResponse,proto3,oneof"`
 }
 
+type EnvelopeV1_ConfigUpdate struct {
+	ConfigUpdate *PluginConfigV1 `protobuf:"bytes,90,opt,name=config_update,json=configUpdate,proto3,oneof"`
+}
+
 func (*EnvelopeV1_Register) isEnvelopeV1_Payload() {}
 
 func (*EnvelopeV1_RegisterAck) isEnvelopeV1_Payload() {}
@@ -394,6 +408,8 @@ func (*EnvelopeV1_Event) isEnvelopeV1_Payload() {}
 func (*EnvelopeV1_OperationHookRequest) isEnvelopeV1_Payload() {}
 
 func (*EnvelopeV1_OperationHookResponse) isEnvelopeV1_Payload() {}
+
+func (*EnvelopeV1_ConfigUpdate) isEnvelopeV1_Payload() {}
 
 // RegisterV1 is sent by the plugin after connecting to announce capabilities.
 type RegisterV1 struct {
@@ -631,7 +647,8 @@ type RegisterAckV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
 	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	GrantedScopes []string               `protobuf:"bytes,3,rep,name=granted_scopes,json=grantedScopes,proto3" json:"granted_scopes,omitempty"` // scopes actually granted (intersection of requested and allowed)
+	GrantedScopes []string               `protobuf:"bytes,3,rep,name=granted_scopes,json=grantedScopes,proto3" json:"granted_scopes,omitempty"`                                        // scopes actually granted (intersection of requested and allowed)
+	Config        map[string]string      `protobuf:"bytes,4,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // plugin's YAML config section (flat keys)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -687,6 +704,58 @@ func (x *RegisterAckV1) GetGrantedScopes() []string {
 	return nil
 }
 
+func (x *RegisterAckV1) GetConfig() map[string]string {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+// PluginConfigV1 is sent by the server to push config updates on hot reload.
+type PluginConfigV1 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       map[string]string      `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginConfigV1) Reset() {
+	*x = PluginConfigV1{}
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginConfigV1) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginConfigV1) ProtoMessage() {}
+
+func (x *PluginConfigV1) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginConfigV1.ProtoReflect.Descriptor instead.
+func (*PluginConfigV1) Descriptor() ([]byte, []int) {
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *PluginConfigV1) GetEntries() map[string]string {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
 // HealthCheckV1 is sent by the server periodically to verify plugin liveness.
 type HealthCheckV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -697,7 +766,7 @@ type HealthCheckV1 struct {
 
 func (x *HealthCheckV1) Reset() {
 	*x = HealthCheckV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[5]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -709,7 +778,7 @@ func (x *HealthCheckV1) String() string {
 func (*HealthCheckV1) ProtoMessage() {}
 
 func (x *HealthCheckV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[5]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,7 +791,7 @@ func (x *HealthCheckV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckV1.ProtoReflect.Descriptor instead.
 func (*HealthCheckV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{5}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HealthCheckV1) GetTimestamp() uint64 {
@@ -743,7 +812,7 @@ type HealthResponseV1 struct {
 
 func (x *HealthResponseV1) Reset() {
 	*x = HealthResponseV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[6]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -755,7 +824,7 @@ func (x *HealthResponseV1) String() string {
 func (*HealthResponseV1) ProtoMessage() {}
 
 func (x *HealthResponseV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[6]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -768,7 +837,7 @@ func (x *HealthResponseV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponseV1.ProtoReflect.Descriptor instead.
 func (*HealthResponseV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{6}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HealthResponseV1) GetOk() bool {
@@ -795,7 +864,7 @@ type ShutdownV1 struct {
 
 func (x *ShutdownV1) Reset() {
 	*x = ShutdownV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[7]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -807,7 +876,7 @@ func (x *ShutdownV1) String() string {
 func (*ShutdownV1) ProtoMessage() {}
 
 func (x *ShutdownV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[7]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -820,7 +889,7 @@ func (x *ShutdownV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownV1.ProtoReflect.Descriptor instead.
 func (*ShutdownV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{7}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ShutdownV1) GetDeadlineNs() uint64 {
@@ -839,7 +908,7 @@ type ShutdownAckV1 struct {
 
 func (x *ShutdownAckV1) Reset() {
 	*x = ShutdownAckV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[8]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -851,7 +920,7 @@ func (x *ShutdownAckV1) String() string {
 func (*ShutdownAckV1) ProtoMessage() {}
 
 func (x *ShutdownAckV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[8]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -864,7 +933,7 @@ func (x *ShutdownAckV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownAckV1.ProtoReflect.Descriptor instead.
 func (*ShutdownAckV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{8}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{9}
 }
 
 // CommandRequestV1 is sent by the server to invoke a plugin command.
@@ -874,13 +943,14 @@ type CommandRequestV1 struct {
 	Args          []string               `protobuf:"bytes,2,rep,name=args,proto3" json:"args,omitempty"`                                                                                   // command arguments as strings
 	RequestId     string                 `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                                        // correlation ID for multiplexed responses
 	Metadata      map[string]string      `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // REX metadata (bare keys, no shared.rex. prefix)
+	Context       map[string]string      `protobuf:"bytes,5,rep,name=context,proto3" json:"context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`   // operation context (filtered for plugin visibility)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CommandRequestV1) Reset() {
 	*x = CommandRequestV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[9]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +962,7 @@ func (x *CommandRequestV1) String() string {
 func (*CommandRequestV1) ProtoMessage() {}
 
 func (x *CommandRequestV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[9]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +975,7 @@ func (x *CommandRequestV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRequestV1.ProtoReflect.Descriptor instead.
 func (*CommandRequestV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{9}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CommandRequestV1) GetCommand() string {
@@ -936,6 +1006,13 @@ func (x *CommandRequestV1) GetMetadata() map[string]string {
 	return nil
 }
 
+func (x *CommandRequestV1) GetContext() map[string]string {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
 // CommandResponseV1 is the plugin's response to a CommandRequestV1.
 type CommandResponseV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -947,7 +1024,7 @@ type CommandResponseV1 struct {
 
 func (x *CommandResponseV1) Reset() {
 	*x = CommandResponseV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[10]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -959,7 +1036,7 @@ func (x *CommandResponseV1) String() string {
 func (*CommandResponseV1) ProtoMessage() {}
 
 func (x *CommandResponseV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[10]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -972,7 +1049,7 @@ func (x *CommandResponseV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResponseV1.ProtoReflect.Descriptor instead.
 func (*CommandResponseV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{10}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CommandResponseV1) GetRequestId() string {
@@ -1006,7 +1083,7 @@ type HookRequestV1 struct {
 
 func (x *HookRequestV1) Reset() {
 	*x = HookRequestV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[11]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1018,7 +1095,7 @@ func (x *HookRequestV1) String() string {
 func (*HookRequestV1) ProtoMessage() {}
 
 func (x *HookRequestV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[11]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1031,7 +1108,7 @@ func (x *HookRequestV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookRequestV1.ProtoReflect.Descriptor instead.
 func (*HookRequestV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{11}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HookRequestV1) GetRequestId() string {
@@ -1104,7 +1181,7 @@ type HookResponseV1 struct {
 
 func (x *HookResponseV1) Reset() {
 	*x = HookResponseV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[12]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1116,7 +1193,7 @@ func (x *HookResponseV1) String() string {
 func (*HookResponseV1) ProtoMessage() {}
 
 func (x *HookResponseV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[12]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1129,7 +1206,7 @@ func (x *HookResponseV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HookResponseV1.ProtoReflect.Descriptor instead.
 func (*HookResponseV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{12}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HookResponseV1) GetRequestId() string {
@@ -1180,7 +1257,7 @@ type ResultV1 struct {
 
 func (x *ResultV1) Reset() {
 	*x = ResultV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[13]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1192,7 +1269,7 @@ func (x *ResultV1) String() string {
 func (*ResultV1) ProtoMessage() {}
 
 func (x *ResultV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[13]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1205,7 +1282,7 @@ func (x *ResultV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResultV1.ProtoReflect.Descriptor instead.
 func (*ResultV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{13}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ResultV1) GetValue() isResultV1_Value {
@@ -1349,7 +1426,7 @@ type ResultArrayV1 struct {
 
 func (x *ResultArrayV1) Reset() {
 	*x = ResultArrayV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[14]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1361,7 +1438,7 @@ func (x *ResultArrayV1) String() string {
 func (*ResultArrayV1) ProtoMessage() {}
 
 func (x *ResultArrayV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[14]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1374,7 +1451,7 @@ func (x *ResultArrayV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResultArrayV1.ProtoReflect.Descriptor instead.
 func (*ResultArrayV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{14}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ResultArrayV1) GetElements() []*ResultV1 {
@@ -1394,7 +1471,7 @@ type ResultMapV1 struct {
 
 func (x *ResultMapV1) Reset() {
 	*x = ResultMapV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[15]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1406,7 +1483,7 @@ func (x *ResultMapV1) String() string {
 func (*ResultMapV1) ProtoMessage() {}
 
 func (x *ResultMapV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[15]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1419,7 +1496,7 @@ func (x *ResultMapV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResultMapV1.ProtoReflect.Descriptor instead.
 func (*ResultMapV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{15}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ResultMapV1) GetEntries() []*ResultEntryV1 {
@@ -1440,7 +1517,7 @@ type ResultEntryV1 struct {
 
 func (x *ResultEntryV1) Reset() {
 	*x = ResultEntryV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[16]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1452,7 +1529,7 @@ func (x *ResultEntryV1) String() string {
 func (*ResultEntryV1) ProtoMessage() {}
 
 func (x *ResultEntryV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[16]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1465,7 +1542,7 @@ func (x *ResultEntryV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResultEntryV1.ProtoReflect.Descriptor instead.
 func (*ResultEntryV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{16}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ResultEntryV1) GetKey() string {
@@ -1485,15 +1562,16 @@ func (x *ResultEntryV1) GetValue() *ResultV1 {
 // ServerQueryV1 is sent by a plugin to query server state.
 type ServerQueryV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // correlation ID for response matching
-	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`                          // query topic: "health", "plugins", "stats"
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                                    // correlation ID for response matching
+	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`                                                                             // query topic: "health", "plugins", "stats"
+	Params        map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // topic-specific parameters
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ServerQueryV1) Reset() {
 	*x = ServerQueryV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[17]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1505,7 +1583,7 @@ func (x *ServerQueryV1) String() string {
 func (*ServerQueryV1) ProtoMessage() {}
 
 func (x *ServerQueryV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[17]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1518,7 +1596,7 @@ func (x *ServerQueryV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerQueryV1.ProtoReflect.Descriptor instead.
 func (*ServerQueryV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{17}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ServerQueryV1) GetRequestId() string {
@@ -1535,6 +1613,13 @@ func (x *ServerQueryV1) GetTopic() string {
 	return ""
 }
 
+func (x *ServerQueryV1) GetParams() map[string]string {
+	if x != nil {
+		return x.Params
+	}
+	return nil
+}
+
 // ServerQueryResponseV1 is the server's response to a ServerQueryV1.
 type ServerQueryResponseV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1547,7 +1632,7 @@ type ServerQueryResponseV1 struct {
 
 func (x *ServerQueryResponseV1) Reset() {
 	*x = ServerQueryResponseV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[18]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1559,7 +1644,7 @@ func (x *ServerQueryResponseV1) String() string {
 func (*ServerQueryResponseV1) ProtoMessage() {}
 
 func (x *ServerQueryResponseV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[18]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1572,7 +1657,7 @@ func (x *ServerQueryResponseV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerQueryResponseV1.ProtoReflect.Descriptor instead.
 func (*ServerQueryResponseV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{18}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ServerQueryResponseV1) GetRequestId() string {
@@ -1607,7 +1692,7 @@ type EventSubscribeV1 struct {
 
 func (x *EventSubscribeV1) Reset() {
 	*x = EventSubscribeV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[19]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1619,7 +1704,7 @@ func (x *EventSubscribeV1) String() string {
 func (*EventSubscribeV1) ProtoMessage() {}
 
 func (x *EventSubscribeV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[19]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1632,7 +1717,7 @@ func (x *EventSubscribeV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscribeV1.ProtoReflect.Descriptor instead.
 func (*EventSubscribeV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{19}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *EventSubscribeV1) GetTypes() []string {
@@ -1673,7 +1758,7 @@ type EventV1 struct {
 
 func (x *EventV1) Reset() {
 	*x = EventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[20]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1685,7 +1770,7 @@ func (x *EventV1) String() string {
 func (*EventV1) ProtoMessage() {}
 
 func (x *EventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[20]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1698,7 +1783,7 @@ func (x *EventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventV1.ProtoReflect.Descriptor instead.
 func (*EventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{20}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *EventV1) GetType() string {
@@ -1969,7 +2054,7 @@ type CommandPreEventV1 struct {
 
 func (x *CommandPreEventV1) Reset() {
 	*x = CommandPreEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[21]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1981,7 +2066,7 @@ func (x *CommandPreEventV1) String() string {
 func (*CommandPreEventV1) ProtoMessage() {}
 
 func (x *CommandPreEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[21]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1994,7 +2079,7 @@ func (x *CommandPreEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandPreEventV1.ProtoReflect.Descriptor instead.
 func (*CommandPreEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{21}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CommandPreEventV1) GetCommand() string {
@@ -2032,7 +2117,7 @@ type CommandPostEventV1 struct {
 
 func (x *CommandPostEventV1) Reset() {
 	*x = CommandPostEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[22]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2044,7 +2129,7 @@ func (x *CommandPostEventV1) String() string {
 func (*CommandPostEventV1) ProtoMessage() {}
 
 func (x *CommandPostEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[22]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2057,7 +2142,7 @@ func (x *CommandPostEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandPostEventV1.ProtoReflect.Descriptor instead.
 func (*CommandPostEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{22}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CommandPostEventV1) GetCommand() string {
@@ -2111,7 +2196,7 @@ type ConnectionOpenEventV1 struct {
 
 func (x *ConnectionOpenEventV1) Reset() {
 	*x = ConnectionOpenEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[23]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2123,7 +2208,7 @@ func (x *ConnectionOpenEventV1) String() string {
 func (*ConnectionOpenEventV1) ProtoMessage() {}
 
 func (x *ConnectionOpenEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[23]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2136,7 +2221,7 @@ func (x *ConnectionOpenEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionOpenEventV1.ProtoReflect.Descriptor instead.
 func (*ConnectionOpenEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{23}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ConnectionOpenEventV1) GetRemoteAddr() string {
@@ -2156,7 +2241,7 @@ type ConnectionCloseEventV1 struct {
 
 func (x *ConnectionCloseEventV1) Reset() {
 	*x = ConnectionCloseEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[24]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2168,7 +2253,7 @@ func (x *ConnectionCloseEventV1) String() string {
 func (*ConnectionCloseEventV1) ProtoMessage() {}
 
 func (x *ConnectionCloseEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[24]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2181,7 +2266,7 @@ func (x *ConnectionCloseEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectionCloseEventV1.ProtoReflect.Descriptor instead.
 func (*ConnectionCloseEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{24}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ConnectionCloseEventV1) GetRemoteAddr() string {
@@ -2208,7 +2293,7 @@ type ServerStartEventV1 struct {
 
 func (x *ServerStartEventV1) Reset() {
 	*x = ServerStartEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[25]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2220,7 +2305,7 @@ func (x *ServerStartEventV1) String() string {
 func (*ServerStartEventV1) ProtoMessage() {}
 
 func (x *ServerStartEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[25]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2233,7 +2318,7 @@ func (x *ServerStartEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerStartEventV1.ProtoReflect.Descriptor instead.
 func (*ServerStartEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{25}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ServerStartEventV1) GetAddr() string {
@@ -2259,7 +2344,7 @@ type ServerShutdownEventV1 struct {
 
 func (x *ServerShutdownEventV1) Reset() {
 	*x = ServerShutdownEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[26]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2271,7 +2356,7 @@ func (x *ServerShutdownEventV1) String() string {
 func (*ServerShutdownEventV1) ProtoMessage() {}
 
 func (x *ServerShutdownEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[26]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2284,7 +2369,7 @@ func (x *ServerShutdownEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerShutdownEventV1.ProtoReflect.Descriptor instead.
 func (*ServerShutdownEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{26}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ServerShutdownEventV1) GetReason() string {
@@ -2305,7 +2390,7 @@ type PluginRegisteredEventV1 struct {
 
 func (x *PluginRegisteredEventV1) Reset() {
 	*x = PluginRegisteredEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[27]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2317,7 +2402,7 @@ func (x *PluginRegisteredEventV1) String() string {
 func (*PluginRegisteredEventV1) ProtoMessage() {}
 
 func (x *PluginRegisteredEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[27]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2330,7 +2415,7 @@ func (x *PluginRegisteredEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginRegisteredEventV1.ProtoReflect.Descriptor instead.
 func (*PluginRegisteredEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{27}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PluginRegisteredEventV1) GetName() string {
@@ -2365,7 +2450,7 @@ type PluginCrashedEventV1 struct {
 
 func (x *PluginCrashedEventV1) Reset() {
 	*x = PluginCrashedEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[28]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2377,7 +2462,7 @@ func (x *PluginCrashedEventV1) String() string {
 func (*PluginCrashedEventV1) ProtoMessage() {}
 
 func (x *PluginCrashedEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[28]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2390,7 +2475,7 @@ func (x *PluginCrashedEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginCrashedEventV1.ProtoReflect.Descriptor instead.
 func (*PluginCrashedEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{28}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PluginCrashedEventV1) GetName() string {
@@ -2425,7 +2510,7 @@ type PluginRestartedEventV1 struct {
 
 func (x *PluginRestartedEventV1) Reset() {
 	*x = PluginRestartedEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[29]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2437,7 +2522,7 @@ func (x *PluginRestartedEventV1) String() string {
 func (*PluginRestartedEventV1) ProtoMessage() {}
 
 func (x *PluginRestartedEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[29]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2450,7 +2535,7 @@ func (x *PluginRestartedEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginRestartedEventV1.ProtoReflect.Descriptor instead.
 func (*PluginRestartedEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{29}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *PluginRestartedEventV1) GetName() string {
@@ -2483,7 +2568,7 @@ type ConfigReloadedEventV1 struct {
 
 func (x *ConfigReloadedEventV1) Reset() {
 	*x = ConfigReloadedEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[30]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2495,7 +2580,7 @@ func (x *ConfigReloadedEventV1) String() string {
 func (*ConfigReloadedEventV1) ProtoMessage() {}
 
 func (x *ConfigReloadedEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[30]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2508,7 +2593,7 @@ func (x *ConfigReloadedEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigReloadedEventV1.ProtoReflect.Descriptor instead.
 func (*ConfigReloadedEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{30}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ConfigReloadedEventV1) GetFile() string {
@@ -2528,7 +2613,7 @@ type AuthFailedEventV1 struct {
 
 func (x *AuthFailedEventV1) Reset() {
 	*x = AuthFailedEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[31]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2540,7 +2625,7 @@ func (x *AuthFailedEventV1) String() string {
 func (*AuthFailedEventV1) ProtoMessage() {}
 
 func (x *AuthFailedEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[31]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2553,7 +2638,7 @@ func (x *AuthFailedEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthFailedEventV1.ProtoReflect.Descriptor instead.
 func (*AuthFailedEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{31}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *AuthFailedEventV1) GetRemoteAddr() string {
@@ -2580,7 +2665,7 @@ type CacheEvictionEventV1 struct {
 
 func (x *CacheEvictionEventV1) Reset() {
 	*x = CacheEvictionEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[32]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2592,7 +2677,7 @@ func (x *CacheEvictionEventV1) String() string {
 func (*CacheEvictionEventV1) ProtoMessage() {}
 
 func (x *CacheEvictionEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[32]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2605,7 +2690,7 @@ func (x *CacheEvictionEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheEvictionEventV1.ProtoReflect.Descriptor instead.
 func (*CacheEvictionEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{32}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CacheEvictionEventV1) GetKey() string {
@@ -2634,7 +2719,7 @@ type LogEntryEventV1 struct {
 
 func (x *LogEntryEventV1) Reset() {
 	*x = LogEntryEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2646,7 +2731,7 @@ func (x *LogEntryEventV1) String() string {
 func (*LogEntryEventV1) ProtoMessage() {}
 
 func (x *LogEntryEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2659,7 +2744,7 @@ func (x *LogEntryEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogEntryEventV1.ProtoReflect.Descriptor instead.
 func (*LogEntryEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{33}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *LogEntryEventV1) GetLevel() string {
@@ -2702,7 +2787,7 @@ type OperationStartEventV1 struct {
 
 func (x *OperationStartEventV1) Reset() {
 	*x = OperationStartEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2714,7 +2799,7 @@ func (x *OperationStartEventV1) String() string {
 func (*OperationStartEventV1) ProtoMessage() {}
 
 func (x *OperationStartEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2727,7 +2812,7 @@ func (x *OperationStartEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationStartEventV1.ProtoReflect.Descriptor instead.
 func (*OperationStartEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{34}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *OperationStartEventV1) GetId() string {
@@ -2772,7 +2857,7 @@ type OperationCompleteEventV1 struct {
 
 func (x *OperationCompleteEventV1) Reset() {
 	*x = OperationCompleteEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2784,7 +2869,7 @@ func (x *OperationCompleteEventV1) String() string {
 func (*OperationCompleteEventV1) ProtoMessage() {}
 
 func (x *OperationCompleteEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2797,7 +2882,7 @@ func (x *OperationCompleteEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationCompleteEventV1.ProtoReflect.Descriptor instead.
 func (*OperationCompleteEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{35}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *OperationCompleteEventV1) GetId() string {
@@ -2853,7 +2938,7 @@ type OperationHookDeclV1 struct {
 
 func (x *OperationHookDeclV1) Reset() {
 	*x = OperationHookDeclV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2865,7 +2950,7 @@ func (x *OperationHookDeclV1) String() string {
 func (*OperationHookDeclV1) ProtoMessage() {}
 
 func (x *OperationHookDeclV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2878,7 +2963,7 @@ func (x *OperationHookDeclV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationHookDeclV1.ProtoReflect.Descriptor instead.
 func (*OperationHookDeclV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{36}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *OperationHookDeclV1) GetType() string {
@@ -2920,7 +3005,7 @@ type OperationHookRequestV1 struct {
 
 func (x *OperationHookRequestV1) Reset() {
 	*x = OperationHookRequestV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2932,7 +3017,7 @@ func (x *OperationHookRequestV1) String() string {
 func (*OperationHookRequestV1) ProtoMessage() {}
 
 func (x *OperationHookRequestV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2945,7 +3030,7 @@ func (x *OperationHookRequestV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationHookRequestV1.ProtoReflect.Descriptor instead.
 func (*OperationHookRequestV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{37}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *OperationHookRequestV1) GetRequestId() string {
@@ -3015,7 +3100,7 @@ type OperationHookResponseV1 struct {
 
 func (x *OperationHookResponseV1) Reset() {
 	*x = OperationHookResponseV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3027,7 +3112,7 @@ func (x *OperationHookResponseV1) String() string {
 func (*OperationHookResponseV1) ProtoMessage() {}
 
 func (x *OperationHookResponseV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3040,7 +3125,7 @@ func (x *OperationHookResponseV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationHookResponseV1.ProtoReflect.Descriptor instead.
 func (*OperationHookResponseV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{38}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *OperationHookResponseV1) GetRequestId() string {
@@ -3061,7 +3146,7 @@ var File_api_gcpc_v1_gcpc_proto protoreflect.FileDescriptor
 
 const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\n" +
-	"\x16api/gcpc/v1/gcpc.proto\x12\agcpc.v1\"\xe8\b\n" +
+	"\x16api/gcpc/v1/gcpc.proto\x12\agcpc.v1\"\xa8\t\n" +
 	"\n" +
 	"EnvelopeV1\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12\x0e\n" +
@@ -3082,7 +3167,8 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\x0fevent_subscribe\x18F \x01(\v2\x19.gcpc.v1.EventSubscribeV1H\x00R\x0eeventSubscribe\x12(\n" +
 	"\x05event\x18G \x01(\v2\x10.gcpc.v1.EventV1H\x00R\x05event\x12W\n" +
 	"\x16operation_hook_request\x18P \x01(\v2\x1f.gcpc.v1.OperationHookRequestV1H\x00R\x14operationHookRequest\x12Z\n" +
-	"\x17operation_hook_response\x18Q \x01(\v2 .gcpc.v1.OperationHookResponseV1H\x00R\x15operationHookResponseB\t\n" +
+	"\x17operation_hook_response\x18Q \x01(\v2 .gcpc.v1.OperationHookResponseV1H\x00R\x15operationHookResponse\x12>\n" +
+	"\rconfig_update\x18Z \x01(\v2\x17.gcpc.v1.PluginConfigV1H\x00R\fconfigUpdateB\t\n" +
 	"\apayload\"\xc3\x02\n" +
 	"\n" +
 	"RegisterV1\x12\x12\n" +
@@ -3105,11 +3191,20 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\n" +
 	"HookDeclV1\x12\x18\n" +
 	"\apattern\x18\x01 \x01(\tR\apattern\x12*\n" +
-	"\x05phase\x18\x02 \x01(\x0e2\x14.gcpc.v1.HookPhaseV1R\x05phase\"j\n" +
+	"\x05phase\x18\x02 \x01(\x0e2\x14.gcpc.v1.HookPhaseV1R\x05phase\"\xe1\x01\n" +
 	"\rRegisterAckV1\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12%\n" +
-	"\x0egranted_scopes\x18\x03 \x03(\tR\rgrantedScopes\"-\n" +
+	"\x0egranted_scopes\x18\x03 \x03(\tR\rgrantedScopes\x12:\n" +
+	"\x06config\x18\x04 \x03(\v2\".gcpc.v1.RegisterAckV1.ConfigEntryR\x06config\x1a9\n" +
+	"\vConfigEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8c\x01\n" +
+	"\x0ePluginConfigV1\x12>\n" +
+	"\aentries\x18\x01 \x03(\v2$.gcpc.v1.PluginConfigV1.EntriesEntryR\aentries\x1a:\n" +
+	"\fEntriesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"-\n" +
 	"\rHealthCheckV1\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x04R\ttimestamp\":\n" +
 	"\x10HealthResponseV1\x12\x0e\n" +
@@ -3119,14 +3214,18 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"ShutdownV1\x12\x1f\n" +
 	"\vdeadline_ns\x18\x01 \x01(\x04R\n" +
 	"deadlineNs\"\x0f\n" +
-	"\rShutdownAckV1\"\xe1\x01\n" +
+	"\rShutdownAckV1\"\xdf\x02\n" +
 	"\x10CommandRequestV1\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x12\n" +
 	"\x04args\x18\x02 \x03(\tR\x04args\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x03 \x01(\tR\trequestId\x12C\n" +
-	"\bmetadata\x18\x04 \x03(\v2'.gcpc.v1.CommandRequestV1.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x04 \x03(\v2'.gcpc.v1.CommandRequestV1.MetadataEntryR\bmetadata\x12@\n" +
+	"\acontext\x18\x05 \x03(\v2&.gcpc.v1.CommandRequestV1.ContextEntryR\acontext\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a:\n" +
+	"\fContextEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"]\n" +
 	"\x11CommandResponseV1\x12\x1d\n" +
@@ -3177,11 +3276,15 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\aentries\x18\x01 \x03(\v2\x16.gcpc.v1.ResultEntryV1R\aentries\"J\n" +
 	"\rResultEntryV1\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
-	"\x05value\x18\x02 \x01(\v2\x11.gcpc.v1.ResultV1R\x05value\"D\n" +
+	"\x05value\x18\x02 \x01(\v2\x11.gcpc.v1.ResultV1R\x05value\"\xbb\x01\n" +
 	"\rServerQueryV1\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
-	"\x05topic\x18\x02 \x01(\tR\x05topic\"\xc3\x01\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\x12:\n" +
+	"\x06params\x18\x03 \x03(\v2\".gcpc.v1.ServerQueryV1.ParamsEntryR\x06params\x1a9\n" +
+	"\vParamsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc3\x01\n" +
 	"\x15ServerQueryResponseV1\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12<\n" +
@@ -3336,7 +3439,7 @@ func file_api_gcpc_v1_gcpc_proto_rawDescGZIP() []byte {
 }
 
 var file_api_gcpc_v1_gcpc_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_gcpc_v1_gcpc_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
+var file_api_gcpc_v1_gcpc_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
 var file_api_gcpc_v1_gcpc_proto_goTypes = []any{
 	(HookPhaseV1)(0),                 // 0: gcpc.v1.HookPhaseV1
 	(*EnvelopeV1)(nil),               // 1: gcpc.v1.EnvelopeV1
@@ -3344,113 +3447,123 @@ var file_api_gcpc_v1_gcpc_proto_goTypes = []any{
 	(*CommandDeclV1)(nil),            // 3: gcpc.v1.CommandDeclV1
 	(*HookDeclV1)(nil),               // 4: gcpc.v1.HookDeclV1
 	(*RegisterAckV1)(nil),            // 5: gcpc.v1.RegisterAckV1
-	(*HealthCheckV1)(nil),            // 6: gcpc.v1.HealthCheckV1
-	(*HealthResponseV1)(nil),         // 7: gcpc.v1.HealthResponseV1
-	(*ShutdownV1)(nil),               // 8: gcpc.v1.ShutdownV1
-	(*ShutdownAckV1)(nil),            // 9: gcpc.v1.ShutdownAckV1
-	(*CommandRequestV1)(nil),         // 10: gcpc.v1.CommandRequestV1
-	(*CommandResponseV1)(nil),        // 11: gcpc.v1.CommandResponseV1
-	(*HookRequestV1)(nil),            // 12: gcpc.v1.HookRequestV1
-	(*HookResponseV1)(nil),           // 13: gcpc.v1.HookResponseV1
-	(*ResultV1)(nil),                 // 14: gcpc.v1.ResultV1
-	(*ResultArrayV1)(nil),            // 15: gcpc.v1.ResultArrayV1
-	(*ResultMapV1)(nil),              // 16: gcpc.v1.ResultMapV1
-	(*ResultEntryV1)(nil),            // 17: gcpc.v1.ResultEntryV1
-	(*ServerQueryV1)(nil),            // 18: gcpc.v1.ServerQueryV1
-	(*ServerQueryResponseV1)(nil),    // 19: gcpc.v1.ServerQueryResponseV1
-	(*EventSubscribeV1)(nil),         // 20: gcpc.v1.EventSubscribeV1
-	(*EventV1)(nil),                  // 21: gcpc.v1.EventV1
-	(*CommandPreEventV1)(nil),        // 22: gcpc.v1.CommandPreEventV1
-	(*CommandPostEventV1)(nil),       // 23: gcpc.v1.CommandPostEventV1
-	(*ConnectionOpenEventV1)(nil),    // 24: gcpc.v1.ConnectionOpenEventV1
-	(*ConnectionCloseEventV1)(nil),   // 25: gcpc.v1.ConnectionCloseEventV1
-	(*ServerStartEventV1)(nil),       // 26: gcpc.v1.ServerStartEventV1
-	(*ServerShutdownEventV1)(nil),    // 27: gcpc.v1.ServerShutdownEventV1
-	(*PluginRegisteredEventV1)(nil),  // 28: gcpc.v1.PluginRegisteredEventV1
-	(*PluginCrashedEventV1)(nil),     // 29: gcpc.v1.PluginCrashedEventV1
-	(*PluginRestartedEventV1)(nil),   // 30: gcpc.v1.PluginRestartedEventV1
-	(*ConfigReloadedEventV1)(nil),    // 31: gcpc.v1.ConfigReloadedEventV1
-	(*AuthFailedEventV1)(nil),        // 32: gcpc.v1.AuthFailedEventV1
-	(*CacheEvictionEventV1)(nil),     // 33: gcpc.v1.CacheEvictionEventV1
-	(*LogEntryEventV1)(nil),          // 34: gcpc.v1.LogEntryEventV1
-	(*OperationStartEventV1)(nil),    // 35: gcpc.v1.OperationStartEventV1
-	(*OperationCompleteEventV1)(nil), // 36: gcpc.v1.OperationCompleteEventV1
-	(*OperationHookDeclV1)(nil),      // 37: gcpc.v1.OperationHookDeclV1
-	(*OperationHookRequestV1)(nil),   // 38: gcpc.v1.OperationHookRequestV1
-	(*OperationHookResponseV1)(nil),  // 39: gcpc.v1.OperationHookResponseV1
-	nil,                              // 40: gcpc.v1.CommandRequestV1.MetadataEntry
-	nil,                              // 41: gcpc.v1.HookRequestV1.ContextEntry
-	nil,                              // 42: gcpc.v1.HookRequestV1.MetadataEntry
-	nil,                              // 43: gcpc.v1.HookResponseV1.ContextValuesEntry
-	nil,                              // 44: gcpc.v1.ServerQueryResponseV1.DataEntry
-	nil,                              // 45: gcpc.v1.CommandPreEventV1.MetadataEntry
-	nil,                              // 46: gcpc.v1.CommandPostEventV1.MetadataEntry
-	nil,                              // 47: gcpc.v1.LogEntryEventV1.FieldsEntry
-	nil,                              // 48: gcpc.v1.OperationStartEventV1.ContextEntry
-	nil,                              // 49: gcpc.v1.OperationCompleteEventV1.ContextEntry
-	nil,                              // 50: gcpc.v1.OperationHookRequestV1.ContextEntry
-	nil,                              // 51: gcpc.v1.OperationHookResponseV1.ContextValuesEntry
+	(*PluginConfigV1)(nil),           // 6: gcpc.v1.PluginConfigV1
+	(*HealthCheckV1)(nil),            // 7: gcpc.v1.HealthCheckV1
+	(*HealthResponseV1)(nil),         // 8: gcpc.v1.HealthResponseV1
+	(*ShutdownV1)(nil),               // 9: gcpc.v1.ShutdownV1
+	(*ShutdownAckV1)(nil),            // 10: gcpc.v1.ShutdownAckV1
+	(*CommandRequestV1)(nil),         // 11: gcpc.v1.CommandRequestV1
+	(*CommandResponseV1)(nil),        // 12: gcpc.v1.CommandResponseV1
+	(*HookRequestV1)(nil),            // 13: gcpc.v1.HookRequestV1
+	(*HookResponseV1)(nil),           // 14: gcpc.v1.HookResponseV1
+	(*ResultV1)(nil),                 // 15: gcpc.v1.ResultV1
+	(*ResultArrayV1)(nil),            // 16: gcpc.v1.ResultArrayV1
+	(*ResultMapV1)(nil),              // 17: gcpc.v1.ResultMapV1
+	(*ResultEntryV1)(nil),            // 18: gcpc.v1.ResultEntryV1
+	(*ServerQueryV1)(nil),            // 19: gcpc.v1.ServerQueryV1
+	(*ServerQueryResponseV1)(nil),    // 20: gcpc.v1.ServerQueryResponseV1
+	(*EventSubscribeV1)(nil),         // 21: gcpc.v1.EventSubscribeV1
+	(*EventV1)(nil),                  // 22: gcpc.v1.EventV1
+	(*CommandPreEventV1)(nil),        // 23: gcpc.v1.CommandPreEventV1
+	(*CommandPostEventV1)(nil),       // 24: gcpc.v1.CommandPostEventV1
+	(*ConnectionOpenEventV1)(nil),    // 25: gcpc.v1.ConnectionOpenEventV1
+	(*ConnectionCloseEventV1)(nil),   // 26: gcpc.v1.ConnectionCloseEventV1
+	(*ServerStartEventV1)(nil),       // 27: gcpc.v1.ServerStartEventV1
+	(*ServerShutdownEventV1)(nil),    // 28: gcpc.v1.ServerShutdownEventV1
+	(*PluginRegisteredEventV1)(nil),  // 29: gcpc.v1.PluginRegisteredEventV1
+	(*PluginCrashedEventV1)(nil),     // 30: gcpc.v1.PluginCrashedEventV1
+	(*PluginRestartedEventV1)(nil),   // 31: gcpc.v1.PluginRestartedEventV1
+	(*ConfigReloadedEventV1)(nil),    // 32: gcpc.v1.ConfigReloadedEventV1
+	(*AuthFailedEventV1)(nil),        // 33: gcpc.v1.AuthFailedEventV1
+	(*CacheEvictionEventV1)(nil),     // 34: gcpc.v1.CacheEvictionEventV1
+	(*LogEntryEventV1)(nil),          // 35: gcpc.v1.LogEntryEventV1
+	(*OperationStartEventV1)(nil),    // 36: gcpc.v1.OperationStartEventV1
+	(*OperationCompleteEventV1)(nil), // 37: gcpc.v1.OperationCompleteEventV1
+	(*OperationHookDeclV1)(nil),      // 38: gcpc.v1.OperationHookDeclV1
+	(*OperationHookRequestV1)(nil),   // 39: gcpc.v1.OperationHookRequestV1
+	(*OperationHookResponseV1)(nil),  // 40: gcpc.v1.OperationHookResponseV1
+	nil,                              // 41: gcpc.v1.RegisterAckV1.ConfigEntry
+	nil,                              // 42: gcpc.v1.PluginConfigV1.EntriesEntry
+	nil,                              // 43: gcpc.v1.CommandRequestV1.MetadataEntry
+	nil,                              // 44: gcpc.v1.CommandRequestV1.ContextEntry
+	nil,                              // 45: gcpc.v1.HookRequestV1.ContextEntry
+	nil,                              // 46: gcpc.v1.HookRequestV1.MetadataEntry
+	nil,                              // 47: gcpc.v1.HookResponseV1.ContextValuesEntry
+	nil,                              // 48: gcpc.v1.ServerQueryV1.ParamsEntry
+	nil,                              // 49: gcpc.v1.ServerQueryResponseV1.DataEntry
+	nil,                              // 50: gcpc.v1.CommandPreEventV1.MetadataEntry
+	nil,                              // 51: gcpc.v1.CommandPostEventV1.MetadataEntry
+	nil,                              // 52: gcpc.v1.LogEntryEventV1.FieldsEntry
+	nil,                              // 53: gcpc.v1.OperationStartEventV1.ContextEntry
+	nil,                              // 54: gcpc.v1.OperationCompleteEventV1.ContextEntry
+	nil,                              // 55: gcpc.v1.OperationHookRequestV1.ContextEntry
+	nil,                              // 56: gcpc.v1.OperationHookResponseV1.ContextValuesEntry
 }
 var file_api_gcpc_v1_gcpc_proto_depIdxs = []int32{
 	2,  // 0: gcpc.v1.EnvelopeV1.register:type_name -> gcpc.v1.RegisterV1
 	5,  // 1: gcpc.v1.EnvelopeV1.register_ack:type_name -> gcpc.v1.RegisterAckV1
-	6,  // 2: gcpc.v1.EnvelopeV1.health_check:type_name -> gcpc.v1.HealthCheckV1
-	7,  // 3: gcpc.v1.EnvelopeV1.health_response:type_name -> gcpc.v1.HealthResponseV1
-	8,  // 4: gcpc.v1.EnvelopeV1.shutdown:type_name -> gcpc.v1.ShutdownV1
-	9,  // 5: gcpc.v1.EnvelopeV1.shutdown_ack:type_name -> gcpc.v1.ShutdownAckV1
-	10, // 6: gcpc.v1.EnvelopeV1.command_request:type_name -> gcpc.v1.CommandRequestV1
-	11, // 7: gcpc.v1.EnvelopeV1.command_response:type_name -> gcpc.v1.CommandResponseV1
-	12, // 8: gcpc.v1.EnvelopeV1.hook_request:type_name -> gcpc.v1.HookRequestV1
-	13, // 9: gcpc.v1.EnvelopeV1.hook_response:type_name -> gcpc.v1.HookResponseV1
-	18, // 10: gcpc.v1.EnvelopeV1.server_query:type_name -> gcpc.v1.ServerQueryV1
-	19, // 11: gcpc.v1.EnvelopeV1.server_query_response:type_name -> gcpc.v1.ServerQueryResponseV1
-	20, // 12: gcpc.v1.EnvelopeV1.event_subscribe:type_name -> gcpc.v1.EventSubscribeV1
-	21, // 13: gcpc.v1.EnvelopeV1.event:type_name -> gcpc.v1.EventV1
-	38, // 14: gcpc.v1.EnvelopeV1.operation_hook_request:type_name -> gcpc.v1.OperationHookRequestV1
-	39, // 15: gcpc.v1.EnvelopeV1.operation_hook_response:type_name -> gcpc.v1.OperationHookResponseV1
-	3,  // 16: gcpc.v1.RegisterV1.commands:type_name -> gcpc.v1.CommandDeclV1
-	4,  // 17: gcpc.v1.RegisterV1.hooks:type_name -> gcpc.v1.HookDeclV1
-	37, // 18: gcpc.v1.RegisterV1.operation_hooks:type_name -> gcpc.v1.OperationHookDeclV1
-	0,  // 19: gcpc.v1.HookDeclV1.phase:type_name -> gcpc.v1.HookPhaseV1
-	40, // 20: gcpc.v1.CommandRequestV1.metadata:type_name -> gcpc.v1.CommandRequestV1.MetadataEntry
-	14, // 21: gcpc.v1.CommandResponseV1.result:type_name -> gcpc.v1.ResultV1
-	0,  // 22: gcpc.v1.HookRequestV1.phase:type_name -> gcpc.v1.HookPhaseV1
-	41, // 23: gcpc.v1.HookRequestV1.context:type_name -> gcpc.v1.HookRequestV1.ContextEntry
-	42, // 24: gcpc.v1.HookRequestV1.metadata:type_name -> gcpc.v1.HookRequestV1.MetadataEntry
-	43, // 25: gcpc.v1.HookResponseV1.context_values:type_name -> gcpc.v1.HookResponseV1.ContextValuesEntry
-	15, // 26: gcpc.v1.ResultV1.array:type_name -> gcpc.v1.ResultArrayV1
-	16, // 27: gcpc.v1.ResultV1.map_val:type_name -> gcpc.v1.ResultMapV1
-	14, // 28: gcpc.v1.ResultArrayV1.elements:type_name -> gcpc.v1.ResultV1
-	17, // 29: gcpc.v1.ResultMapV1.entries:type_name -> gcpc.v1.ResultEntryV1
-	14, // 30: gcpc.v1.ResultEntryV1.value:type_name -> gcpc.v1.ResultV1
-	44, // 31: gcpc.v1.ServerQueryResponseV1.data:type_name -> gcpc.v1.ServerQueryResponseV1.DataEntry
-	22, // 32: gcpc.v1.EventV1.command_pre:type_name -> gcpc.v1.CommandPreEventV1
-	23, // 33: gcpc.v1.EventV1.command_post:type_name -> gcpc.v1.CommandPostEventV1
-	24, // 34: gcpc.v1.EventV1.connection_open:type_name -> gcpc.v1.ConnectionOpenEventV1
-	25, // 35: gcpc.v1.EventV1.connection_close:type_name -> gcpc.v1.ConnectionCloseEventV1
-	26, // 36: gcpc.v1.EventV1.server_start:type_name -> gcpc.v1.ServerStartEventV1
-	27, // 37: gcpc.v1.EventV1.server_shutdown:type_name -> gcpc.v1.ServerShutdownEventV1
-	28, // 38: gcpc.v1.EventV1.plugin_registered:type_name -> gcpc.v1.PluginRegisteredEventV1
-	29, // 39: gcpc.v1.EventV1.plugin_crashed:type_name -> gcpc.v1.PluginCrashedEventV1
-	30, // 40: gcpc.v1.EventV1.plugin_restarted:type_name -> gcpc.v1.PluginRestartedEventV1
-	31, // 41: gcpc.v1.EventV1.config_reloaded:type_name -> gcpc.v1.ConfigReloadedEventV1
-	32, // 42: gcpc.v1.EventV1.auth_failed:type_name -> gcpc.v1.AuthFailedEventV1
-	33, // 43: gcpc.v1.EventV1.cache_eviction:type_name -> gcpc.v1.CacheEvictionEventV1
-	34, // 44: gcpc.v1.EventV1.log_entry:type_name -> gcpc.v1.LogEntryEventV1
-	35, // 45: gcpc.v1.EventV1.operation_start:type_name -> gcpc.v1.OperationStartEventV1
-	36, // 46: gcpc.v1.EventV1.operation_complete:type_name -> gcpc.v1.OperationCompleteEventV1
-	45, // 47: gcpc.v1.CommandPreEventV1.metadata:type_name -> gcpc.v1.CommandPreEventV1.MetadataEntry
-	46, // 48: gcpc.v1.CommandPostEventV1.metadata:type_name -> gcpc.v1.CommandPostEventV1.MetadataEntry
-	47, // 49: gcpc.v1.LogEntryEventV1.fields:type_name -> gcpc.v1.LogEntryEventV1.FieldsEntry
-	48, // 50: gcpc.v1.OperationStartEventV1.context:type_name -> gcpc.v1.OperationStartEventV1.ContextEntry
-	49, // 51: gcpc.v1.OperationCompleteEventV1.context:type_name -> gcpc.v1.OperationCompleteEventV1.ContextEntry
-	50, // 52: gcpc.v1.OperationHookRequestV1.context:type_name -> gcpc.v1.OperationHookRequestV1.ContextEntry
-	51, // 53: gcpc.v1.OperationHookResponseV1.context_values:type_name -> gcpc.v1.OperationHookResponseV1.ContextValuesEntry
-	54, // [54:54] is the sub-list for method output_type
-	54, // [54:54] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	7,  // 2: gcpc.v1.EnvelopeV1.health_check:type_name -> gcpc.v1.HealthCheckV1
+	8,  // 3: gcpc.v1.EnvelopeV1.health_response:type_name -> gcpc.v1.HealthResponseV1
+	9,  // 4: gcpc.v1.EnvelopeV1.shutdown:type_name -> gcpc.v1.ShutdownV1
+	10, // 5: gcpc.v1.EnvelopeV1.shutdown_ack:type_name -> gcpc.v1.ShutdownAckV1
+	11, // 6: gcpc.v1.EnvelopeV1.command_request:type_name -> gcpc.v1.CommandRequestV1
+	12, // 7: gcpc.v1.EnvelopeV1.command_response:type_name -> gcpc.v1.CommandResponseV1
+	13, // 8: gcpc.v1.EnvelopeV1.hook_request:type_name -> gcpc.v1.HookRequestV1
+	14, // 9: gcpc.v1.EnvelopeV1.hook_response:type_name -> gcpc.v1.HookResponseV1
+	19, // 10: gcpc.v1.EnvelopeV1.server_query:type_name -> gcpc.v1.ServerQueryV1
+	20, // 11: gcpc.v1.EnvelopeV1.server_query_response:type_name -> gcpc.v1.ServerQueryResponseV1
+	21, // 12: gcpc.v1.EnvelopeV1.event_subscribe:type_name -> gcpc.v1.EventSubscribeV1
+	22, // 13: gcpc.v1.EnvelopeV1.event:type_name -> gcpc.v1.EventV1
+	39, // 14: gcpc.v1.EnvelopeV1.operation_hook_request:type_name -> gcpc.v1.OperationHookRequestV1
+	40, // 15: gcpc.v1.EnvelopeV1.operation_hook_response:type_name -> gcpc.v1.OperationHookResponseV1
+	6,  // 16: gcpc.v1.EnvelopeV1.config_update:type_name -> gcpc.v1.PluginConfigV1
+	3,  // 17: gcpc.v1.RegisterV1.commands:type_name -> gcpc.v1.CommandDeclV1
+	4,  // 18: gcpc.v1.RegisterV1.hooks:type_name -> gcpc.v1.HookDeclV1
+	38, // 19: gcpc.v1.RegisterV1.operation_hooks:type_name -> gcpc.v1.OperationHookDeclV1
+	0,  // 20: gcpc.v1.HookDeclV1.phase:type_name -> gcpc.v1.HookPhaseV1
+	41, // 21: gcpc.v1.RegisterAckV1.config:type_name -> gcpc.v1.RegisterAckV1.ConfigEntry
+	42, // 22: gcpc.v1.PluginConfigV1.entries:type_name -> gcpc.v1.PluginConfigV1.EntriesEntry
+	43, // 23: gcpc.v1.CommandRequestV1.metadata:type_name -> gcpc.v1.CommandRequestV1.MetadataEntry
+	44, // 24: gcpc.v1.CommandRequestV1.context:type_name -> gcpc.v1.CommandRequestV1.ContextEntry
+	15, // 25: gcpc.v1.CommandResponseV1.result:type_name -> gcpc.v1.ResultV1
+	0,  // 26: gcpc.v1.HookRequestV1.phase:type_name -> gcpc.v1.HookPhaseV1
+	45, // 27: gcpc.v1.HookRequestV1.context:type_name -> gcpc.v1.HookRequestV1.ContextEntry
+	46, // 28: gcpc.v1.HookRequestV1.metadata:type_name -> gcpc.v1.HookRequestV1.MetadataEntry
+	47, // 29: gcpc.v1.HookResponseV1.context_values:type_name -> gcpc.v1.HookResponseV1.ContextValuesEntry
+	16, // 30: gcpc.v1.ResultV1.array:type_name -> gcpc.v1.ResultArrayV1
+	17, // 31: gcpc.v1.ResultV1.map_val:type_name -> gcpc.v1.ResultMapV1
+	15, // 32: gcpc.v1.ResultArrayV1.elements:type_name -> gcpc.v1.ResultV1
+	18, // 33: gcpc.v1.ResultMapV1.entries:type_name -> gcpc.v1.ResultEntryV1
+	15, // 34: gcpc.v1.ResultEntryV1.value:type_name -> gcpc.v1.ResultV1
+	48, // 35: gcpc.v1.ServerQueryV1.params:type_name -> gcpc.v1.ServerQueryV1.ParamsEntry
+	49, // 36: gcpc.v1.ServerQueryResponseV1.data:type_name -> gcpc.v1.ServerQueryResponseV1.DataEntry
+	23, // 37: gcpc.v1.EventV1.command_pre:type_name -> gcpc.v1.CommandPreEventV1
+	24, // 38: gcpc.v1.EventV1.command_post:type_name -> gcpc.v1.CommandPostEventV1
+	25, // 39: gcpc.v1.EventV1.connection_open:type_name -> gcpc.v1.ConnectionOpenEventV1
+	26, // 40: gcpc.v1.EventV1.connection_close:type_name -> gcpc.v1.ConnectionCloseEventV1
+	27, // 41: gcpc.v1.EventV1.server_start:type_name -> gcpc.v1.ServerStartEventV1
+	28, // 42: gcpc.v1.EventV1.server_shutdown:type_name -> gcpc.v1.ServerShutdownEventV1
+	29, // 43: gcpc.v1.EventV1.plugin_registered:type_name -> gcpc.v1.PluginRegisteredEventV1
+	30, // 44: gcpc.v1.EventV1.plugin_crashed:type_name -> gcpc.v1.PluginCrashedEventV1
+	31, // 45: gcpc.v1.EventV1.plugin_restarted:type_name -> gcpc.v1.PluginRestartedEventV1
+	32, // 46: gcpc.v1.EventV1.config_reloaded:type_name -> gcpc.v1.ConfigReloadedEventV1
+	33, // 47: gcpc.v1.EventV1.auth_failed:type_name -> gcpc.v1.AuthFailedEventV1
+	34, // 48: gcpc.v1.EventV1.cache_eviction:type_name -> gcpc.v1.CacheEvictionEventV1
+	35, // 49: gcpc.v1.EventV1.log_entry:type_name -> gcpc.v1.LogEntryEventV1
+	36, // 50: gcpc.v1.EventV1.operation_start:type_name -> gcpc.v1.OperationStartEventV1
+	37, // 51: gcpc.v1.EventV1.operation_complete:type_name -> gcpc.v1.OperationCompleteEventV1
+	50, // 52: gcpc.v1.CommandPreEventV1.metadata:type_name -> gcpc.v1.CommandPreEventV1.MetadataEntry
+	51, // 53: gcpc.v1.CommandPostEventV1.metadata:type_name -> gcpc.v1.CommandPostEventV1.MetadataEntry
+	52, // 54: gcpc.v1.LogEntryEventV1.fields:type_name -> gcpc.v1.LogEntryEventV1.FieldsEntry
+	53, // 55: gcpc.v1.OperationStartEventV1.context:type_name -> gcpc.v1.OperationStartEventV1.ContextEntry
+	54, // 56: gcpc.v1.OperationCompleteEventV1.context:type_name -> gcpc.v1.OperationCompleteEventV1.ContextEntry
+	55, // 57: gcpc.v1.OperationHookRequestV1.context:type_name -> gcpc.v1.OperationHookRequestV1.ContextEntry
+	56, // 58: gcpc.v1.OperationHookResponseV1.context_values:type_name -> gcpc.v1.OperationHookResponseV1.ContextValuesEntry
+	59, // [59:59] is the sub-list for method output_type
+	59, // [59:59] is the sub-list for method input_type
+	59, // [59:59] is the sub-list for extension type_name
+	59, // [59:59] is the sub-list for extension extendee
+	0,  // [0:59] is the sub-list for field type_name
 }
 
 func init() { file_api_gcpc_v1_gcpc_proto_init() }
@@ -3475,8 +3588,9 @@ func file_api_gcpc_v1_gcpc_proto_init() {
 		(*EnvelopeV1_Event)(nil),
 		(*EnvelopeV1_OperationHookRequest)(nil),
 		(*EnvelopeV1_OperationHookResponse)(nil),
+		(*EnvelopeV1_ConfigUpdate)(nil),
 	}
-	file_api_gcpc_v1_gcpc_proto_msgTypes[13].OneofWrappers = []any{
+	file_api_gcpc_v1_gcpc_proto_msgTypes[14].OneofWrappers = []any{
 		(*ResultV1_SimpleString)(nil),
 		(*ResultV1_Error)(nil),
 		(*ResultV1_Integer)(nil),
@@ -3486,7 +3600,7 @@ func file_api_gcpc_v1_gcpc_proto_init() {
 		(*ResultV1_Array)(nil),
 		(*ResultV1_MapVal)(nil),
 	}
-	file_api_gcpc_v1_gcpc_proto_msgTypes[20].OneofWrappers = []any{
+	file_api_gcpc_v1_gcpc_proto_msgTypes[21].OneofWrappers = []any{
 		(*EventV1_CommandPre)(nil),
 		(*EventV1_CommandPost)(nil),
 		(*EventV1_ConnectionOpen)(nil),
@@ -3509,7 +3623,7 @@ func file_api_gcpc_v1_gcpc_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_gcpc_v1_gcpc_proto_rawDesc), len(file_api_gcpc_v1_gcpc_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   51,
+			NumMessages:   56,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

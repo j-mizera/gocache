@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gocache/api/command"
+	apiconfig "gocache/api/config"
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
 	apiplugin "gocache/api/plugin"
@@ -72,7 +73,7 @@ func (p *gobservabilityPlugin) Hooks() []pluginsdk.HookDecl {
 	}
 }
 
-func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.HookRequest) *pluginsdk.HookResponse {
+func (p *gobservabilityPlugin) HandleHook(ctx context.Context, req *pluginsdk.HookRequest) *pluginsdk.HookResponse {
 	if req.Phase != pluginsdk.HookPhasePost {
 		return nil
 	}
@@ -83,7 +84,7 @@ func (p *gobservabilityPlugin) HandleHook(_ context.Context, req *pluginsdk.Hook
 		if err != nil {
 			// Malformed ns value would silently record a zero-latency sample.
 			// Log and skip the record so the histogram isn't poisoned.
-			p.log.WarnNoCtx().Str("value", v).Err(err).Msg("invalid elapsed_ns in hook context; skipping metrics sample")
+			p.log.Warn(ctx).Str("value", v).Err(err).Msg("invalid elapsed_ns in hook context; skipping metrics sample")
 			return nil
 		}
 		elapsedNs = n
@@ -169,6 +170,12 @@ func (p *gobservabilityPlugin) HandleEvent(_ context.Context, evt *gcpc.EventV1)
 
 func (p *gobservabilityPlugin) SetSession(s *pluginsdk.Session) {
 	p.session = s
+}
+
+// ConfigPlugin interface.
+
+func (p *gobservabilityPlugin) OnConfigReload(cfg apiconfig.PluginConfig) {
+	p.log.InfoNoCtx().Msg("config reloaded")
 }
 
 // ScopePlugin interface.
