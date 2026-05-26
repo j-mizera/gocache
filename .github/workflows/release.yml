@@ -97,6 +97,12 @@ jobs:
       - name: Integration tests
         run: go test -race -count=1 -run 'TestIT_' ./pkg/server/...
 
+      - name: OTLP integration tests
+        run: go test -race -count=1 -v -tags "otlp,integration" ./plugins/otlp/...
+
+      - name: Gobservability integration tests
+        run: go test -race -count=1 -v -tags integration ./plugins/gobservability/...
+
   bump:
     name: Bump Versions
     needs: [detect, test]
@@ -186,7 +192,7 @@ jobs:
     if: needs.detect.outputs.any_artifact == 'true'
     runs-on: ubuntu-latest
     env:
-      PKG: gocache/pkg/version
+      PKG: gocache/api/version
     steps:
       - uses: actions/checkout@v4
         with:

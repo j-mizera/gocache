@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gocache/api/events"
+	gcpc "gocache/api/gcpc/v1"
 	"gocache/api/logger"
 	ops "gocache/api/operations"
 	apicommand "gocache/api/command"
@@ -314,10 +315,12 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// --- Command hooks (pre) ---
 	var hookCtx map[string]string
 	hasHooks := b.hookExecutor != nil && b.hookExecutor.HasAny()
+	connInfo := &gcpc.ConnectionInfoV1{Id: ctx.ConnectionID, RemoteAddr: ctx.RemoteAddr}
+	cmdInfo := &gcpc.CommandInfoV1{Name: op, Args: args}
 	if hasHooks {
 		hookCtx = cmdOp.ContextSnapshot(false)
 
-		if pre := b.hookExecutor.RunPreHooks(opCtx, op, args, hookCtx); pre != nil {
+		if pre := b.hookExecutor.RunPreHooks(opCtx, cmdInfo, connInfo, hookCtx); pre != nil {
 			if pre.Denied {
 				cmdOp.Fail("denied: " + pre.DenyReason)
 				if b.opHookExecutor != nil {
@@ -341,7 +344,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		elapsedNs := time.Now().UnixNano() - startNs
 		hookCtx[apicommand.ElapsedNs] = strconv.FormatInt(elapsedNs, 10)
 		resultVal, resultErr := resultToHookStrings(result)
-		b.hookExecutor.RunPostHooks(opCtx, op, args, resultVal, resultErr, hookCtx)
+		b.hookExecutor.RunPostHooks(opCtx, cmdInfo, connInfo, resultVal, resultErr, hookCtx)
 	}
 
 	// --- Complete operation ---
@@ -433,6 +436,7 @@ func (b *Pipeline) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, 
 // aborts the plugin call.
 func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) apicommand.Result {
 	metadata := rex.BuildMetadata(client.RexMeta, client.CmdMeta)
+	connInfo := &gcpc.ConnectionInfoV1{Id: client.ConnectionID, RemoteAddr: client.RemoteAddr}
 
 	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)
 	defer cancel()
@@ -448,7 +452,7 @@ func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.Cl
 		defer func() { cmdOp.Complete(); b.tracker.Complete(cmdOp.ID) }()
 	}
 
-	val, suppress, err := b.pluginRouter.Route(ctx, op, args, metadata)
+	val, suppress, err := b.pluginRouter.Route(ctx, op, args, metadata, connInfo)
 	if err != nil {
 		if errors.Is(err, router.ErrPluginTimeout) {
 			return apicommand.Result{Value: resp.MarshalError("ERR plugin timeout")}

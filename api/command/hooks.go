@@ -1,6 +1,10 @@
 package command
 
-import "context"
+import (
+	"context"
+
+	gcpc "gocache/api/gcpc/v1"
+)
 
 // PreHookResult reports whether a pre-hook chain denied the command
 // and carries the accumulated hook context.
@@ -23,9 +27,9 @@ type HookExecutor interface {
 	// if there are no matching hooks. Otherwise returns a PreHookResult that
 	// indicates whether the command was denied and carries the accumulated
 	// hook context after all pre-hooks have run.
-	RunPreHooks(ctx context.Context, op string, args []string, hookCtx map[string]string) *PreHookResult
+	RunPreHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, conn *gcpc.ConnectionInfoV1, hookCtx map[string]string) *PreHookResult
 
 	// RunPostHooks fires all matching post-hooks for the command. Post-hooks
 	// observe the command result but cannot abort it.
-	RunPostHooks(ctx context.Context, op string, args []string, resultValue, resultError string, hookCtx map[string]string)
+	RunPostHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, conn *gcpc.ConnectionInfoV1, resultValue, resultError string, hookCtx map[string]string)
 }

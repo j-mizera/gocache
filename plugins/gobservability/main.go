@@ -15,12 +15,12 @@ import (
 	gcpc "gocache/api/gcpc/v1"
 	apilogger "gocache/api/logger"
 	apiplugin "gocache/api/plugin"
+	"gocache/api/version"
 	"gocache/sdk/pluginsdk"
 )
 
 const (
-	pluginName    = "gobservability"
-	pluginVersion = "0.1.0"
+	pluginName = "gobservability"
 
 	// Environment variables consumed by the plugin.
 	envPort         = "GOBSERVABILITY_PORT"
@@ -48,7 +48,7 @@ type gobservabilityPlugin struct {
 // Plugin interface.
 
 func (p *gobservabilityPlugin) Name() string    { return pluginName }
-func (p *gobservabilityPlugin) Version() string { return pluginVersion }
+func (p *gobservabilityPlugin) Version() string { return version.Version }
 func (p *gobservabilityPlugin) Critical() bool  { return false }
 
 func (p *gobservabilityPlugin) OnHealthCheck(_ context.Context) error {
@@ -82,8 +82,6 @@ func (p *gobservabilityPlugin) HandleHook(ctx context.Context, req *pluginsdk.Ho
 	if v, ok := req.Context[command.ElapsedNs]; ok {
 		n, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			// Malformed ns value would silently record a zero-latency sample.
-			// Log and skip the record so the histogram isn't poisoned.
 			p.log.Warn(ctx).Str("value", v).Err(err).Msg("invalid elapsed_ns in hook context; skipping metrics sample")
 			return nil
 		}
@@ -91,7 +89,7 @@ func (p *gobservabilityPlugin) HandleHook(ctx context.Context, req *pluginsdk.Ho
 	}
 
 	isError := req.ResultError != ""
-	p.collector.Record(req.Command, elapsedNs, isError)
+	p.collector.Record(req.Command.GetName(), elapsedNs, isError)
 
 	return nil
 }
@@ -227,7 +225,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", metricsHandler(collector, pluginName, pluginVersion))
+	mux.Handle("/metrics", metricsHandler(collector, pluginName, version.Version))
 	mux.Handle("/healthz", healthzHandler(plugin))
 	mux.Handle("/readyz", readyzHandler(plugin))
 

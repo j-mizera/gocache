@@ -43,7 +43,7 @@ func TestBus_TypeFiltering(t *testing.T) {
 	}
 
 	// Emit the subscribed type.
-	bus.Emit(apiEvents.NewConnectionOpen("127.0.0.1:1234"))
+	bus.Emit(apiEvents.NewConnectionOpen("127.0.0.1:1234", ""))
 	if received.Load() != 1 {
 		t.Errorf("expected 1 event, got %d", received.Load())
 	}
@@ -185,8 +185,8 @@ func TestBus_MultipleEventTypes(t *testing.T) {
 		received.Add(1)
 	})
 
-	bus.Emit(apiEvents.NewConnectionOpen("127.0.0.1:1234"))
-	bus.Emit(apiEvents.NewConnectionClose("127.0.0.1:1234", 5000))
+	bus.Emit(apiEvents.NewConnectionOpen("127.0.0.1:1234", ""))
+	bus.Emit(apiEvents.NewConnectionClose("127.0.0.1:1234", 5000, ""))
 	bus.Emit(apiEvents.NewAuthFailed("127.0.0.1:1234", "SET"))
 	bus.Emit(apiEvents.NewServerStart("localhost:6379", "1.0")) // not subscribed
 
@@ -201,9 +201,9 @@ func TestBus_ReplayDeliversRetainedEventsInFIFOOrder(t *testing.T) {
 	bus := NewBusWithCapacity(10)
 
 	// Emit before anyone subscribes — the ring must hold these.
-	bus.Emit(apiEvents.NewConnectionOpen("a"))
-	bus.Emit(apiEvents.NewConnectionOpen("b"))
-	bus.Emit(apiEvents.NewConnectionOpen("c"))
+	bus.Emit(apiEvents.NewConnectionOpen("a", ""))
+	bus.Emit(apiEvents.NewConnectionOpen("b", ""))
+	bus.Emit(apiEvents.NewConnectionOpen("c", ""))
 
 	var got []string
 	bus.Subscribe("late", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
@@ -225,8 +225,8 @@ func TestBus_ReplayFiltersByType(t *testing.T) {
 	bus := NewBusWithCapacity(10)
 
 	bus.Emit(apiEvents.NewServerStart("addr", "v1"))
-	bus.Emit(apiEvents.NewConnectionOpen("a"))
-	bus.Emit(apiEvents.NewConnectionClose("a", 1))
+	bus.Emit(apiEvents.NewConnectionOpen("a", ""))
+	bus.Emit(apiEvents.NewConnectionClose("a", 1, ""))
 
 	var count int
 	bus.Subscribe("only-conn-open", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
@@ -243,7 +243,7 @@ func TestBus_ReplayNoDuplicatesWithConcurrentEmit(t *testing.T) {
 	// Pre-seed 10 events.
 	for i := range 10 {
 		_ = i
-		bus.Emit(apiEvents.NewConnectionOpen("x"))
+		bus.Emit(apiEvents.NewConnectionOpen("x", ""))
 	}
 
 	var received atomic.Int32
@@ -256,7 +256,7 @@ func TestBus_ReplayNoDuplicatesWithConcurrentEmit(t *testing.T) {
 		defer wg.Done()
 		for i := range 40 {
 			_ = i
-			bus.Emit(apiEvents.NewConnectionOpen("y"))
+			bus.Emit(apiEvents.NewConnectionOpen("y", ""))
 		}
 	}()
 
@@ -276,11 +276,11 @@ func TestBus_ReplayNoDuplicatesWithConcurrentEmit(t *testing.T) {
 func TestBus_OverflowDropsOldestAndEmitsReplayGap(t *testing.T) {
 	bus := NewBusWithCapacity(3)
 
-	bus.Emit(apiEvents.NewConnectionOpen("a")) // dropped
-	bus.Emit(apiEvents.NewConnectionOpen("b")) // dropped
-	bus.Emit(apiEvents.NewConnectionOpen("c"))
-	bus.Emit(apiEvents.NewConnectionOpen("d"))
-	bus.Emit(apiEvents.NewConnectionOpen("e"))
+	bus.Emit(apiEvents.NewConnectionOpen("a", "")) // dropped
+	bus.Emit(apiEvents.NewConnectionOpen("b", "")) // dropped
+	bus.Emit(apiEvents.NewConnectionOpen("c", ""))
+	bus.Emit(apiEvents.NewConnectionOpen("d", ""))
+	bus.Emit(apiEvents.NewConnectionOpen("e", ""))
 
 	var addrs []string
 	var gapCount uint64
@@ -319,7 +319,7 @@ func TestBus_OverflowDropsOldestAndEmitsReplayGap(t *testing.T) {
 
 func TestBus_ZeroCapacityDisablesReplay(t *testing.T) {
 	bus := NewBusWithCapacity(0)
-	bus.Emit(apiEvents.NewConnectionOpen("a"))
+	bus.Emit(apiEvents.NewConnectionOpen("a", ""))
 
 	var received atomic.Int32
 	bus.Subscribe("late", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
@@ -330,7 +330,7 @@ func TestBus_ZeroCapacityDisablesReplay(t *testing.T) {
 	}
 
 	// Live delivery still works.
-	bus.Emit(apiEvents.NewConnectionOpen("b"))
+	bus.Emit(apiEvents.NewConnectionOpen("b", ""))
 	if received.Load() != 1 {
 		t.Errorf("expected 1 live event, got %d", received.Load())
 	}
@@ -338,9 +338,9 @@ func TestBus_ZeroCapacityDisablesReplay(t *testing.T) {
 
 func TestBus_ReplayGapOnlyWhenSubscribed(t *testing.T) {
 	bus := NewBusWithCapacity(2)
-	bus.Emit(apiEvents.NewConnectionOpen("a")) // dropped
-	bus.Emit(apiEvents.NewConnectionOpen("b"))
-	bus.Emit(apiEvents.NewConnectionOpen("c"))
+	bus.Emit(apiEvents.NewConnectionOpen("a", "")) // dropped
+	bus.Emit(apiEvents.NewConnectionOpen("b", ""))
+	bus.Emit(apiEvents.NewConnectionOpen("c", ""))
 
 	// Subscriber does NOT list ReplayGap — it should see conn events only.
 	var saw []string
@@ -363,8 +363,8 @@ func TestBus_UpdateSubscriptionDoesNotReplay(t *testing.T) {
 	bus.Subscribe("same", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
 		received.Add(1)
 	})
-	bus.Emit(apiEvents.NewConnectionOpen("a"))
-	bus.Emit(apiEvents.NewConnectionOpen("b"))
+	bus.Emit(apiEvents.NewConnectionOpen("a", ""))
+	bus.Emit(apiEvents.NewConnectionOpen("b", ""))
 	// Re-register under the same name — assumed already caught up.
 	bus.Subscribe("same", []apiEvents.Type{apiEvents.ConnectionOpen}, func(evt apiEvents.Event) {
 		received.Add(1)

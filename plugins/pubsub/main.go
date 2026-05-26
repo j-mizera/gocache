@@ -5,17 +5,14 @@ import (
 	"fmt"
 	"strconv"
 
-	"gocache/api/command"
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
 	apiResp "gocache/api/resp"
+	"gocache/api/version"
 	"gocache/sdk/pluginsdk"
 )
 
-const (
-	pluginName    = "pubsub"
-	pluginVersion = "0.1.0"
-)
+const pluginName = "pubsub"
 
 // Compile-time interface checks.
 var (
@@ -36,7 +33,7 @@ func (p *PubSub) SetSession(s *pluginsdk.Session) {
 }
 
 func (p *PubSub) Name() string    { return pluginName }
-func (p *PubSub) Version() string { return pluginVersion }
+func (p *PubSub) Version() string { return version.Version }
 func (p *PubSub) Critical() bool  { return false }
 
 func (p *PubSub) OnHealthCheck(context.Context) error { return nil }
@@ -52,25 +49,25 @@ func (p *PubSub) Commands() []pluginsdk.CommandDecl {
 	}
 }
 
-func (p *PubSub) HandleCommand(ctx context.Context, cmd string, args []string, _ map[string]string) *pluginsdk.CommandResult {
-	connID := pluginsdk.ConnectionID(ctx)
+func (p *PubSub) HandleCommand(_ context.Context, cmd *gcpc.CommandInfoV1, conn *gcpc.ConnectionInfoV1, _ map[string]string) *pluginsdk.CommandResult {
+	connID := conn.GetId()
 	if connID == "" {
 		return &pluginsdk.CommandResult{Value: fmt.Errorf("ERR no connection context")}
 	}
 
-	switch cmd {
+	switch cmd.Name {
 	case "SUBSCRIBE":
-		return p.handleSubscribe(connID, args)
+		return p.handleSubscribe(connID, cmd.Args)
 	case "UNSUBSCRIBE":
-		return p.handleUnsubscribe(connID, args)
+		return p.handleUnsubscribe(connID, cmd.Args)
 	case "PSUBSCRIBE":
-		return p.handlePSubscribe(connID, args)
+		return p.handlePSubscribe(connID, cmd.Args)
 	case "PUNSUBSCRIBE":
-		return p.handlePUnsubscribe(connID, args)
+		return p.handlePUnsubscribe(connID, cmd.Args)
 	case "PUBLISH":
-		return p.handlePublish(connID, args[0], args[1])
+		return p.handlePublish(connID, cmd.Args[0], cmd.Args[1])
 	default:
-		return &pluginsdk.CommandResult{Value: fmt.Errorf("ERR unknown command '%s'", cmd)}
+		return &pluginsdk.CommandResult{Value: fmt.Errorf("ERR unknown command '%s'", cmd.Name)}
 	}
 }
 
@@ -196,21 +193,21 @@ func (p *PubSub) handlePublish(connID, channel, message string) *pluginsdk.Comma
 // Hooks returns the hook declarations for subscription mode enforcement.
 func (p *PubSub) Hooks() []pluginsdk.HookDecl {
 	return []pluginsdk.HookDecl{
-		{Pattern: "*", Phase: pluginsdk.HookPhasePre},
+		{Pattern: "*", Phase: pluginsdk.HookPhasePre, Blocking: true},
 	}
 }
 
 // HandleHook enforces subscription mode: when a connection has active
 // subscriptions, only subscription-related commands are allowed.
-func (p *PubSub) HandleHook(ctx context.Context, req *pluginsdk.HookRequest) *pluginsdk.HookResponse {
+func (p *PubSub) HandleHook(_ context.Context, req *pluginsdk.HookRequest) *pluginsdk.HookResponse {
 	if req.Phase != pluginsdk.HookPhasePre {
 		return nil
 	}
-	connID := req.Context[command.ConnectionIDKey]
+	connID := req.Connection.GetId()
 	if connID == "" || !p.manager.IsSubscribed(connID) {
 		return nil
 	}
-	switch req.Command {
+	switch req.Command.GetName() {
 	case "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "PING", "RESET", "QUIT":
 		return nil
 	default:
@@ -229,8 +226,8 @@ func (p *PubSub) EventTypes() []string {
 // HandleEvent cleans up subscriptions when a connection disconnects.
 func (p *PubSub) HandleEvent(_ context.Context, evt *gcpc.EventV1) {
 	if evt.Type == string(events.ConnectionClose) {
-		if connID := evt.OperationId; connID != "" {
-			p.manager.RemoveConnection(connID)
+		if cc := evt.GetConnectionClose(); cc != nil && cc.ConnectionId != "" {
+			p.manager.RemoveConnection(cc.ConnectionId)
 		}
 	}
 }

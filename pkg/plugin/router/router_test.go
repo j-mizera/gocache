@@ -181,6 +181,7 @@ func TestRouteSuccess(t *testing.T) {
 	if err := r.RegisterPlugin("echo", serverConn, decls); err != nil {
 		t.Fatal(err)
 	}
+	go r.GetPluginConn("echo").StartReadLoop()
 
 	// Simulate plugin side: read request, send response.
 	var wg sync.WaitGroup
@@ -197,11 +198,11 @@ func TestRouteSuccess(t *testing.T) {
 			t.Error("expected CommandRequest")
 			return
 		}
-		if req.Command != "ECHO" {
-			t.Errorf("expected command ECHO, got %s", req.Command)
+		if req.Command.GetName() != "ECHO" {
+			t.Errorf("expected command ECHO, got %s", req.Command.GetName())
 		}
-		if len(req.Args) != 1 || req.Args[0] != "hello" {
-			t.Errorf("unexpected args: %v", req.Args)
+		if len(req.Command.GetArgs()) != 1 || req.Command.GetArgs()[0] != "hello" {
+			t.Errorf("unexpected args: %v", req.Command.GetArgs())
 		}
 		// Send response.
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
@@ -214,7 +215,7 @@ func TestRouteSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	val, _, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
+	val, _, err := r.Route(ctx, "ECHO", []string{"hello"}, nil, nil)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -240,13 +241,13 @@ func TestRouteArgValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Too few args.
-	_, _, err := r.Route(ctx, "EXACT", []string{"one"}, nil)
+	_, _, err := r.Route(ctx, "EXACT", []string{"one"}, nil, nil)
 	if err == nil {
 		t.Error("expected arg validation error for too few args")
 	}
 
 	// Too many args.
-	_, _, err = r.Route(ctx, "EXACT", []string{"one", "two", "three"}, nil)
+	_, _, err = r.Route(ctx, "EXACT", []string{"one", "two", "three"}, nil, nil)
 	if err == nil {
 		t.Error("expected arg validation error for too many args")
 	}
@@ -267,7 +268,7 @@ func TestRouteTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, _, err := r.Route(ctx, "SLOW", nil, nil)
+	_, _, err := r.Route(ctx, "SLOW", nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -285,6 +286,7 @@ func TestRouteConcurrent(t *testing.T) {
 		{Name: "PING", MinArgs: 0, MaxArgs: -1},
 	}
 	_ = r.RegisterPlugin("pinger", serverConn, decls)
+	go r.GetPluginConn("pinger").StartReadLoop()
 
 	// Plugin side: read requests and echo back request_id as the result.
 	go func() {
@@ -312,7 +314,7 @@ func TestRouteConcurrent(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, _, err := r.Route(ctx, "PING", nil, nil)
+			_, _, err := r.Route(ctx, "PING", nil, nil, nil)
 			if err != nil {
 				errs <- err
 			}
@@ -340,6 +342,7 @@ func TestRouteMetadataForwarded(t *testing.T) {
 	if err := r.RegisterPlugin("echo", serverConn, decls); err != nil {
 		t.Fatal(err)
 	}
+	go r.GetPluginConn("echo").StartReadLoop()
 
 	// Plugin side: verify metadata arrives, send response.
 	var wg sync.WaitGroup
@@ -379,7 +382,7 @@ func TestRouteMetadataForwarded(t *testing.T) {
 		"traceparent": "00-abc-def-01",
 		"tenant":      "acme",
 	}
-	val, _, err := r.Route(ctx, "ECHO", []string{"hello"}, metadata)
+	val, _, err := r.Route(ctx, "ECHO", []string{"hello"}, metadata, nil)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -402,6 +405,7 @@ func TestRouteNilMetadata(t *testing.T) {
 	if err := r.RegisterPlugin("echo", serverConn, decls); err != nil {
 		t.Fatal(err)
 	}
+	go r.GetPluginConn("echo").StartReadLoop()
 
 	// Plugin side: verify metadata is nil/empty.
 	var wg sync.WaitGroup
@@ -424,7 +428,7 @@ func TestRouteNilMetadata(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, _, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
+	_, _, err := r.Route(ctx, "ECHO", []string{"hello"}, nil, nil)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -468,6 +472,7 @@ func TestPluginConnOperationHookRoundtrip(t *testing.T) {
 
 	pc := NewPluginConn("op-hook-plugin", serverConn)
 	defer pc.Close()
+	go pc.StartReadLoop()
 
 	// Simulated plugin: when it sees an OperationHookRequest, reply immediately.
 	go func() {

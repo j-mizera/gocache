@@ -7,20 +7,18 @@ import (
 	"syscall"
 
 	apilogger "gocache/api/logger"
+	"gocache/api/version"
 	"gocache/sdk/pluginsdk"
 )
 
-const (
-	pluginName    = "dummy"
-	pluginVersion = "0.1.0"
-)
+const pluginName = "dummy"
 
 type dummyPlugin struct {
 	log *apilogger.Logger
 }
 
 func (d *dummyPlugin) Name() string    { return pluginName }
-func (d *dummyPlugin) Version() string { return pluginVersion }
+func (d *dummyPlugin) Version() string { return version.Version }
 func (d *dummyPlugin) Critical() bool  { return false }
 
 func (d *dummyPlugin) OnHealthCheck(_ context.Context) error {

@@ -61,13 +61,11 @@ type PluginConn struct {
 }
 
 func NewPluginConn(name string, conn *transport.Conn) *PluginConn {
-	pc := &PluginConn{
+	return &PluginConn{
 		conn: conn,
 		done: make(chan struct{}),
 		Name: name,
 	}
-	go pc.readLoop()
-	return pc
 }
 
 // Send writes an envelope and returns a channel for the correlated response.
@@ -109,11 +107,12 @@ func (pc *PluginConn) SendFireAndForget(env *gcpc.EnvelopeV1) {
 	pc.mu.Unlock()
 }
 
-// readLoop reads all incoming envelopes and dispatches responses
+// StartReadLoop reads all incoming envelopes and dispatches responses
 // to the appropriate pending channel by request_id. Handles every
 // request/response type that flows through PluginConn: command,
-// command hook, and operation hook.
-func (pc *PluginConn) readLoop() {
+// command hook, and operation hook. Blocks until the connection closes
+// or Done is signalled — call from a goroutine.
+func (pc *PluginConn) StartReadLoop() {
 	defer pc.drainPending()
 	for {
 		select {
@@ -160,12 +159,21 @@ func (pc *PluginConn) drainPending() {
 	})
 }
 
-// Close signals the readLoop to stop and closes the underlying transport.
-// Closing the transport is required to unblock a readLoop that is parked
-// in io.ReadFull. Safe to call multiple times.
+// Deliver dispatches an envelope to the pending channel for the given
+// request ID. Called by the manager's read loop to route response types
+// (CommandResponse, HookResponse, OperationHookResponse) to their waiters.
+func (pc *PluginConn) Deliver(requestID string, env *gcpc.EnvelopeV1) {
+	if ch, ok := pc.pending.LoadAndDelete(requestID); ok {
+		ch.(chan *gcpc.EnvelopeV1) <- env
+	}
+}
+
+// Close signals shutdown, drains pending channels, and closes the transport.
+// Safe to call multiple times.
 func (pc *PluginConn) Close() {
 	pc.closeOnce.Do(func() {
 		close(pc.done)
+		pc.drainPending()
 		if pc.conn != nil {
 			_ = pc.conn.Close()
 		}
@@ -326,7 +334,8 @@ func (r *Router) LookupMeta(op string) *RouteMeta {
 // Route dispatches a command to the owning plugin and waits for the response.
 // Returns the result as an any compatible with evaluator.Result.Value.
 // metadata carries REX metadata with bare keys (no shared.rex. prefix).
-func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string) (any, bool, error) {
+// conn carries the originating client connection info.
+func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string, conn *gcpc.ConnectionInfoV1) (any, bool, error) {
 	r.mu.RLock()
 	route, pc, found := r.lookup(op)
 	r.mu.RUnlock()
@@ -346,7 +355,8 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 	if ctxOp := ops.FromContext(ctx); ctxOp != nil {
 		opCtx = ctxOp.FilteredContext(route.PluginName, false)
 	}
-	env := gcpc.NewCommandRequest(route.Command, args, requestID, metadata, opCtx)
+	cmd := &gcpc.CommandInfoV1{Name: route.Command, Args: args}
+	env := gcpc.NewCommandRequest(requestID, cmd, conn, metadata, opCtx)
 
 	respCh, err := pc.Send(ctx, env, requestID)
 	if err != nil {
