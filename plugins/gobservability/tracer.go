@@ -55,8 +55,9 @@ type Tracer struct {
 	tracer   trace.Tracer
 	log      *apilogger.Logger
 
-	mu       sync.Mutex
-	inflight map[string]inflightSpan // operationID → span data
+	mu         sync.Mutex
+	inflight   map[string]inflightSpan // operationID → span data
+	opCounter  uint64
 }
 
 type inflightSpan struct {
@@ -155,6 +156,16 @@ func (t *Tracer) StartOperation(opID, opType string, opContext map[string]string
 
 	t.mu.Lock()
 	t.inflight[opID] = inflightSpan{span: span, startTime: spanStart}
+	t.opCounter++
+	if t.opCounter%1000 == 0 {
+		cutoff := time.Now().Add(-5 * time.Minute)
+		for id, entry := range t.inflight {
+			if entry.startTime.Before(cutoff) {
+				entry.span.End()
+				delete(t.inflight, id)
+			}
+		}
+	}
 	t.mu.Unlock()
 
 	// Emit a traceparent from the new span if none existed.

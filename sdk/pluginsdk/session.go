@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gocache/api/command"
 	gcpc "gocache/api/gcpc/v1"
@@ -65,14 +66,18 @@ func (s *Session) StartOperation(ctx context.Context, opType string) (context.Co
 }
 
 func (s *Session) completeOperation(operationID string) error {
-	_, err := s.QueryServer(context.Background(), "operation.complete", map[string]string{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := s.QueryServer(ctx, "operation.complete", map[string]string{
 		"_operation_id": operationID,
 	})
 	return err
 }
 
 func (s *Session) failOperation(operationID, reason string) error {
-	_, err := s.QueryServer(context.Background(), "operation.fail", map[string]string{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := s.QueryServer(ctx, "operation.fail", map[string]string{
 		"_operation_id":  operationID,
 		"_fail_reason":   reason,
 	})

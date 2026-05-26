@@ -475,7 +475,7 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 		if !found {
 			return
 		}
-		popResult, dispatchErr := cmdCtx.Engine.DispatchWithResult(cmdCtx.Context(), func() any {
+		popResult, dispatchErr := cmdCtx.Engine.DispatchToShard(cmdCtx.Context(), cmdCtx.Cache.ShardIndexOf(key), func() any {
 			entry, ok := cmdCtx.Cache.RawGet(key)
 			if !ok {
 				return nil
