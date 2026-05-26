@@ -467,9 +467,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 	}
 
-	// Resolve or create the PluginConn once — reused for hooks and op-hooks
-	// so a single readLoop serves all hook types. Creating two PluginConns
-	// on the same connection would spawn duplicate readLoop goroutines.
+	// Resolve or create the PluginConn once — reused for hooks and op-hooks.
 	pc := m.router.GetPluginConn(reg.Name)
 	if pc == nil && (len(reg.Hooks) > 0 || len(reg.OperationHooks) > 0) {
 		pc = router.NewPluginConn(reg.Name, conn)
@@ -532,8 +530,8 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		m.healthLoop(ctx, inst)
 	}()
 
-	// Read loop for this plugin (handles ShutdownAck and future messages).
-	m.readLoop(ctx, inst)
+	// Read loop for this plugin — single reader on the transport connection.
+	m.readLoop(ctx, inst, pc)
 }
 
 // validateScopes resolves the granted scopes for a plugin.
@@ -622,8 +620,12 @@ func (m *Manager) healthLoop(ctx context.Context, inst *PluginInstance) {
 	}
 }
 
-// readLoop reads messages from a connected plugin.
-func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
+// readLoop reads messages from a connected plugin. It is the single reader
+// on the transport connection — response types (CommandResponse, HookResponse,
+// OperationHookResponse) are dispatched to the PluginConn's pending channels,
+// while management messages (ClientPush, EventSubscribe, etc.) are handled
+// directly.
+func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router.PluginConn) {
 	conn := inst.Conn()
 	if conn == nil {
 		return
@@ -713,6 +715,18 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 			}
 			if err := m.clientPusher.Push(push.ConnectionId, push.Data); err != nil {
 				logger.Debug(loopCtx).Str("plugin", inst.Name).Err(err).Msg("client push failed")
+			}
+		case *gcpcv1.EnvelopeV1_CommandResponse:
+			if pc != nil {
+				pc.Deliver(env.GetCommandResponse().RequestId, env)
+			}
+		case *gcpcv1.EnvelopeV1_HookResponse:
+			if pc != nil {
+				pc.Deliver(env.GetHookResponse().RequestId, env)
+			}
+		case *gcpcv1.EnvelopeV1_OperationHookResponse:
+			if pc != nil {
+				pc.Deliver(env.GetOperationHookResponse().RequestId, env)
 			}
 		default:
 			logger.Debug(loopCtx).Str("plugin", inst.Name).Msg("unexpected message from plugin")

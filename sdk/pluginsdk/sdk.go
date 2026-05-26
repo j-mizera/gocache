@@ -43,9 +43,10 @@ type CommandPlugin interface {
 	// Called once during registration.
 	Commands() []CommandDecl
 	// HandleCommand is called when a client invokes a plugin command.
+	// cmd and conn carry the command and originating connection as typed proto messages.
 	// metadata carries REX metadata with bare keys (no shared.rex. prefix), nil when absent.
 	// Called concurrently from multiple goroutines — must be goroutine-safe.
-	HandleCommand(ctx context.Context, cmd string, args []string, metadata map[string]string) *CommandResult
+	HandleCommand(ctx context.Context, cmd *gcpc.CommandInfoV1, conn *gcpc.ConnectionInfoV1, metadata map[string]string) *CommandResult
 }
 
 // HookPlugin extends Plugin with hook registration and handling.
@@ -176,19 +177,21 @@ type CommandResult struct {
 
 // HookDecl declares a hook a plugin wants to intercept.
 type HookDecl struct {
-	Pattern string    // "SET", "GET", "*" (exact or wildcard)
-	Phase   HookPhase // Pre or Post
+	Pattern  string    // "SET", "GET", "*" (exact or wildcard)
+	Phase    HookPhase // Pre or Post
+	Blocking bool      // true = server waits for response and can honour deny
+	Critical *bool     // hook failure mode; nil = inherit from plugin; non-nil overrides
 }
 
 // HookRequest contains the context for a hook invocation.
 type HookRequest struct {
 	Phase       HookPhase
-	Command     string
-	Args        []string
-	ResultValue string            // post-hook only
-	ResultError string            // post-hook only
-	Context     map[string]string // accumulated context from server + own namespace + shared
-	Metadata    map[string]string // REX metadata with bare keys (no shared.rex. prefix)
+	Command     *gcpc.CommandInfoV1    // the command being hooked
+	Connection  *gcpc.ConnectionInfoV1 // originating client connection
+	ResultValue string                 // post-hook only
+	ResultError string                 // post-hook only
+	Context     map[string]string      // accumulated context from server + own namespace + shared
+	Metadata    map[string]string      // REX metadata with bare keys (no shared.rex. prefix)
 }
 
 // HookResponse is the plugin's response to a hook invocation.
@@ -196,16 +199,6 @@ type HookResponse struct {
 	Deny          bool // pre-hook only: true = abort the command
 	DenyReason    string
 	ContextValues map[string]string // pre-hook: values to add to command context
-}
-
-// ConnectionID extracts the stable connection identifier from the operation
-// context. Returns "" if no operation or connection ID is available.
-func ConnectionID(ctx context.Context) string {
-	if op := ops.FromContext(ctx); op != nil {
-		snap := op.ContextSnapshot(false)
-		return snap[command.ConnectionIDKey]
-	}
-	return ""
 }
 
 // ctxFromOpMap reconstructs a local operation from a context map containing
@@ -279,8 +272,10 @@ func Run(ctx context.Context, p Plugin) error {
 		hookDecls = make([]*gcpc.HookDeclV1, len(decls))
 		for i, d := range decls {
 			hookDecls[i] = &gcpc.HookDeclV1{
-				Pattern: d.Pattern,
-				Phase:   gcpc.HookPhaseV1(d.Phase),
+				Pattern:  d.Pattern,
+				Phase:    gcpc.HookPhaseV1(d.Phase),
+				Blocking: d.Blocking,
+				Critical: d.Critical,
 			}
 		}
 	}
@@ -425,7 +420,7 @@ func Run(ctx context.Context, p Plugin) error {
 			go func() {
 				defer handlerWg.Done()
 				cmdCtx := ctxFromOpMap(ctx, req.Context)
-				result := cp.HandleCommand(cmdCtx, req.Command, req.Args, req.Metadata)
+				result := cp.HandleCommand(cmdCtx, req.Command, req.Connection, req.Metadata)
 				var protoResult *gcpc.ResultV1
 				suppress := false
 				if result != nil {
@@ -436,7 +431,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewCommandResponse(req.RequestId, protoResult, suppress)
 				if err := tc.Send(resp); err != nil {
-					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command).Msg("failed to send command response")
+					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command.GetName()).Msg("failed to send command response")
 				}
 			}()
 
@@ -510,7 +505,7 @@ func Run(ctx context.Context, p Plugin) error {
 				hookReq := &HookRequest{
 					Phase:       HookPhase(req.Phase),
 					Command:     req.Command,
-					Args:        req.Args,
+					Connection:  req.Connection,
 					ResultValue: req.ResultValue,
 					ResultError: req.ResultError,
 					Context:     req.Context,
@@ -528,7 +523,7 @@ func Run(ctx context.Context, p Plugin) error {
 				}
 				resp := gcpc.NewHookResponse(req.RequestId, deny, denyReason, ctxValues)
 				if err := tc.Send(resp); err != nil {
-					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command).Msg("failed to send hook response")
+					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command.GetName()).Msg("failed to send hook response")
 				}
 			}()
 

@@ -23,7 +23,8 @@ type HookEntry struct {
 	PluginName string
 	Pattern    string // uppercase, "*" = wildcard
 	Phase      Phase
-	Critical   bool // critical = blocking, non-critical = fire-and-forget
+	Blocking   bool // true = server waits for response and can honour deny
+	Critical   bool // true = hook error/timeout fails the command; false = fail-open
 	Priority   int  // lower = higher priority
 	Conn       *router.PluginConn
 }
@@ -54,17 +55,24 @@ func NewRegistry() *Registry {
 }
 
 // Register adds hooks declared by a plugin.
-func (r *Registry) Register(pluginName string, priority int, critical bool, conn *router.PluginConn, decls []*gcpc.HookDeclV1) {
+// pluginCritical is the plugin-level critical flag, used as fallback when the
+// hook declaration does not set its own critical field.
+func (r *Registry) Register(pluginName string, priority int, pluginCritical bool, conn *router.PluginConn, decls []*gcpc.HookDeclV1) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	added := 0
 	for _, d := range decls {
+		hookCritical := pluginCritical
+		if d.Critical != nil {
+			hookCritical = *d.Critical
+		}
 		entry := &HookEntry{
 			PluginName: pluginName,
 			Pattern:    strings.ToUpper(strings.TrimSpace(d.Pattern)),
 			Phase:      Phase(d.Phase),
-			Critical:   critical,
+			Blocking:   d.Blocking,
+			Critical:   hookCritical,
 			Priority:   priority,
 			Conn:       conn,
 		}

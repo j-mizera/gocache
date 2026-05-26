@@ -31,7 +31,7 @@ import (
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/plugin/ophooks"
 	"gocache/pkg/server"
-	"gocache/pkg/version"
+	"gocache/api/version"
 	"gocache/pkg/watch"
 	"gocache/pkg/workers"
 

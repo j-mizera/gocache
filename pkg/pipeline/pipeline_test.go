@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	apiEvents "gocache/api/events"
+	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
 	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
@@ -39,11 +40,11 @@ type mockHookExecutor struct {
 }
 
 func (m *mockHookExecutor) HasAny() bool { return m.hasAny }
-func (m *mockHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, hookCtx map[string]string) *apicommand.PreHookResult {
+func (m *mockHookExecutor) RunPreHooks(_ context.Context, _ *gcpc.CommandInfoV1, _ *gcpc.ConnectionInfoV1, hookCtx map[string]string) *apicommand.PreHookResult {
 	m.lastHookCtx = hookCtx
 	return m.preResult
 }
-func (m *mockHookExecutor) RunPostHooks(_ context.Context, _ string, _ []string, _, _ string, _ map[string]string) {
+func (m *mockHookExecutor) RunPostHooks(_ context.Context, _ *gcpc.CommandInfoV1, _ *gcpc.ConnectionInfoV1, _, _ string, _ map[string]string) {
 	m.postCalled.Add(1)
 }
 

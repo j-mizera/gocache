@@ -241,21 +241,26 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		}
 	}
 
+	// Generate a stable connection ID, independent of the operation system.
+	connID := clientctx.NextConnectionID()
+
 	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
 	connOp.Enrich(apicommand.RemoteAddrKey, remoteAddr)
-	connOp.Enrich(apicommand.ConnectionIDKey, connOp.ID)
+	connOp.Enrich(apicommand.ConnectionIDKey, connID)
 	connCtx := ops.WithContext(serverCtx, connOp)
 	if srv.opHookExecutor != nil {
 		srv.opHookExecutor.RunStartHooks(connCtx, connOp)
 	}
-	srv.emitter.Emit(events.NewConnectionOpen(remoteAddr).WithOperationID(connOp.ID))
+	srv.emitter.Emit(events.NewConnectionOpen(remoteAddr, connID).WithOperationID(connOp.ID))
 
 	ctx := clientctx.New()
+	ctx.ConnectionID = connID
+	ctx.RemoteAddr = remoteAddr
 	ctx.OperationID = connOp.ID
 
 	defer func() {
-		srv.connRegistry.Unregister(connOp.ID)
+		srv.connRegistry.Unregister(connID)
 		if srv.watchManager != nil {
 			srv.watchManager.Unwatch(ctx)
 		}
@@ -265,13 +270,13 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		if srv.opHookExecutor != nil {
 			srv.opHookExecutor.RunCompleteHooks(connOp)
 		}
-		srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds())).WithOperationID(connOp.ID))
+		srv.emitter.Emit(events.NewConnectionClose(remoteAddr, uint64(time.Since(connStart).Nanoseconds()), connID).WithOperationID(connOp.ID))
 		srv.tracker.Complete(connOp.ID)
 	}()
 
 	reader := resp.NewReader(conn)
 	writer := resp.NewWriter(conn)
-	connHandle := srv.connRegistry.Register(connOp.ID, writer)
+	connHandle := srv.connRegistry.Register(connID, writer)
 	defer func() {
 		if err := connHandle.Flush(); err != nil {
 			logger.Debug(connCtx).Err(err).Msg("final flush on connection close")

@@ -2,10 +2,19 @@ package clientctx
 
 import (
 	"errors"
+	"fmt"
 	"sync/atomic"
 
 	"gocache/pkg/rex"
 )
+
+var connSeq atomic.Uint64
+
+// NextConnectionID returns a unique connection identifier, independent of
+// the operation tracking system.
+func NextConnectionID() string {
+	return fmt.Sprintf("cid_%d", connSeq.Add(1))
+}
 
 var (
 	ErrNestedMulti         = errors.New("multi calls cannot be nested")
@@ -31,6 +40,8 @@ type ClientContext struct {
 	RexVersion    int               // 0 = disabled, 1 = META lines enabled
 	RexMeta       *rex.Store        // nil until first REX.META SET/MSET
 	CmdMeta       map[string]string // transient per-command META, set by server, cleared after eval
+	ConnectionID  string            // stable connection identifier, independent of operations
+	RemoteAddr    string            // remote peer address, set by server
 	OperationID   string            // parent operation ID (connection operation), set by server
 }
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	apicommand "gocache/api/command"
+	gcpc "gocache/api/gcpc/v1"
 	"gocache/pkg/command"
 	"gocache/pkg/resp"
 )
@@ -21,7 +22,7 @@ type fakeHookExecutor struct {
 
 func (f *fakeHookExecutor) HasAny() bool { return true }
 
-func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, hookCtx map[string]string) *apicommand.PreHookResult {
+func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ *gcpc.CommandInfoV1, _ *gcpc.ConnectionInfoV1, hookCtx map[string]string) *apicommand.PreHookResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := make(map[string]string, len(hookCtx))
@@ -32,7 +33,7 @@ func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ string, _ []string, 
 	return &apicommand.PreHookResult{Denied: false, Context: hookCtx}
 }
 
-func (f *fakeHookExecutor) RunPostHooks(_ context.Context, _ string, _ []string, _, _ string, hookCtx map[string]string) {
+func (f *fakeHookExecutor) RunPostHooks(_ context.Context, _ *gcpc.CommandInfoV1, _ *gcpc.ConnectionInfoV1, _, _ string, hookCtx map[string]string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := make(map[string]string, len(hookCtx))

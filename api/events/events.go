@@ -74,19 +74,19 @@ func NewCommandPost(command string, args []string, elapsedNs uint64, result, err
 }
 
 // NewConnectionOpen creates a connection.open event.
-func NewConnectionOpen(remoteAddr string) Event {
+func NewConnectionOpen(remoteAddr, connectionID string) Event {
 	e := newEventProto(ConnectionOpen)
 	e.Data = &gcpc.EventV1_ConnectionOpen{ConnectionOpen: &gcpc.ConnectionOpenEventV1{
-		RemoteAddr: remoteAddr,
+		RemoteAddr: remoteAddr, ConnectionId: connectionID,
 	}}
 	return Event{Proto: e}
 }
 
 // NewConnectionClose creates a connection.close event.
-func NewConnectionClose(remoteAddr string, durationNs uint64) Event {
+func NewConnectionClose(remoteAddr string, durationNs uint64, connectionID string) Event {
 	e := newEventProto(ConnectionClose)
 	e.Data = &gcpc.EventV1_ConnectionClose{ConnectionClose: &gcpc.ConnectionCloseEventV1{
-		RemoteAddr: remoteAddr, DurationNs: durationNs,
+		RemoteAddr: remoteAddr, DurationNs: durationNs, ConnectionId: connectionID,
 	}}
 	return Event{Proto: e}
 }

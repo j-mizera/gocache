@@ -108,10 +108,26 @@ jobs:
             exit 1
           fi
 
+  integration-docker:
+    name: Integration Tests (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: OTLP integration tests
+        run: go test -race -count=1 -v -tags "otlp,integration" ./plugins/otlp/...
+
+      - name: Gobservability integration tests
+        run: go test -race -count=1 -v -tags integration ./plugins/gobservability/...
+
   merge-gate:
     name: PR Ready
     runs-on: ubuntu-latest
-    needs: [lint, build, test, proto-check]
+    needs: [lint, build, test, proto-check, integration-docker]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -121,6 +137,7 @@ jobs:
             "${{ needs.build.result }}"
             "${{ needs.test.result }}"
             "${{ needs.proto-check.result }}"
+            "${{ needs.integration-docker.result }}"
           )
           for r in "${results[@]}"; do
             if [[ "$r" != "success" ]]; then

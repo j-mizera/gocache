@@ -104,7 +104,7 @@ func NewShutdownAck() *EnvelopeV1 {
 	}
 }
 
-func NewHookRequest(requestID string, phase HookPhaseV1, command string, args []string, resultValue, resultError string, ctx map[string]string, metadata map[string]string) *EnvelopeV1 {
+func NewHookRequest(requestID string, phase HookPhaseV1, cmd *CommandInfoV1, conn *ConnectionInfoV1, resultValue, resultError string, ctx map[string]string, metadata map[string]string) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
@@ -112,8 +112,8 @@ func NewHookRequest(requestID string, phase HookPhaseV1, command string, args []
 			HookRequest: &HookRequestV1{
 				RequestId:   requestID,
 				Phase:       phase,
-				Command:     command,
-				Args:        args,
+				Command:     cmd,
+				Connection:  conn,
 				ResultValue: resultValue,
 				ResultError: resultError,
 				Context:     ctx,
@@ -138,17 +138,17 @@ func NewHookResponse(requestID string, deny bool, denyReason string, contextValu
 	}
 }
 
-func NewCommandRequest(command string, args []string, requestID string, metadata, opContext map[string]string) *EnvelopeV1 {
+func NewCommandRequest(requestID string, cmd *CommandInfoV1, conn *ConnectionInfoV1, metadata, opContext map[string]string) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
 		Payload: &EnvelopeV1_CommandRequest{
 			CommandRequest: &CommandRequestV1{
-				Command:   command,
-				Args:      args,
-				RequestId: requestID,
-				Metadata:  metadata,
-				Context:   opContext,
+				RequestId:  requestID,
+				Command:    cmd,
+				Connection: conn,
+				Metadata:   metadata,
+				Context:    opContext,
 			},
 		},
 	}

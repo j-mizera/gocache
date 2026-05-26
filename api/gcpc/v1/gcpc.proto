@@ -61,8 +61,10 @@ enum HookPhaseV1 {
 
 // HookDeclV1 declares a hook a plugin wants to intercept.
 message HookDeclV1 {
-  string      pattern = 1; // "SET", "GET", "*" (exact or wildcard)
-  HookPhaseV1 phase   = 2; // when the hook fires
+  string      pattern  = 1; // "SET", "GET", "*" (exact or wildcard)
+  HookPhaseV1 phase    = 2; // when the hook fires
+  bool        blocking = 3; // true = server waits for response and can honour deny; false = fire-and-forget
+  optional bool critical = 4; // hook failure mode; absent = inherit from plugin; true = error fails command; false = fail-open
 }
 
 // RegisterAckV1 is the server's response to a RegisterV1 message.
@@ -97,13 +99,25 @@ message ShutdownV1 {
 // ShutdownAckV1 is the plugin's acknowledgement of a ShutdownV1 request.
 message ShutdownAckV1 {}
 
+// ConnectionInfoV1 identifies the client connection that originated a request.
+message ConnectionInfoV1 {
+  string id          = 1; // stable connection identifier (connOp.ID)
+  string remote_addr = 2; // remote peer address (e.g. "127.0.0.1:54321")
+}
+
+// CommandInfoV1 describes the command being executed or hooked.
+message CommandInfoV1 {
+  string          name = 1; // resolved command name (e.g. "SET", "PUBLISH")
+  repeated string args = 2; // command arguments as strings
+}
+
 // CommandRequestV1 is sent by the server to invoke a plugin command.
 message CommandRequestV1 {
-  string          command    = 1; // resolved command name (e.g. "PUBLISH")
-  repeated string args       = 2; // command arguments as strings
-  string          request_id = 3; // correlation ID for multiplexed responses
-  map<string, string> metadata = 4; // REX metadata (bare keys, no shared.rex. prefix)
-  map<string, string> context  = 5; // operation context (filtered for plugin visibility)
+  string              request_id = 1; // correlation ID for multiplexed responses
+  CommandInfoV1       command    = 2; // the command being invoked
+  ConnectionInfoV1    connection = 3; // originating client connection
+  map<string, string> metadata  = 4; // REX metadata (bare keys, no shared.rex. prefix)
+  map<string, string> context   = 5; // operation context (filtered for plugin visibility)
 }
 
 // CommandResponseV1 is the plugin's response to a CommandRequestV1.
@@ -115,14 +129,14 @@ message CommandResponseV1 {
 
 // HookRequestV1 is sent by the server when a hook fires.
 message HookRequestV1 {
-  string          request_id   = 1; // correlation ID
-  HookPhaseV1     phase        = 2;
-  string          command      = 3; // the command being hooked (e.g. "SET")
-  repeated string args          = 4;
-  string          result_value = 5; // post-hook only: serialized result
-  string          result_error = 6; // post-hook only: error string if any
-  map<string, string> context  = 7; // accumulated hook context (server + own namespace + shared)
-  map<string, string> metadata = 8; // REX metadata (bare keys, no shared.rex. prefix)
+  string              request_id   = 1; // correlation ID
+  HookPhaseV1         phase        = 2;
+  CommandInfoV1       command      = 3; // the command being hooked
+  ConnectionInfoV1    connection   = 4; // originating client connection
+  string              result_value = 5; // post-hook only: serialized result
+  string              result_error = 6; // post-hook only: error string if any
+  map<string, string> context      = 7; // accumulated hook context (server + own namespace + shared)
+  map<string, string> metadata     = 8; // REX metadata (bare keys, no shared.rex. prefix)
 }
 
 // HookResponseV1 is the plugin's response to a HookRequestV1.
@@ -225,12 +239,14 @@ message CommandPostEventV1 {
 }
 
 message ConnectionOpenEventV1 {
-  string remote_addr = 1;
+  string remote_addr    = 1;
+  string connection_id  = 2; // stable connection identifier
 }
 
 message ConnectionCloseEventV1 {
-  string remote_addr = 1;
-  uint64 duration_ns = 2;
+  string remote_addr    = 1;
+  uint64 duration_ns    = 2;
+  string connection_id  = 3; // stable connection identifier
 }
 
 message ServerStartEventV1 {

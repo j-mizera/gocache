@@ -204,9 +204,10 @@ func TestExecutorPreHookDeny(t *testing.T) {
 
 	pc := router.NewPluginConn("acl", serverConn)
 	defer pc.Close()
+	go pc.StartReadLoop()
 
-	reg.Register("acl", 1, true, pc, []*gcpc.HookDeclV1{
-		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE},
+	reg.Register("acl", 1, false, pc, []*gcpc.HookDeclV1{
+		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE, Blocking: true},
 	})
 
 	exec := NewExecutor(reg, 5*time.Second)
@@ -223,8 +224,8 @@ func TestExecutorPreHookDeny(t *testing.T) {
 			t.Error("expected HookRequest")
 			return
 		}
-		if req.Command != "SET" {
-			t.Errorf("expected SET, got %s", req.Command)
+		if req.Command.GetName() != "SET" {
+			t.Errorf("expected SET, got %s", req.Command.GetName())
 		}
 		resp := gcpc.NewHookResponse(req.RequestId, true, "permission denied", nil)
 		if err := clientConn.Send(resp); err != nil {
@@ -233,7 +234,7 @@ func TestExecutorPreHookDeny(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	result := exec.RunPreHooks(ctx, "SET", []string{"key", "val"}, nil)
+	result := exec.RunPreHooks(ctx, &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, nil)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -254,9 +255,10 @@ func TestExecutorPreHookAllow(t *testing.T) {
 
 	pc := router.NewPluginConn("acl", serverConn)
 	defer pc.Close()
+	go pc.StartReadLoop()
 
-	reg.Register("acl", 1, true, pc, []*gcpc.HookDeclV1{
-		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE},
+	reg.Register("acl", 1, false, pc, []*gcpc.HookDeclV1{
+		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE, Blocking: true},
 	})
 
 	exec := NewExecutor(reg, 5*time.Second)
@@ -269,7 +271,7 @@ func TestExecutorPreHookAllow(t *testing.T) {
 		_ = clientConn.Send(resp)
 	}()
 
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
+	result := exec.RunPreHooks(context.Background(), &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, nil)
 	if result == nil || result.Denied {
 		t.Error("expected command to be allowed")
 	}
@@ -277,7 +279,7 @@ func TestExecutorPreHookAllow(t *testing.T) {
 	clientConn.Close()
 }
 
-func TestExecutorNonCriticalFireAndForget(t *testing.T) {
+func TestExecutorNonBlockingFireAndForget(t *testing.T) {
 	reg := NewRegistry()
 	serverConn, clientConn := testPipe()
 	defer serverConn.Close()
@@ -285,7 +287,7 @@ func TestExecutorNonCriticalFireAndForget(t *testing.T) {
 	pc := router.NewPluginConn("audit", serverConn)
 	defer pc.Close()
 
-	// Non-critical hook (critical=false).
+	// Non-blocking hook (blocking=false, the default).
 	reg.Register("audit", 10, false, pc, []*gcpc.HookDeclV1{
 		{Pattern: "*", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE},
 	})
@@ -304,16 +306,16 @@ func TestExecutorNonCriticalFireAndForget(t *testing.T) {
 		}
 	}()
 
-	// Non-critical pre-hooks should not block — returns immediately.
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
+	// Non-blocking pre-hooks should not block — returns immediately.
+	result := exec.RunPreHooks(context.Background(), &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, nil)
 	if result == nil || result.Denied {
-		t.Error("non-critical hook should not deny")
+		t.Error("non-blocking hook should not deny")
 	}
 
 	// Give the async goroutine time to deliver.
 	time.Sleep(100 * time.Millisecond)
 	if !received.Load() {
-		t.Error("expected non-critical hook to be received by plugin")
+		t.Error("expected non-blocking hook to be received by plugin")
 	}
 
 	clientConn.Close()
@@ -328,7 +330,7 @@ func TestExecutorNoHooksZeroCost(t *testing.T) {
 	}
 
 	// Should return nil immediately — no allocations, no goroutines.
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
+	result := exec.RunPreHooks(context.Background(), &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, nil)
 	if result != nil {
 		t.Error("expected nil result when no hooks")
 	}
@@ -342,9 +344,11 @@ func TestExecutorPostHook(t *testing.T) {
 	pc := router.NewPluginConn("aof", serverConn)
 	defer pc.Close()
 
-	// Critical post-hook.
-	reg.Register("aof", 5, true, pc, []*gcpc.HookDeclV1{
-		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_POST},
+	go pc.StartReadLoop()
+
+	// Blocking post-hook.
+	reg.Register("aof", 5, false, pc, []*gcpc.HookDeclV1{
+		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_POST, Blocking: true},
 	})
 
 	exec := NewExecutor(reg, 5*time.Second)
@@ -363,12 +367,12 @@ func TestExecutorPostHook(t *testing.T) {
 		_ = clientConn.Send(resp)
 	}()
 
-	exec.RunPostHooks(context.Background(), "SET", []string{"key", "val"}, "OK", "", nil)
+	exec.RunPostHooks(context.Background(), &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, "OK", "", nil)
 
 	clientConn.Close()
 }
 
-func TestExecutorPreHookTimeout(t *testing.T) {
+func TestExecutorPreHookTimeoutFailOpen(t *testing.T) {
 	reg := NewRegistry()
 	serverConn, clientConn := testPipe()
 	defer clientConn.Close()
@@ -376,24 +380,52 @@ func TestExecutorPreHookTimeout(t *testing.T) {
 
 	pc := router.NewPluginConn("slow", serverConn)
 	defer pc.Close()
+	go pc.StartReadLoop()
 
-	reg.Register("slow", 1, true, pc, []*gcpc.HookDeclV1{
-		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE},
+	// Blocking but non-critical: timeout → fail-open.
+	reg.Register("slow", 1, false, pc, []*gcpc.HookDeclV1{
+		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE, Blocking: true},
 	})
 
-	// Short timeout — plugin never responds.
 	exec := NewExecutor(reg, 50*time.Millisecond)
 
-	// Plugin side: read but don't respond.
 	go func() {
 		_, _ = clientConn.Recv()
-		// intentionally don't respond
 	}()
 
-	// Should fail-open (allow command) after timeout.
-	result := exec.RunPreHooks(context.Background(), "SET", []string{"key", "val"}, nil)
+	result := exec.RunPreHooks(context.Background(), &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, nil)
 	if result == nil || result.Denied {
 		t.Error("expected fail-open on timeout (command allowed)")
+	}
+}
+
+func TestExecutorPreHookTimeoutCritical(t *testing.T) {
+	reg := NewRegistry()
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	pc := router.NewPluginConn("strict", serverConn)
+	defer pc.Close()
+	go pc.StartReadLoop()
+
+	// Blocking and critical: timeout → fail-closed (deny command).
+	reg.Register("strict", 1, true, pc, []*gcpc.HookDeclV1{
+		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE, Blocking: true},
+	})
+
+	exec := NewExecutor(reg, 50*time.Millisecond)
+
+	go func() {
+		_, _ = clientConn.Recv()
+	}()
+
+	result := exec.RunPreHooks(context.Background(), &gcpc.CommandInfoV1{Name: "SET", Args: []string{"key", "val"}}, nil, nil)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Denied {
+		t.Error("expected fail-closed on timeout for critical hook")
 	}
 }
 
@@ -466,7 +498,7 @@ func TestExecutorNoMatchReturnsNil(t *testing.T) {
 	exec := NewExecutor(reg, time.Second)
 
 	// GET should not trigger hooks.
-	result := exec.RunPreHooks(context.Background(), "GET", []string{"key"}, nil)
+	result := exec.RunPreHooks(context.Background(), &gcpc.CommandInfoV1{Name: "GET", Args: []string{"key"}}, nil, nil)
 	if result != nil {
 		t.Error("expected nil for non-matching command")
 	}
