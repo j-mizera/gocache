@@ -248,9 +248,19 @@ func (c *Cache) ApplyMutation(ctx context.Context, m apipersistence.Mutation) er
 		if !ok {
 			return nil
 		}
-		h, ok := e.Value.(map[string]string)
-		if !ok {
-			return fmt.Errorf("apply HDEL: key %q is not a hash", key)
+		var h map[string]string
+		if e.Encoding == EncPacked {
+			var err error
+			h, err = DecodeHash(c.ResolvePacked(e))
+			if err != nil {
+				return fmt.Errorf("apply HDEL: decode packed hash %q: %w", key, err)
+			}
+		} else {
+			var ok bool
+			h, ok = e.Value.(map[string]string)
+			if !ok {
+				return fmt.Errorf("apply HDEL: key %q is not a hash", key)
+			}
 		}
 		for _, f := range m.Args[1:] {
 			delete(h, string(f))
@@ -281,9 +291,19 @@ func (c *Cache) ApplyMutation(ctx context.Context, m apipersistence.Mutation) er
 		if !ok {
 			return nil
 		}
-		s, ok := e.Value.(map[string]struct{})
-		if !ok {
-			return fmt.Errorf("apply SREM: key %q is not a set", key)
+		var s map[string]struct{}
+		if e.Encoding == EncPacked {
+			var err error
+			s, err = DecodeSet(c.ResolvePacked(e))
+			if err != nil {
+				return fmt.Errorf("apply SREM: decode packed set %q: %w", key, err)
+			}
+		} else {
+			var ok bool
+			s, ok = e.Value.(map[string]struct{})
+			if !ok {
+				return fmt.Errorf("apply SREM: key %q is not a set", key)
+			}
 		}
 		for _, member := range m.Args[1:] {
 			delete(s, string(member))
@@ -305,9 +325,19 @@ func (c *Cache) ApplyMutation(ctx context.Context, m apipersistence.Mutation) er
 		if !ok {
 			return nil
 		}
-		s, ok := e.Value.(map[string]struct{})
-		if !ok {
-			return fmt.Errorf("apply SPOP: key %q is not a set", key)
+		var s map[string]struct{}
+		if e.Encoding == EncPacked {
+			var err error
+			s, err = DecodeSet(c.ResolvePacked(e))
+			if err != nil {
+				return fmt.Errorf("apply SPOP: decode packed set %q: %w", key, err)
+			}
+		} else {
+			var ok bool
+			s, ok = e.Value.(map[string]struct{})
+			if !ok {
+				return fmt.Errorf("apply SPOP: key %q is not a set", key)
+			}
 		}
 		i := 0
 		for member := range s {
@@ -356,9 +386,19 @@ func (c *Cache) ApplyMutation(ctx context.Context, m apipersistence.Mutation) er
 		if !ok {
 			return nil
 		}
-		z, ok := e.Value.(*SortedSet)
-		if !ok {
-			return fmt.Errorf("apply ZREM: key %q is not a sorted set", key)
+		var z *SortedSet
+		if e.Encoding == EncPacked {
+			var err error
+			z, err = DecodeZSet(c.ResolvePacked(e))
+			if err != nil {
+				return fmt.Errorf("apply ZREM: decode packed zset %q: %w", key, err)
+			}
+		} else {
+			var ok bool
+			z, ok = e.Value.(*SortedSet)
+			if !ok {
+				return fmt.Errorf("apply ZREM: key %q is not a sorted set", key)
+			}
 		}
 		for _, member := range m.Args[1:] {
 			z.Remove(string(member))
@@ -474,6 +514,13 @@ func (c *Cache) getHash(key string) (map[string]string, int64) {
 	if !ok {
 		return make(map[string]string), 0
 	}
+	if e.Encoding == EncPacked {
+		h, err := DecodeHash(c.ResolvePacked(e))
+		if err != nil {
+			return make(map[string]string), c.RawTTL(key)
+		}
+		return h, c.RawTTL(key)
+	}
 	if h, ok := e.Value.(map[string]string); ok {
 		return h, c.RawTTL(key)
 	}
@@ -485,6 +532,13 @@ func (c *Cache) getSet(key string) (map[string]struct{}, int64) {
 	if !ok {
 		return make(map[string]struct{}), 0
 	}
+	if e.Encoding == EncPacked {
+		s, err := DecodeSet(c.ResolvePacked(e))
+		if err != nil {
+			return make(map[string]struct{}), c.RawTTL(key)
+		}
+		return s, c.RawTTL(key)
+	}
 	if s, ok := e.Value.(map[string]struct{}); ok {
 		return s, c.RawTTL(key)
 	}
@@ -495,6 +549,13 @@ func (c *Cache) getSortedSet(key string) (*SortedSet, int64) {
 	e, ok := c.RawGet(key)
 	if !ok {
 		return NewSortedSet(), 0
+	}
+	if e.Encoding == EncPacked {
+		z, err := DecodeZSet(c.ResolvePacked(e))
+		if err != nil {
+			return NewSortedSet(), c.RawTTL(key)
+		}
+		return z, c.RawTTL(key)
 	}
 	if z, ok := e.Value.(*SortedSet); ok {
 		return z, c.RawTTL(key)

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 func TestSession_QueryServer(t *testing.T) {

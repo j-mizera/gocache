@@ -24,7 +24,8 @@ import (
 	"fmt"
 
 	"gocache/api/config"
-	"gocache/api/logger"
+	"gocache/commons/logger"
+	"gocache/commons/plugincfg"
 	ops "gocache/api/operations"
 )
 
@@ -104,7 +105,7 @@ func BootAll(ctx context.Context) {
 // as BootAll.
 func ConfigLoadedAll(ctx context.Context, cfg *config.Config) {
 	for _, r := range registry {
-		pcfg := config.PluginConfigFor(r.plugin.Name())
+		pcfg := plugincfg.PluginConfigFor(r.plugin.Name())
 		invoke(ctx, r, "config_loaded", func(pctx context.Context) error { return r.plugin.ConfigLoaded(pctx, cfg, pcfg) })
 	}
 }

@@ -12,7 +12,7 @@ import (
 	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 var msetPerShardPool = sync.Pool{
@@ -376,10 +376,10 @@ func HandleSet(cmdCtx *command.Context) apicommand.Result {
 	executeFn := func() any {
 		_, found := cmdCtx.Cache.RawGet(key)
 		if nx && found {
-			// Live (non-expired) key blocks NX; expired key is lazily deleted and SET proceeds.
 			if !lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
+			found = false
 		}
 		if xx && !found {
 			return nil

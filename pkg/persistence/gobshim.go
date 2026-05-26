@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
 )
 

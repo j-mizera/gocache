@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	apilogger "gocache/api/logger"
+	apilogger "gocache/commons/logger"
 	"gocache/testkit/integration"
 )
 

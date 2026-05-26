@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 func TestIT_PubSub_SubscribeAndPublish(t *testing.T) {

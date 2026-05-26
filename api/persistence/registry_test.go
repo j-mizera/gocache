@@ -4,10 +4,26 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
 )
+
+type stubConfig struct{}
+
+var _ apiconfig.PluginConfig = (*stubConfig)(nil)
+
+func (*stubConfig) GetString(string) string            { return "" }
+func (*stubConfig) GetInt(string) int                   { return 0 }
+func (*stubConfig) GetInt64(string) int64               { return 0 }
+func (*stubConfig) GetBool(string) bool                 { return false }
+func (*stubConfig) GetDuration(string) time.Duration    { return 0 }
+func (*stubConfig) GetStringSlice(string) []string      { return nil }
+func (*stubConfig) IsSet(string) bool                   { return false }
+func (*stubConfig) SetDefault(string, any)              {}
+func (*stubConfig) BindEnv(string, ...string)           {}
+func (*stubConfig) MergeFile(string) error              { return nil }
 
 type fakeProvider struct {
 	name      string
@@ -64,7 +80,7 @@ func TestRegistry_Register_RoundTrip(t *testing.T) {
 		t.Errorf("name = %q, want test-provider", got.Name())
 	}
 
-	backend, err := got.Build(apiconfig.NewMapConfig(), nil)
+	backend, err := got.Build(&stubConfig{}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

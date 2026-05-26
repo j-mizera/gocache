@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
-	apiResp "gocache/api/resp"
+	apiResp "gocache/commons/resp"
 	"gocache/api/version"
 	"gocache/sdk/pluginsdk"
 )
@@ -187,7 +186,7 @@ func (p *PubSub) handlePublish(connID, channel, message string) *pluginsdk.Comma
 		}
 	}
 
-	return &pluginsdk.CommandResult{Value: strconv.Itoa(len(matches))}
+	return &pluginsdk.CommandResult{Value: len(matches)}
 }
 
 // Hooks returns the hook declarations for subscription mode enforcement.

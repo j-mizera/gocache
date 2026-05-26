@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"gocache/api/command"
-	"gocache/api/crashdump"
-	"gocache/api/embedded"
+	"gocache/commons/crashdump"
+	"gocache/sdk/embedded"
 	"gocache/api/events"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
 	"gocache/pkg/blocking"
@@ -218,8 +218,8 @@ func main() {
 	engineInstance := engine.New(cacheInstance)
 	blockingRegistry := blocking.NewRegistry()
 	watchManager := watch.NewManager()
-	cacheInstance.OnMutate = watchManager.NotifyMutation
-	cacheInstance.OnMutateAll = watchManager.NotifyAll
+	cacheInstance.SetOnMutate(watchManager.NotifyMutation)
+	cacheInstance.SetOnMutateAll(watchManager.NotifyAll)
 
 	// tracker was created above main() for the crashdump defer; reuse it.
 	eventBus := serverEvents.NewBusWithCapacity(cfg.Events.ReplayCapacity)

@@ -11,7 +11,7 @@ import (
 	apicommand "gocache/api/command"
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 const (
@@ -245,6 +245,9 @@ func HandleObject(cmdCtx *command.Context) apicommand.Result {
 			}
 			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
+			}
+			if entry.Encoding == cache.EncPacked && entry.ValueType != cache.ObjTypeBytes {
+				return "listpack"
 			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:

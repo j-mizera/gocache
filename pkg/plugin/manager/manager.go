@@ -15,11 +15,11 @@ import (
 	opctx "gocache/api/context"
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
 	"gocache/api/scope"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 	pkgconfig "gocache/pkg/config"
 	serverEvents "gocache/pkg/events"
 	serverOps "gocache/pkg/operations"
@@ -278,7 +278,9 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 	defer timer.Stop()
 
 	done := make(chan struct{})
+	m.wg.Add(1)
 	go func() {
+		defer m.wg.Done()
 		for _, inst := range m.registry.All() {
 			if c := inst.Cmd(); c != nil && c.Process != nil {
 				_ = c.Wait()
@@ -505,8 +507,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	pluginCfgMap := pkgconfig.FlatPluginConfig(reg.Name)
 	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings, pluginCfgMap)); err != nil {
 		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
-		m.router.UnregisterPlugin(reg.Name)
-		m.scopeRegistry.Unregister(reg.Name)
+		m.deregisterPlugin(reg.Name)
 		_ = conn.Close()
 		return
 	}
@@ -639,11 +640,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 			}
 			if inst.State() == StateRunning {
 				logger.Warn(loopCtx).Str("plugin", inst.Name).Err(err).Msg("plugin connection lost")
-				m.deregisterPlugin(inst.Name)
 				inst.SetState(StateUnhealthy)
-				if m.eventBus != nil {
-					m.eventBus.Emit(events.NewPluginCrashed(inst.Name, inst.Critical(), err.Error()))
-				}
 			}
 			return
 		}

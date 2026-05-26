@@ -12,8 +12,8 @@ import (
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
 	apiplugin "gocache/api/plugin"
-	apiResp "gocache/api/resp"
-	"gocache/api/transport"
+	"gocache/commons/resp"
+	"gocache/commons/transport"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/engine"
@@ -21,7 +21,6 @@ import (
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
-	"gocache/pkg/resp"
 	"gocache/pkg/watch"
 )
 
@@ -132,10 +131,10 @@ func (p *simulatedPlugin) handleCommands(env *gcpc.EnvelopeV1) {
 	case "SUBSCRIBE":
 		for _, ch := range req.Command.Args {
 			count := p.state.subscribe(connID, ch)
-			msg := apiResp.EncodeArray(
-				apiResp.EncodeBulkString("subscribe"),
-				apiResp.EncodeBulkString(ch),
-				apiResp.EncodeInteger(int64(count)),
+			msg := resp.EncodeArray(
+				resp.EncodeBulkString("subscribe"),
+				resp.EncodeBulkString(ch),
+				resp.EncodeInteger(int64(count)),
 			)
 			p.conn.Send(gcpc.NewClientPush(connID, msg))
 		}
@@ -147,19 +146,19 @@ func (p *simulatedPlugin) handleCommands(env *gcpc.EnvelopeV1) {
 			channels = p.state.channelsFor(connID)
 		}
 		if len(channels) == 0 {
-			msg := apiResp.EncodeArray(
-				apiResp.EncodeBulkString("unsubscribe"),
-				apiResp.EncodeNullBulk(),
-				apiResp.EncodeInteger(0),
+			msg := resp.EncodeArray(
+				resp.EncodeBulkString("unsubscribe"),
+				resp.EncodeNullBulk(),
+				resp.EncodeInteger(0),
 			)
 			p.conn.Send(gcpc.NewClientPush(connID, msg))
 		} else {
 			for _, ch := range channels {
 				count := p.state.unsubscribe(connID, ch)
-				msg := apiResp.EncodeArray(
-					apiResp.EncodeBulkString("unsubscribe"),
-					apiResp.EncodeBulkString(ch),
-					apiResp.EncodeInteger(int64(count)),
+				msg := resp.EncodeArray(
+					resp.EncodeBulkString("unsubscribe"),
+					resp.EncodeBulkString(ch),
+					resp.EncodeInteger(int64(count)),
 				)
 				p.conn.Send(gcpc.NewClientPush(connID, msg))
 			}
@@ -175,10 +174,10 @@ func (p *simulatedPlugin) handleCommands(env *gcpc.EnvelopeV1) {
 		subs := p.state.subscribers(channel)
 		for _, sub := range subs {
 			b := make([]byte, 0, 64+len(channel)+len(message))
-			b = apiResp.AppendArrayHeader(b, 3)
-			b = apiResp.AppendBulkString(b, "message")
-			b = apiResp.AppendBulkString(b, channel)
-			b = apiResp.AppendBulkString(b, message)
+			b = resp.AppendArrayHeader(b, 3)
+			b = resp.AppendBulkString(b, "message")
+			b = resp.AppendBulkString(b, channel)
+			b = resp.AppendBulkString(b, message)
 			p.conn.Send(gcpc.NewClientPush(sub, b))
 		}
 		p.conn.Send(gcpc.NewCommandResponse(req.RequestId, gcpc.ResultFromInterface(strconv.Itoa(len(subs))), false))
@@ -261,8 +260,8 @@ func startTestServerWithPubSub(t *testing.T) string {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
-	c.OnMutateAll = wm.NotifyAll
+	c.SetOnMutate(wm.NotifyMutation)
+	c.SetOnMutateAll(wm.NotifyAll)
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	tracker := serverOps.NewTracker()

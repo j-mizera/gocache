@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	"gocache/pkg/cache/slab"
 )
 

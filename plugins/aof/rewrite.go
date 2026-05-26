@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
 )
 

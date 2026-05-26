@@ -13,7 +13,7 @@ import (
 	"gocache/api/command"
 	apiconfig "gocache/api/config"
 	gcpc "gocache/api/gcpc/v1"
-	apilogger "gocache/api/logger"
+	apilogger "gocache/commons/logger"
 	apiplugin "gocache/api/plugin"
 	"gocache/api/version"
 	"gocache/sdk/pluginsdk"

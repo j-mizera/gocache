@@ -6,7 +6,7 @@ import (
 
 	apicommand "gocache/api/command"
 	apiconfig "gocache/api/config"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
 )

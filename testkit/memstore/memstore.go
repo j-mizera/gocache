@@ -1,4 +1,4 @@
-package persistence
+package memstore
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	apipersistence "gocache/api/persistence"
 )
 
 // MemoryStore is a reference CacheStore for plugin tests. It uses only
@@ -19,7 +21,7 @@ type MemoryStore struct {
 
 type memEntry struct {
 	value     any
-	valueType ValueType
+	valueType apipersistence.ValueType
 	expireAt  int64
 }
 
@@ -57,13 +59,13 @@ func (s *MemoryStore) Len() int { return len(s.items) }
 
 // --- CacheStore interface ---
 
-func (s *MemoryStore) CaptureSnapshot() []SnapshotEntry {
-	entries := make([]SnapshotEntry, 0, len(s.items))
+func (s *MemoryStore) CaptureSnapshot() []apipersistence.SnapshotEntry {
+	entries := make([]apipersistence.SnapshotEntry, 0, len(s.items))
 	for key, e := range s.items {
-		entries = append(entries, SnapshotEntry{
+		entries = append(entries, apipersistence.SnapshotEntry{
 			Key:        key,
 			ValueType:  e.valueType,
-			Encoding:   EncodingNative,
+			Encoding:   apipersistence.EncodingNative,
 			Value:      e.value,
 			Expiration: e.expireAt,
 		})
@@ -71,7 +73,7 @@ func (s *MemoryStore) CaptureSnapshot() []SnapshotEntry {
 	return entries
 }
 
-func (s *MemoryStore) LoadEntry(_ context.Context, e SnapshotEntry) error {
+func (s *MemoryStore) LoadEntry(_ context.Context, e apipersistence.SnapshotEntry) error {
 	s.items[e.Key] = &memEntry{
 		value:     e.Value,
 		valueType: e.ValueType,
@@ -84,7 +86,7 @@ func (s *MemoryStore) Clear(_ context.Context) {
 	s.items = make(map[string]*memEntry)
 }
 
-func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
+func (s *MemoryStore) ApplyMutation(_ context.Context, m apipersistence.Mutation) error {
 	if len(m.Args) == 0 {
 		if m.Op == "FLUSHDB" || m.Op == "FLUSHALL" {
 			s.items = make(map[string]*memEntry)
@@ -102,7 +104,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		}
 		s.items[key] = &memEntry{
 			value:     m.Args[1],
-			valueType: ValueTypeBytes,
+			valueType: apipersistence.ValueTypeBytes,
 			expireAt:  parseExpiration(m.Args[2:]),
 		}
 
@@ -111,14 +113,14 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 			return fmt.Errorf("apply SETNX: need >= 2 args, got %d", len(m.Args))
 		}
 		if _, ok := s.items[key]; !ok {
-			s.items[key] = &memEntry{value: m.Args[1], valueType: ValueTypeBytes}
+			s.items[key] = &memEntry{value: m.Args[1], valueType: apipersistence.ValueTypeBytes}
 		}
 
 	case "GETSET":
 		if len(m.Args) < 2 {
 			return fmt.Errorf("apply GETSET: need >= 2 args, got %d", len(m.Args))
 		}
-		s.items[key] = &memEntry{value: m.Args[1], valueType: ValueTypeBytes}
+		s.items[key] = &memEntry{value: m.Args[1], valueType: apipersistence.ValueTypeBytes}
 
 	case "GETDEL":
 		delete(s.items, key)
@@ -133,7 +135,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 			return fmt.Errorf("apply MSET: odd arg count (%d)", len(m.Args))
 		}
 		for i := 0; i < len(m.Args); i += 2 {
-			s.items[string(m.Args[i])] = &memEntry{value: m.Args[i+1], valueType: ValueTypeBytes}
+			s.items[string(m.Args[i])] = &memEntry{value: m.Args[i+1], valueType: apipersistence.ValueTypeBytes}
 		}
 
 	case "APPEND":
@@ -144,7 +146,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		val := make([]byte, len(existing)+len(m.Args[1]))
 		copy(val, existing)
 		copy(val[len(existing):], m.Args[1])
-		s.items[key] = &memEntry{value: val, valueType: ValueTypeBytes, expireAt: ttl}
+		s.items[key] = &memEntry{value: val, valueType: apipersistence.ValueTypeBytes, expireAt: ttl}
 
 	case "INCR":
 		return s.applyIncrBy(key, 1)
@@ -186,7 +188,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		}
 		s.items[key] = &memEntry{
 			value:     []byte(strconv.FormatFloat(cur+delta, 'f', -1, 64)),
-			valueType: ValueTypeBytes,
+			valueType: apipersistence.ValueTypeBytes,
 			expireAt:  ttl,
 		}
 
@@ -238,7 +240,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		for i := 1; i+1 < len(m.Args); i += 2 {
 			h[string(m.Args[i])] = string(m.Args[i+1])
 		}
-		s.items[key] = &memEntry{value: h, valueType: ValueTypeHash, expireAt: ttl}
+		s.items[key] = &memEntry{value: h, valueType: apipersistence.ValueTypeHash, expireAt: ttl}
 
 	case "HDEL":
 		if len(m.Args) < 2 {
@@ -269,7 +271,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		for _, member := range m.Args[1:] {
 			st[string(member)] = struct{}{}
 		}
-		s.items[key] = &memEntry{value: st, valueType: ValueTypeSet, expireAt: ttl}
+		s.items[key] = &memEntry{value: st, valueType: apipersistence.ValueTypeSet, expireAt: ttl}
 
 	case "SREM":
 		if len(m.Args) < 2 {
@@ -338,7 +340,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 			}
 			z[string(m.Args[i+1])] = score
 		}
-		s.items[key] = &memEntry{value: z, valueType: ValueTypeSortedSet, expireAt: ttl}
+		s.items[key] = &memEntry{value: z, valueType: apipersistence.ValueTypeSortedSet, expireAt: ttl}
 
 	case "ZREM":
 		if len(m.Args) < 2 {
@@ -369,7 +371,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		for _, v := range m.Args[1:] {
 			l = append([]string{string(v)}, l...)
 		}
-		s.items[key] = &memEntry{value: l, valueType: ValueTypeList, expireAt: ttl}
+		s.items[key] = &memEntry{value: l, valueType: apipersistence.ValueTypeList, expireAt: ttl}
 
 	case "RPUSH":
 		if len(m.Args) < 2 {
@@ -379,7 +381,7 @@ func (s *MemoryStore) ApplyMutation(_ context.Context, m Mutation) error {
 		for _, v := range m.Args[1:] {
 			l = append(l, string(v))
 		}
-		s.items[key] = &memEntry{value: l, valueType: ValueTypeList, expireAt: ttl}
+		s.items[key] = &memEntry{value: l, valueType: apipersistence.ValueTypeList, expireAt: ttl}
 
 	case "LPOP":
 		return s.applyPop(key, m.Args, true)
@@ -444,7 +446,7 @@ func (s *MemoryStore) applyIncrBy(key string, delta int64) error {
 	}
 	s.items[key] = &memEntry{
 		value:     []byte(strconv.FormatInt(cur+delta, 10)),
-		valueType: ValueTypeBytes,
+		valueType: apipersistence.ValueTypeBytes,
 		expireAt:  ttl,
 	}
 	return nil

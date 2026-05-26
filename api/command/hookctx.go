@@ -1,7 +1,5 @@
 package command
 
-import opctx "gocache/api/context"
-
 // Hook and operation context constants. These are server-injected keys
 // available to all plugins in the hook context map and on operation
 // context snapshots. All keys start with "_" to mark them as server-owned
@@ -35,14 +33,4 @@ const (
 
 	// Log collector field names.
 	CtxField = "_ctx" // Nested operation-context object in JSON log lines
-)
-
-// SharedPrefix is the key prefix for cross-plugin shared values.
-const SharedPrefix = opctx.SharedPrefix
-
-// Backward-compatible re-exports. New code should use api/context directly.
-var (
-	NewHookCtx    = opctx.NewContext
-	MergeHookCtx  = opctx.MergeFromPlugin
-	FilterHookCtx = opctx.FilterForPlugin
 )

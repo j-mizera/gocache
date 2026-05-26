@@ -1,10 +1,7 @@
 package plugin
 
 import (
-	"sync"
 	"time"
-
-	"gocache/api/logger"
 )
 
 // Failure policy values for PluginOverride.FailurePolicy.
@@ -19,15 +16,6 @@ const (
 	// (typically auth, rate limiting, compliance filters).
 	FailurePolicyHaltServer = "halt_server"
 )
-
-// deprecatedCriticalWarnOnce ensures we only log the migration warning
-// once per process no matter how many overrides still use the old field.
-// Intentional tradeoff: on a config hot-reload that re-adds a
-// `critical: true` after the first warn, the second reload will stay
-// silent. We accept that because the first log is sufficient — operators
-// fix the YAML once, not per reload — and spamming WARN per reload would
-// add noise to a hot-reload's already-busy log window.
-var deprecatedCriticalWarnOnce sync.Once
 
 // PluginsConfig holds the plugin system configuration.
 type PluginsConfig struct {
@@ -65,25 +53,15 @@ type PluginOverride struct {
 // IsCritical reports whether the plugin should halt the server on failure.
 // FailurePolicy is the canonical field; when set to a known value it wins
 // outright. Unknown values + the unset case fall back to the legacy
-// Critical bool (with a one-shot deprecation warning on first observation),
-// so existing configs keep working through the migration window.
+// Critical bool so existing configs keep working through the migration
+// window. Deprecation/unknown-value warnings are emitted by the caller
+// (pkg/plugin) which has access to the logger.
 func (o PluginOverride) IsCritical() bool {
 	switch o.FailurePolicy {
 	case FailurePolicyHaltServer:
 		return true
 	case FailurePolicyContinue:
 		return false
-	case "":
-		// Unset — defer to legacy below.
-	default:
-		logger.WarnNoCtx().Str("failure_policy", o.FailurePolicy).
-			Msg("unknown plugin failure_policy — falling back to legacy 'critical' field")
 	}
-	if o.Critical {
-		deprecatedCriticalWarnOnce.Do(func() {
-			logger.WarnNoCtx().Msg("plugin override uses deprecated 'critical: true' — migrate to 'failure_policy: halt_server'")
-		})
-		return true
-	}
-	return false
+	return o.Critical
 }

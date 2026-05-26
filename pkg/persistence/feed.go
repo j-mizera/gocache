@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
 )
 
@@ -200,6 +200,7 @@ func (c *Coordinator) Emit(m apipersistence.Mutation) {
 		select {
 		case sc.incoming <- m:
 		default:
+			c.droppedMutations.Add(1)
 			logger.WarnNoCtx().
 				Str("sink", sc.sink.Name()).
 				Int64("lsn", int64(m.LSN)).

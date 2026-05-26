@@ -7,7 +7,7 @@ import (
 	"github.com/gammazero/deque"
 
 	apicommand "gocache/api/command"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
@@ -475,7 +475,7 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 		if !found {
 			return
 		}
-		popResult, dispatchErr := cmdCtx.Engine.DispatchWithResult(cmdCtx.Context(), func() any {
+		popResult, dispatchErr := cmdCtx.Engine.DispatchToShard(cmdCtx.Context(), cmdCtx.Cache.ShardIndexOf(key), func() any {
 			entry, ok := cmdCtx.Cache.RawGet(key)
 			if !ok {
 				return nil

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gocache/api/config"
+	"gocache/commons/plugincfg"
 )
 
 // TestBootInit_DisabledNoEndpoint verifies the common case: user built
@@ -23,7 +24,7 @@ func TestBootInit_DisabledNoEndpoint(t *testing.T) {
 		t.Errorf("provider should remain nil when endpoint is empty")
 	}
 	// Subsequent lifecycle calls must not panic.
-	if err := p.ConfigLoaded(context.Background(), config.DefaultConfig(), config.NewMapConfig()); err != nil {
+	if err := p.ConfigLoaded(context.Background(), config.DefaultConfig(), plugincfg.NewMapConfig()); err != nil {
 		t.Errorf("ConfigLoaded unexpected error: %v", err)
 	}
 	if err := p.ProcessShutdown(context.Background()); err != nil {

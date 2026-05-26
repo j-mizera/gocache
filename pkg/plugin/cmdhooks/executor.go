@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
-	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/logger"
 	apicommand "gocache/api/command"
+	opctx "gocache/api/context"
+	gcpc "gocache/api/gcpc/v1"
+	"gocache/commons/logger"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/rex"
 )
@@ -62,7 +63,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, con
 	for _, h := range matches {
 		if !h.Blocking {
 			reqID := router.NextRequestID()
-			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, cmd, conn, "", "", apicommand.FilterHookCtx(hookCtx, h.PluginName), metadata)
+			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, cmd, conn, "", "", opctx.FilterForPlugin(hookCtx, h.PluginName), metadata)
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -72,7 +73,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, con
 		if !h.Blocking {
 			continue
 		}
-		result, err := e.sendBlockingHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, cmd, conn, "", "", apicommand.FilterHookCtx(hookCtx, h.PluginName), metadata)
+		result, err := e.sendBlockingHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_PRE, cmd, conn, "", "", opctx.FilterForPlugin(hookCtx, h.PluginName), metadata)
 		if err != nil {
 			if h.Critical {
 				return &apicommand.PreHookResult{Denied: true, DenyReason: fmt.Sprintf("critical hook %s failed: %v", h.PluginName, err), Context: hookCtx}
@@ -83,7 +84,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, con
 		if result.Deny {
 			return &apicommand.PreHookResult{Denied: true, DenyReason: result.DenyReason, Context: hookCtx}
 		}
-		apicommand.MergeHookCtx(hookCtx, h.PluginName, result.ContextValues)
+		opctx.MergeFromPlugin(hookCtx, h.PluginName, result.ContextValues)
 	}
 
 	return &apicommand.PreHookResult{Denied: false, Context: hookCtx}
@@ -104,7 +105,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, co
 	for _, h := range matches {
 		if !h.Blocking {
 			reqID := router.NextRequestID()
-			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, cmd, conn, resultValue, resultError, apicommand.FilterHookCtx(hookCtx, h.PluginName), metadata)
+			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, cmd, conn, resultValue, resultError, opctx.FilterForPlugin(hookCtx, h.PluginName), metadata)
 			go h.Conn.SendFireAndForget(env)
 		}
 	}
@@ -114,7 +115,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, co
 		if !h.Blocking {
 			continue
 		}
-		_, err := e.sendBlockingHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, cmd, conn, resultValue, resultError, apicommand.FilterHookCtx(hookCtx, h.PluginName), metadata)
+		_, err := e.sendBlockingHook(ctx, h, gcpc.HookPhaseV1_HOOK_PHASE_POST, cmd, conn, resultValue, resultError, opctx.FilterForPlugin(hookCtx, h.PluginName), metadata)
 		if err != nil {
 			logger.Warn(ctx).Str("plugin", h.PluginName).Str("command", cmd.Name).Err(err).Msg("blocking post-hook failed")
 		}

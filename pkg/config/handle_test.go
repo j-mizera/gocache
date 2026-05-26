@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/viper"
 
 	apiconfig "gocache/api/config"
+	"gocache/commons/plugincfg"
 )
 
 // Note: these tests reach for unexported helpers (installHandle,
@@ -176,7 +177,7 @@ func TestAPIPluginConfigFor_DelegatesToPkgConfig(t *testing.T) {
 	v.Set("plugins.config.myplugin.key", "value-from-server")
 	installHandle(v)
 
-	cfg := apiconfig.PluginConfigFor("myplugin")
+	cfg := plugincfg.PluginConfigFor("myplugin")
 	if got := cfg.GetString("key"); got != "value-from-server" {
 		t.Errorf("api-level PluginConfigFor: got %q, want %q", got, "value-from-server")
 	}

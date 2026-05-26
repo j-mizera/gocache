@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 // Server is a minimal RESP server exposing only the three commands the

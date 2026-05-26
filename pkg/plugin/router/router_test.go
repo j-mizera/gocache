@@ -8,7 +8,7 @@ import (
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 // testPipe creates a connected pair of transport.Conn for testing.
@@ -102,8 +102,8 @@ func TestRejectShadowCore(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when shadowing core command")
 	}
-	if !r.HasCommand("PUBLISH") == true {
-		// It should NOT be registered since it's a core command
+	if r.HasCommand("PUBLISH") {
+		t.Error("expected PUBLISH to NOT be registered since it's a core command")
 	}
 }
 

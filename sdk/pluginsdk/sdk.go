@@ -12,10 +12,10 @@ import (
 	"gocache/api/command"
 	apiconfig "gocache/api/config"
 	gcpc "gocache/api/gcpc/v1"
-	apilogger "gocache/api/logger"
+	apilogger "gocache/commons/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 // Plugin is the interface plugin authors implement for lifecycle-only plugins

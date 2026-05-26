@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
 )
 
@@ -56,6 +56,9 @@ type Coordinator struct {
 	// lastSaveUnix records the Unix timestamp (seconds) of the most recent
 	// successful Snapshot() call. Exposed via LastSaveUnix() for LASTSAVE.
 	lastSaveUnix atomic.Int64
+
+	// droppedMutations counts mutations dropped because a sink buffer was full.
+	droppedMutations atomic.Uint64
 
 	// stop is closed by Stop to signal every per-sink flush loop to exit.
 	stop      chan struct{}
@@ -154,6 +157,10 @@ func (c *Coordinator) SetLSN(lsn apipersistence.LSN) {
 // LastSaveUnix returns the Unix timestamp (seconds) of the most recent
 // successful Snapshot() call, or 0 if no save has completed.
 func (c *Coordinator) LastSaveUnix() int64 { return c.lastSaveUnix.Load() }
+
+// DroppedMutations returns the total number of mutations dropped because
+// a sink buffer was full.
+func (c *Coordinator) DroppedMutations() uint64 { return c.droppedMutations.Load() }
 
 // Source returns the registered source (may be nil).
 func (c *Coordinator) Source() apipersistence.Source { return c.source }
