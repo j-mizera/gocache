@@ -137,6 +137,9 @@ func (e *Engine) DispatchToShards(ctx context.Context, shardIDs []int, fn func()
 // a release function. Used by pipeline batch coalescing to pre-acquire
 // multiple shard locks before evaluating a batch of commands.
 func (e *Engine) AcquireShard(shard int) func() {
+	if e.stopped.Load() {
+		return func() {}
+	}
 	s := e.cache.ShardByIndex(shard)
 	s.Lock()
 	return s.Unlock
@@ -146,6 +149,9 @@ func (e *Engine) AcquireShard(shard int) func() {
 // release function. Used by pipeline batch coalescing when all commands
 // targeting a shard are read-only.
 func (e *Engine) AcquireShardRO(shard int) func() {
+	if e.stopped.Load() {
+		return func() {}
+	}
 	s := e.cache.ShardByIndex(shard)
 	s.RLock()
 	return s.RUnlock

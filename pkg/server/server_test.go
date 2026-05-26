@@ -25,8 +25,8 @@ func startTestServer(t *testing.T, requirePass string) (*Server, string) {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
-	c.OnMutateAll = wm.NotifyAll
+	c.SetOnMutate(wm.NotifyMutation)
+	c.SetOnMutateAll(wm.NotifyAll)
 
 	srv := New("127.0.0.1:0", c, e, requirePass, br, wm)
 	srv.SetTracker(serverOps.NewTracker())
@@ -212,8 +212,8 @@ func TestServer_TCPNoDelay(t *testing.T) {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
-	c.OnMutateAll = wm.NotifyAll
+	c.SetOnMutate(wm.NotifyMutation)
+	c.SetOnMutateAll(wm.NotifyAll)
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	srv.SetTracker(serverOps.NewTracker())

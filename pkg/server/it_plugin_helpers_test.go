@@ -261,8 +261,8 @@ func startTestServerWithPubSub(t *testing.T) string {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
-	c.OnMutateAll = wm.NotifyAll
+	c.SetOnMutate(wm.NotifyMutation)
+	c.SetOnMutateAll(wm.NotifyAll)
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	tracker := serverOps.NewTracker()

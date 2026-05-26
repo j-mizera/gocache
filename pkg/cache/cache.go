@@ -6,6 +6,7 @@ import (
 	"math/bits"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gammazero/deque"
@@ -147,10 +148,8 @@ type Cache struct {
 	evictionPolicy EvictionPolicy
 	packed         PackedThresholds
 
-	// OnMutate / OnMutateAll are external callbacks (WATCH dirty-bit
-	// propagation). Set after construction by the server wiring.
-	OnMutate    func(key string)
-	OnMutateAll func()
+	onMutate    atomic.Pointer[func(key string)]
+	onMutateAll atomic.Pointer[func()]
 }
 
 
@@ -236,18 +235,26 @@ func newCache(shards int, maxBytes int64, policy EvictionPolicy) *Cache {
 	return c
 }
 
-// bindShardCallbacks wires each shard's onMutate to the Cache's external
-// OnMutate. Called from constructors and after SetOnMutate.
+// SetOnMutate atomically sets the per-key mutation callback.
+func (c *Cache) SetOnMutate(fn func(key string)) {
+	c.onMutate.Store(&fn)
+}
+
+// SetOnMutateAll atomically sets the all-keys mutation callback.
+func (c *Cache) SetOnMutateAll(fn func()) {
+	c.onMutateAll.Store(&fn)
+}
+
 func (c *Cache) bindShardCallbacks() {
 	for _, s := range c.shards {
 		s.onMutate = func(key string) {
-			if c.OnMutate != nil {
-				c.OnMutate(key)
+			if fn := c.onMutate.Load(); fn != nil {
+				(*fn)(key)
 			}
 		}
 		s.onMutateAll = func() {
-			if c.OnMutateAll != nil {
-				c.OnMutateAll()
+			if fn := c.onMutateAll.Load(); fn != nil {
+				(*fn)()
 			}
 		}
 	}
@@ -392,9 +399,9 @@ func (c *Cache) Rename(src, dst string, newExpiration int64) bool {
 	} else {
 		dstShard.setNativeInternal(dst, nativeValue, entry.ValueType, nativeBytes, newExpiration, true)
 	}
-	if c.OnMutate != nil {
-		c.OnMutate(src)
-		c.OnMutate(dst)
+	if fn := c.onMutate.Load(); fn != nil {
+		(*fn)(src)
+		(*fn)(dst)
 	}
 	return true
 }
@@ -419,8 +426,8 @@ func (c *Cache) Clear(ctx context.Context) {
 	for _, s := range c.shards {
 		s.clear()
 	}
-	if c.OnMutateAll != nil {
-		c.OnMutateAll()
+	if fn := c.onMutateAll.Load(); fn != nil {
+		(*fn)()
 	}
 }
 

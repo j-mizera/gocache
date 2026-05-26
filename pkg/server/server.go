@@ -460,7 +460,9 @@ func (srv *Server) runBatch(
 			break
 		}
 		if val.Type != resp.Array || len(val.Array) == 0 {
-			_ = handle.WriteValue(resp.MarshalError("ERR Protocol error: expected array"))
+			if err := handle.WriteValue(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
+				break
+			}
 			continue
 		}
 		parts := make([]string, len(val.Array))
@@ -523,7 +525,9 @@ func (srv *Server) runBatch(
 
 	for _, r := range results {
 		if !r.SuppressResponse {
-			_ = handle.WriteValue(srv.mapToResp(ctx, r))
+			if err := handle.WriteValue(srv.mapToResp(ctx, r)); err != nil {
+				break
+			}
 		}
 	}
 

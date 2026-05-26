@@ -53,7 +53,7 @@ func newInProcRig(b *testing.B) *inProcRig {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
+	c.SetOnMutate(wm.NotifyMutation)
 
 	ev := pipeline.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
@@ -100,7 +100,7 @@ func newTCPRig(b *testing.B) *tcpRig {
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
+	c.SetOnMutate(wm.NotifyMutation)
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
 	srv.SetTracker(serverOps.NewTracker())
@@ -194,7 +194,7 @@ func TestHSET_PromotedHash_O1(t *testing.T) {
 	t.Cleanup(func() { e.Stop() })
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
+	c.SetOnMutate(wm.NotifyMutation)
 	ev := pipeline.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
@@ -235,7 +235,7 @@ func runPromotedCollectionO1(t *testing.T, deadline time.Duration, n int, makeAr
 
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
-	c.OnMutate = wm.NotifyMutation
+	c.SetOnMutate(wm.NotifyMutation)
 	ev := pipeline.New(c, e, "", br, wm)
 	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()

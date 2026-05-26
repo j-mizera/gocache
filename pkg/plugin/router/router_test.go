@@ -102,8 +102,8 @@ func TestRejectShadowCore(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when shadowing core command")
 	}
-	if !r.HasCommand("PUBLISH") == true {
-		// It should NOT be registered since it's a core command
+	if r.HasCommand("PUBLISH") {
+		t.Error("expected PUBLISH to NOT be registered since it's a core command")
 	}
 }
 

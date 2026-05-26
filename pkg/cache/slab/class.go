@@ -52,6 +52,9 @@ func (c *slabClass) free(p SlabPointer) {
 }
 
 func (c *slabClass) growOneSlab() {
+	if uint32(len(c.slabs)) >= (1 << 24) {
+		panic("slab: exceeded 16M slabs")
+	}
 	s := newSlab(c.classID, c.classSize, c.entriesPerSlab)
 	slabIdx := uint32(len(c.slabs))
 	c.slabs = append(c.slabs, s)

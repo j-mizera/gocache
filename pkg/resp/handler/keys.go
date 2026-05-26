@@ -246,6 +246,9 @@ func HandleObject(cmdCtx *command.Context) apicommand.Result {
 			if lazyExpire(cmdCtx.Cache, key) {
 				return nil
 			}
+			if entry.Encoding == cache.EncPacked && entry.ValueType != cache.ObjTypeBytes {
+				return "listpack"
+			}
 			switch entry.ValueType {
 			case cache.ObjTypeBytes:
 				b := cmdCtx.Cache.ResolvePacked(entry)

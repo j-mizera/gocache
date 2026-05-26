@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"gocache/api/logger"
 	apipersistence "gocache/api/persistence"
@@ -15,6 +16,7 @@ import (
 
 // AOFSource reads an AOF file at boot to produce a replay iterator.
 type AOFSource struct {
+	mu   sync.RWMutex
 	path string
 }
 
@@ -26,23 +28,30 @@ func NewSource(path string) *AOFSource {
 func (*AOFSource) Name() string { return "aof" }
 
 // SetPath updates the file path (hot reload).
-func (s *AOFSource) SetPath(p string) { s.path = p }
+func (s *AOFSource) SetPath(p string) {
+	s.mu.Lock()
+	s.path = p
+	s.mu.Unlock()
+}
 
 // Boot opens the AOF file and returns a replay iterator. Missing or
 // empty file → BootModeInitial (fresh start).
 func (s *AOFSource) Boot(_ context.Context) (apipersistence.BootResult, error) {
-	f, err := os.Open(s.path)
+	s.mu.RLock()
+	path := s.path
+	s.mu.RUnlock()
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return apipersistence.BootResult{Mode: apipersistence.BootModeInitial}, nil
 		}
-		return apipersistence.BootResult{}, fmt.Errorf("aof: open %s: %w", s.path, err)
+		return apipersistence.BootResult{}, fmt.Errorf("aof: open %s: %w", path, err)
 	}
 
 	info, err := f.Stat()
 	if err != nil {
 		f.Close()
-		return apipersistence.BootResult{}, fmt.Errorf("aof: stat %s: %w", s.path, err)
+		return apipersistence.BootResult{}, fmt.Errorf("aof: stat %s: %w", path, err)
 	}
 	if info.Size() == 0 {
 		f.Close()
