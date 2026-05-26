@@ -4,7 +4,7 @@ import (
 	apicommand "gocache/api/command"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 func HandleMulti(cmdCtx *command.Context) apicommand.Result {

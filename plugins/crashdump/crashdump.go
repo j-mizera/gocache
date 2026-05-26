@@ -17,9 +17,9 @@ import (
 	"context"
 
 	"gocache/api/config"
-	"gocache/api/crashdump"
-	"gocache/api/embedded"
-	"gocache/api/logger"
+	"gocache/commons/crashdump"
+	"gocache/sdk/embedded"
+	"gocache/commons/logger"
 )
 
 const (

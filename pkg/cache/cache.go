@@ -12,7 +12,7 @@ import (
 	"github.com/gammazero/deque"
 
 	apiconfig "gocache/api/config"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	"gocache/pkg/cache/slab"
 )
 

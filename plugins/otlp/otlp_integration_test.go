@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gocache/api/config"
+	"gocache/commons/plugincfg"
 	"gocache/testkit/integration"
 )
 
@@ -30,7 +31,7 @@ func TestOTLP_TracesReachJaeger(t *testing.T) {
 		t.Fatal("provider should be initialized after BootInit")
 	}
 
-	if err := p.ConfigLoaded(ctx, config.DefaultConfig(), config.NewMapConfig()); err != nil {
+	if err := p.ConfigLoaded(ctx, config.DefaultConfig(), plugincfg.NewMapConfig()); err != nil {
 		t.Fatalf("ConfigLoaded: %v", err)
 	}
 

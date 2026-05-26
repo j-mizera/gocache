@@ -1,18 +1,21 @@
-package config
+package plugincfg
 
-import "time"
+import (
+	"time"
 
-// MapConfig is a test stand-in for PluginConfig that stores values in
-// plain maps. Use it in plugin tests to construct a config view with
-// canned values — no global state, no viper dependency.
-//
-// Production code must not use MapConfig.
+	"gocache/api/config"
+)
+
+// MapConfig is a stand-in for PluginConfig that stores values in plain
+// maps. Use it in plugin tests to construct a config view with canned
+// values — no global state, no viper dependency. Also used as the
+// zero-value fallback before the config loader runs.
 type MapConfig struct {
 	Values   map[string]any
 	Defaults map[string]any
 }
 
-var _ PluginConfig = (*MapConfig)(nil)
+var _ config.PluginConfig = (*MapConfig)(nil)
 
 // NewMapConfig returns a ready-to-use test config.
 func NewMapConfig() *MapConfig {

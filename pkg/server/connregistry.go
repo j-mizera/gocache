@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 var ErrConnNotFound = errors.New("connection not found")

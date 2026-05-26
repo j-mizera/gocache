@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"gocache/api/command"
-	"gocache/api/crashdump"
-	"gocache/api/embedded"
+	"gocache/commons/crashdump"
+	"gocache/sdk/embedded"
 	"gocache/api/events"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
 	"gocache/pkg/blocking"

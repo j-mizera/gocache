@@ -3,7 +3,7 @@ package manager
 import (
 	"context"
 
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 // TestSetCancel sets the lifecycle cancel func. Test-only.

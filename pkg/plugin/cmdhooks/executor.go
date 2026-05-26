@@ -10,7 +10,7 @@ import (
 	apicommand "gocache/api/command"
 	opctx "gocache/api/context"
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	"gocache/pkg/plugin/router"
 	"gocache/pkg/rex"
 )

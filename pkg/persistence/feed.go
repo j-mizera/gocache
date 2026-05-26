@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
 )
 

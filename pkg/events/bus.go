@@ -15,7 +15,7 @@ import (
 
 	apiconfig "gocache/api/config"
 	apiEvents "gocache/api/events"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 )
 
 

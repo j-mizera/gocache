@@ -14,7 +14,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
 )
 

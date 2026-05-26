@@ -1,32 +1,6 @@
 package config
 
-import (
-	"sync/atomic"
-	"time"
-)
-
-// pluginConfigProvider is set once by the config loader (pkg/config)
-// after the server config is loaded. Embedded plugins call
-// PluginConfigFor in ConfigLoaded to get their scoped view.
-var pluginConfigProvider atomic.Value // stores func(string) PluginConfig
-
-// SetPluginConfigProvider registers the function that produces scoped
-// PluginConfig views. Called once by pkg/config during installHandle.
-// After this call, PluginConfigFor delegates to fn.
-func SetPluginConfigProvider(fn func(string) PluginConfig) {
-	pluginConfigProvider.Store(fn)
-}
-
-// PluginConfigFor returns a scoped PluginConfig view for the named
-// plugin. Safe to call from ConfigLoaded and later. Before the config
-// loader runs, returns a zero-value MapConfig (all Gets return zero,
-// SetDefault and BindEnv are no-ops).
-func PluginConfigFor(name string) PluginConfig {
-	if fn, ok := pluginConfigProvider.Load().(func(string) PluginConfig); ok {
-		return fn(name)
-	}
-	return NewMapConfig()
-}
+import "time"
 
 // PluginConfig is the typed read-only view of a single embedded plugin's
 // configuration subsection. The server hands one to each plugin's

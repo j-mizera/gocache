@@ -11,7 +11,7 @@ import (
 
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
@@ -21,7 +21,7 @@ import (
 	"gocache/pkg/engine"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 	resphandler "gocache/pkg/resp/handler"
 	"gocache/pkg/rex"
 	rexhandler "gocache/pkg/rex/handler"

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/viper"
 
 	apiconfig "gocache/api/config"
+	"gocache/commons/plugincfg"
 )
 
 // serverConfig is the package-private handle that pkg/config holds onto
@@ -21,7 +22,7 @@ var serverConfig atomic.Pointer[viper.Viper]
 // once viper is fully wired (defaults + flags + env + file + watch).
 func installHandle(v *viper.Viper) {
 	serverConfig.Store(v)
-	apiconfig.SetPluginConfigProvider(PluginConfigFor)
+	plugincfg.SetPluginConfigProvider(PluginConfigFor)
 }
 
 // PluginConfigFor returns a typed read-only view of the named plugin's

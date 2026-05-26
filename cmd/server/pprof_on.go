@@ -8,7 +8,7 @@ import (
 	"os"
 	"runtime"
 
-	"gocache/api/logger"
+	"gocache/commons/logger"
 )
 
 // Build-tag-gated pprof endpoint. Compiled in only when the `pprof` build

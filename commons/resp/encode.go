@@ -2,20 +2,6 @@ package resp
 
 import "strconv"
 
-const (
-	SimpleString = '+'
-	Error        = '-'
-	Integer      = ':'
-	BulkString   = '$'
-	Array        = '*'
-	Null         = '_'
-	Boolean      = '#'
-	Double       = ','
-	BulkError    = '!'
-	Map          = '%'
-	Set          = '~'
-)
-
 // --- Append-based API (zero-alloc hot path) ---
 
 func AppendBulkString(b []byte, s string) []byte {

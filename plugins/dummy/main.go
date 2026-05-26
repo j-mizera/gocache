@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	apilogger "gocache/api/logger"
+	apilogger "gocache/commons/logger"
 	"gocache/api/version"
 	"gocache/sdk/pluginsdk"
 )

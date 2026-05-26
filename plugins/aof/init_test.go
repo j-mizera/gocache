@@ -10,8 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
+	"gocache/commons/plugincfg"
+	"gocache/testkit/memstore"
 )
 
 func TestSinkAndSource_RoundTrip(t *testing.T) {
@@ -138,7 +139,7 @@ func TestProvider_Build(t *testing.T) {
 	t.Cleanup(apipersistence.ResetProvidersForTest)
 
 	p := &provider{}
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	cfg.Values[keyFile] = filepath.Join(t.TempDir(), "test.aof")
 
 	backend, err := p.Build(cfg, nil)
@@ -169,7 +170,7 @@ func TestProvider_Build_AppliesDefaults(t *testing.T) {
 	apipersistence.ResetProvidersForTest()
 	t.Cleanup(apipersistence.ResetProvidersForTest)
 
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	p := &provider{}
 	backend, err := p.Build(cfg, nil)
 	if err != nil {
@@ -187,7 +188,7 @@ func TestProvider_Build_AppliesDefaults(t *testing.T) {
 }
 
 func TestProvider_Build_EmptyFile_Errors(t *testing.T) {
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	cfg.Values[keyFile] = ""
 
 	p := &provider{}
@@ -199,7 +200,7 @@ func TestProvider_Build_EmptyFile_Errors(t *testing.T) {
 
 func TestProvider_OnConfigReload(t *testing.T) {
 	dir := t.TempDir()
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	cfg.Values[keyFile] = filepath.Join(dir, "test.aof")
 	cfg.Values[keyFsync] = "no"
 
@@ -215,7 +216,7 @@ func TestProvider_OnConfigReload(t *testing.T) {
 		t.Fatalf("initial policy = %v, want FsyncNo", sink.FsyncPolicy())
 	}
 
-	reloadCfg := apiconfig.NewMapConfig()
+	reloadCfg := plugincfg.NewMapConfig()
 	reloadCfg.Values[keyFsync] = "always"
 	p.OnConfigReload(reloadCfg)
 
@@ -406,7 +407,7 @@ func TestIntegration_WriteBootReplayVerify(t *testing.T) {
 		t.Fatalf("mode = %v, want Replay", boot.Mode)
 	}
 
-	store := apipersistence.NewMemoryStore()
+	store := memstore.NewMemoryStore()
 	count := 0
 	for {
 		m, err := boot.Replay.Next(ctx)
@@ -463,7 +464,7 @@ func TestBGREWRITEAOF_ConcurrentRejection(t *testing.T) {
 	t.Cleanup(apipersistence.ResetProvidersForTest)
 
 	dir := t.TempDir()
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	cfg.Values[keyFile] = filepath.Join(dir, "test.aof")
 	cfg.Values[keyFsync] = "no"
 

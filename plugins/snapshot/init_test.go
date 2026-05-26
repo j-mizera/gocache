@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	apiconfig "gocache/api/config"
 	apipersistence "gocache/api/persistence"
+	"gocache/commons/plugincfg"
 )
 
 // TestProvider_Build_ReadsScopedKey verifies the plugin pulls its
@@ -16,7 +16,7 @@ func TestProvider_Build_ReadsScopedKey(t *testing.T) {
 	dir := t.TempDir()
 	wantFile := filepath.Join(dir, "configured.snap")
 
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	cfg.Values[keyFile] = wantFile
 
 	p := &provider{}
@@ -39,7 +39,7 @@ func TestProvider_Build_ReadsScopedKey(t *testing.T) {
 // TestProvider_Build_AppliesDefault verifies the plugin's SetDefault
 // call provides a fallback when the operator hasn't set "file".
 func TestProvider_Build_AppliesDefault(t *testing.T) {
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 
 	p := &provider{}
 	if _, err := p.Build(cfg, nil); err != nil {
@@ -54,7 +54,7 @@ func TestProvider_Build_AppliesDefault(t *testing.T) {
 // TestProvider_Build_RequiredKeyEmpty verifies that an empty filename
 // (e.g. operator explicitly set the key to "") surfaces as an error.
 func TestProvider_Build_RequiredKeyEmpty(t *testing.T) {
-	cfg := apiconfig.NewMapConfig()
+	cfg := plugincfg.NewMapConfig()
 	cfg.Values[keyFile] = "" // explicit empty wins over the SetDefault inside Build
 
 	p := &provider{}
@@ -72,7 +72,7 @@ func TestProvider_OnConfigReload(t *testing.T) {
 	first := filepath.Join(dir, "first.snap")
 	second := filepath.Join(dir, "second.snap")
 
-	cfgInitial := apiconfig.NewMapConfig()
+	cfgInitial := plugincfg.NewMapConfig()
 	cfgInitial.Values[keyFile] = first
 
 	p := &provider{}
@@ -89,7 +89,7 @@ func TestProvider_OnConfigReload(t *testing.T) {
 		t.Errorf("first snapshot missing: %v", err)
 	}
 
-	cfgReloaded := apiconfig.NewMapConfig()
+	cfgReloaded := plugincfg.NewMapConfig()
 	cfgReloaded.Values[keyFile] = second
 	p.OnConfigReload(cfgReloaded)
 

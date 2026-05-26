@@ -18,8 +18,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gocache/api/config"
-	"gocache/api/embedded"
-	"gocache/api/logger"
+	"gocache/sdk/embedded"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 )
 

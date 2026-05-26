@@ -5,7 +5,7 @@ import (
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 // Hash commands operate on two physical encodings:

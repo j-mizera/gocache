@@ -10,7 +10,7 @@ import (
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 	serverEvents "gocache/pkg/events"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"

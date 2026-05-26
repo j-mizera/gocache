@@ -9,7 +9,7 @@ import (
 
 	opctx "gocache/api/context"
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
 	"gocache/pkg/operations"

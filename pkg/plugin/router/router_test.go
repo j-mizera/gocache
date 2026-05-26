@@ -8,7 +8,7 @@ import (
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 // testPipe creates a connected pair of transport.Conn for testing.

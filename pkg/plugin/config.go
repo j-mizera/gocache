@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	apiplugin "gocache/api/plugin"
+	"gocache/commons/logger"
 )
 
 // Re-exports of the public plugin contract types. Pure data definitions
@@ -21,6 +23,8 @@ const (
 	FailurePolicyContinue   = apiplugin.FailurePolicyContinue
 	FailurePolicyHaltServer = apiplugin.FailurePolicyHaltServer
 )
+
+var deprecatedCriticalWarnOnce sync.Once
 
 // executableBits is the mask of the owner, group, and other execute bits
 // on a Unix file mode. A plugin binary must have at least one of these
@@ -85,6 +89,18 @@ func Discover(cfg PluginsConfig) ([]*PluginEntry, error) {
 			}
 			entry.Critical = override.IsCritical()
 			entry.Priority = override.Priority
+
+			switch override.FailurePolicy {
+			case FailurePolicyHaltServer, FailurePolicyContinue, "":
+			default:
+				logger.WarnNoCtx().Str("failure_policy", override.FailurePolicy).
+					Msg("unknown plugin failure_policy — falling back to legacy 'critical' field")
+			}
+			if override.Critical && override.FailurePolicy != FailurePolicyHaltServer && override.FailurePolicy != FailurePolicyContinue {
+				deprecatedCriticalWarnOnce.Do(func() {
+					logger.WarnNoCtx().Msg("plugin override uses deprecated 'critical: true' — migrate to 'failure_policy: halt_server'")
+				})
+			}
 		}
 
 		plugins = append(plugins, entry)

@@ -30,7 +30,7 @@ import (
 	"gocache/pkg/pipeline"
 	"gocache/pkg/events"
 	serverOps "gocache/pkg/operations"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 	"gocache/pkg/watch"
 )
 

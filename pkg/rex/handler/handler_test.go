@@ -6,7 +6,7 @@ import (
 
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 	"gocache/pkg/rex"
 	rexhandler "gocache/pkg/rex/handler"
 )

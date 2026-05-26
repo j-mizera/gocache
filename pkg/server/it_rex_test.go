@@ -9,7 +9,7 @@ import (
 	apicommand "gocache/api/command"
 	gcpc "gocache/api/gcpc/v1"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 // fakeHookExecutor is an in-process command.HookExecutor that captures the

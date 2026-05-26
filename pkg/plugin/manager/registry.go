@@ -8,7 +8,7 @@ import (
 
 	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 // PluginState represents the current lifecycle state of a plugin.

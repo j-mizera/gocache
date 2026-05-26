@@ -11,7 +11,7 @@ import (
 	"gocache/api/command"
 	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
-	"gocache/api/transport"
+	"gocache/commons/transport"
 )
 
 // Session provides query capabilities over the plugin's GCPC connection.

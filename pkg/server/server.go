@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"gocache/api/events"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
@@ -24,7 +24,7 @@ import (
 	"gocache/pkg/pipeline"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 	"gocache/pkg/rex"
 	"gocache/pkg/watch"
 )

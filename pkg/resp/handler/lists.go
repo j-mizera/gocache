@@ -7,7 +7,7 @@ import (
 	"github.com/gammazero/deque"
 
 	apicommand "gocache/api/command"
-	"gocache/api/logger"
+	"gocache/commons/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"

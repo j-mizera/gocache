@@ -3,7 +3,7 @@ package handler
 import (
 	apicommand "gocache/api/command"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 // reg builds a single-key Registration with the key at Args[0] (the

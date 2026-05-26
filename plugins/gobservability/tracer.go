@@ -10,7 +10,7 @@ import (
 
 	"gocache/api/command"
 	opctx "gocache/api/context"
-	apilogger "gocache/api/logger"
+	apilogger "gocache/commons/logger"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"

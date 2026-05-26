@@ -5,7 +5,7 @@ import (
 
 	apicommand "gocache/api/command"
 	"gocache/pkg/command"
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 	"gocache/pkg/rex"
 )
 

@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"gocache/pkg/resp"
+	"gocache/commons/resp"
 )
 
 func dial(t *testing.T, addr string) net.Conn {

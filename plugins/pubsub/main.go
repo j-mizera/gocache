@@ -6,7 +6,7 @@ import (
 
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
-	apiResp "gocache/api/resp"
+	apiResp "gocache/commons/resp"
 	"gocache/api/version"
 	"gocache/sdk/pluginsdk"
 )
