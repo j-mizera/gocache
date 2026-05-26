@@ -239,6 +239,7 @@ func main() {
 		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
 		pluginManager.SetLogCollector(logCollector)
 		pluginManager.SetTracker(tracker)
+		pluginManager.SetClientPusher(srv.ConnRegistry())
 		pluginmgr.RegisterOperationHandlers(pluginManager.QueryRegistry(), tracker)
 		if err := pluginManager.Start(ctx); err != nil {
 			logger.FatalNoCtx().Err(err).Msg("failed to start plugin manager")

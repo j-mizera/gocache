@@ -42,6 +42,12 @@ type PluginRoute struct {
 	ReadOnly   bool
 }
 
+// RouteMeta is a lightweight snapshot of a registered command's metadata,
+// returned by LookupMeta for callers that need classification without routing.
+type RouteMeta struct {
+	ReadOnly bool
+}
+
 // PluginConn wraps a transport.Conn with request/response multiplexing.
 // Multiple goroutines can send requests concurrently; responses are
 // correlated by request_id. Used by both the command router and hook executor.
@@ -304,22 +310,35 @@ func (r *Router) HasCommand(op string) bool {
 	return found
 }
 
+// LookupMeta returns classification metadata for a registered plugin command
+// without acquiring the full route connection. Returns nil if the command is
+// not registered.
+func (r *Router) LookupMeta(op string) *RouteMeta {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	route, _, found := r.lookup(op)
+	if !found {
+		return nil
+	}
+	return &RouteMeta{ReadOnly: route.ReadOnly}
+}
+
 // Route dispatches a command to the owning plugin and waits for the response.
 // Returns the result as an any compatible with evaluator.Result.Value.
 // metadata carries REX metadata with bare keys (no shared.rex. prefix).
-func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string) (any, error) {
+func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string) (any, bool, error) {
 	r.mu.RLock()
 	route, pc, found := r.lookup(op)
 	r.mu.RUnlock()
 
 	if !found {
-		return nil, ErrCommandNotFound
+		return nil, false, ErrCommandNotFound
 	}
 
 	// Arg count validation.
 	n := len(args)
 	if n < route.MinArgs || (route.MaxArgs >= 0 && n > route.MaxArgs) {
-		return nil, fmt.Errorf("ERR wrong number of arguments for '%s' command", strings.ToLower(op))
+		return nil, false, fmt.Errorf("ERR wrong number of arguments for '%s' command", strings.ToLower(op))
 	}
 
 	requestID := NextRequestID()
@@ -332,24 +351,24 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 	respCh, err := pc.Send(ctx, env, requestID)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ErrPluginTimeout
+			return nil, false, ErrPluginTimeout
 		}
-		return nil, fmt.Errorf("%w: %s", ErrPluginDown, err.Error())
+		return nil, false, fmt.Errorf("%w: %s", ErrPluginDown, err.Error())
 	}
 
 	select {
 	case resp, ok := <-respCh:
 		if !ok {
-			return nil, ErrPluginDown
+			return nil, false, ErrPluginDown
 		}
 		cmdResp := resp.GetCommandResponse()
 		if cmdResp == nil {
-			return nil, ErrPluginDown
+			return nil, false, ErrPluginDown
 		}
-		return gcpc.InterfaceFromResult(cmdResp.Result), nil
+		return gcpc.InterfaceFromResult(cmdResp.Result), cmdResp.SuppressResponse, nil
 	case <-ctx.Done():
 		pc.pending.Delete(requestID)
-		return nil, ErrPluginTimeout
+		return nil, false, ErrPluginTimeout
 	}
 }
 

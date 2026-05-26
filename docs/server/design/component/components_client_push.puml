@@ -1,0 +1,49 @@
+@startuml components_client_push
+!include ../../../design/theme.iuml
+
+mainframe **component** Client Push Architecture
+
+package "Server Process" {
+    component "handleConnection\n(per-goroutine)" as HC
+    component "ConnectionRegistry" as CR
+    component "ConnHandle\n(mutex + resp.Writer)" as CH
+    component "Manager.readLoop" as MRL
+
+    HC --> CR : Register(connID, writer)
+    CR --> CH : creates per-connection
+    HC --> CH : WriteValue / Flush\n(normal command responses)
+    MRL --> CH : Push(connID, data)\n(plugin-initiated)
+}
+
+package "Plugin Process (IPC)" {
+    component "PubSub Plugin" as PS
+    component "Session.PushToClient" as SPC
+    component "SubscriptionManager" as SM
+
+    PS --> SM : Subscribe/Publish
+    PS --> SPC : PushToClient(connID, respBytes)
+}
+
+cloud "GCPC (Unix Socket)" as GCPC
+
+SPC --> GCPC : ClientPushV1{connID, data}
+GCPC --> MRL : ClientPushV1
+
+note bottom of CH
+  ConnHandle serializes concurrent access:
+  - Normal writes from handleConnection goroutine
+  - Push writes from Manager.readLoop goroutine
+  Both acquire the per-connection mutex before writing.
+end note
+
+note bottom of CR
+  Registry lifecycle:
+  1. Register() after resp.NewWriter() in handleConnection
+  2. Unregister() in deferred cleanup before conn.Close()
+  Push() after Unregister returns ErrConnNotFound
+end note
+
+actor "Client" as C
+CH --> C : TCP write\n(mutex-serialized)
+
+@enduml

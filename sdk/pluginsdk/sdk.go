@@ -157,18 +157,21 @@ const (
 
 // CommandDecl declares a command a plugin can handle.
 type CommandDecl struct {
-	Name       string // command name (e.g. "PUBLISH" or "QUERY")
-	Namespaced bool   // true = REX (PLUGIN:CMD), false = main namespace
-	MinArgs    int
-	MaxArgs    int  // -1 = unlimited
-	ReadOnly   bool // hint: command does not mutate state
+	Name        string // command name (e.g. "PUBLISH" or "QUERY")
+	Namespaced  bool   // true = REX (PLUGIN:CMD), false = main namespace
+	MinArgs     int
+	MaxArgs     int  // -1 = unlimited
+	ReadOnly    bool // hint: command does not mutate state
+	KeyArgIndex int  // -1 = keyless (default), 0+ = single-key at Args[N]
+	MultiKey    bool // command touches multiple keys
 }
 
 // CommandResult holds the result of a plugin command execution.
 type CommandResult struct {
 	// Value can be: string, int, int64, float64, nil, error,
 	// []any, []string, map[string]string, map[string]any.
-	Value any
+	Value            any
+	SuppressResponse bool
 }
 
 // HookDecl declares a hook a plugin wants to intercept.
@@ -195,12 +198,23 @@ type HookResponse struct {
 	ContextValues map[string]string // pre-hook: values to add to command context
 }
 
+// ConnectionID extracts the stable connection identifier from the operation
+// context. Returns "" if no operation or connection ID is available.
+func ConnectionID(ctx context.Context) string {
+	if op := ops.FromContext(ctx); op != nil {
+		snap := op.ContextSnapshot(false)
+		return snap[command.ConnectionIDKey]
+	}
+	return ""
+}
+
 // ctxFromOpMap reconstructs a local operation from a context map containing
 // _operation_id. If no operation ID is present, returns ctx unchanged.
 func ctxFromOpMap(ctx context.Context, m map[string]string) context.Context {
 	if opID := m[command.OperationID]; opID != "" {
 		op := ops.New(ops.TypeCommand, "")
 		op.ID = opID
+		op.EnrichMany(m)
 		return ops.WithContext(ctx, op)
 	}
 	return ctx
@@ -248,11 +262,13 @@ func Run(ctx context.Context, p Plugin) error {
 		cmdDecls = make([]*gcpc.CommandDeclV1, len(decls))
 		for i, d := range decls {
 			cmdDecls[i] = &gcpc.CommandDeclV1{
-				Name:       d.Name,
-				Namespaced: d.Namespaced,
-				MinArgs:    int32(d.MinArgs),
-				MaxArgs:    int32(d.MaxArgs),
-				Readonly:   d.ReadOnly,
+				Name:        d.Name,
+				Namespaced:  d.Namespaced,
+				MinArgs:     int32(d.MinArgs),
+				MaxArgs:     int32(d.MaxArgs),
+				Readonly:    d.ReadOnly,
+				KeyArgIndex: int32(d.KeyArgIndex),
+				MultiKey:    d.MultiKey,
 			}
 		}
 	}
@@ -411,12 +427,14 @@ func Run(ctx context.Context, p Plugin) error {
 				cmdCtx := ctxFromOpMap(ctx, req.Context)
 				result := cp.HandleCommand(cmdCtx, req.Command, req.Args, req.Metadata)
 				var protoResult *gcpc.ResultV1
+				suppress := false
 				if result != nil {
 					protoResult = gcpc.ResultFromInterface(result.Value)
+					suppress = result.SuppressResponse
 				} else {
 					protoResult = gcpc.ResultFromInterface(nil)
 				}
-				resp := gcpc.NewCommandResponse(req.RequestId, protoResult)
+				resp := gcpc.NewCommandResponse(req.RequestId, protoResult, suppress)
 				if err := tc.Send(resp); err != nil {
 					pluginLog.ErrorNoCtx().Err(err).Str("command", req.Command).Msg("failed to send command response")
 				}

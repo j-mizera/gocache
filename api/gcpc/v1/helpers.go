@@ -154,14 +154,28 @@ func NewCommandRequest(command string, args []string, requestID string, metadata
 	}
 }
 
-func NewCommandResponse(requestID string, result *ResultV1) *EnvelopeV1 {
+func NewCommandResponse(requestID string, result *ResultV1, suppressResponse bool) *EnvelopeV1 {
 	return &EnvelopeV1{
 		Version: ProtocolVersion,
 		Id:      envelopeID(),
 		Payload: &EnvelopeV1_CommandResponse{
 			CommandResponse: &CommandResponseV1{
-				RequestId: requestID,
-				Result:    result,
+				RequestId:        requestID,
+				Result:           result,
+				SuppressResponse: suppressResponse,
+			},
+		},
+	}
+}
+
+func NewClientPush(connectionID string, data []byte) *EnvelopeV1 {
+	return &EnvelopeV1{
+		Version: ProtocolVersion,
+		Id:      envelopeID(),
+		Payload: &EnvelopeV1_ClientPush{
+			ClientPush: &ClientPushV1{
+				ConnectionId: connectionID,
+				Data:         data,
 			},
 		},
 	}

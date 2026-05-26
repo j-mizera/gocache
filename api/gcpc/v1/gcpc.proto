@@ -25,6 +25,7 @@ message EnvelopeV1 {
     OperationHookRequestV1  operation_hook_request  = 80;
     OperationHookResponseV1 operation_hook_response = 81;
     PluginConfigV1          config_update           = 90;
+    ClientPushV1            client_push             = 100;
   }
 }
 
@@ -42,11 +43,13 @@ message RegisterV1 {
 
 // CommandDeclV1 declares a single command a plugin can handle.
 message CommandDeclV1 {
-  string name       = 1; // command name, e.g. "PUBLISH" or "QUERY"
-  bool   namespaced = 2; // true = REX (PLUGIN:CMD), false = main namespace
-  int32  min_args   = 3;
-  int32  max_args   = 4; // -1 = unlimited
-  bool   readonly   = 5; // hint: command does not mutate state
+  string name          = 1; // command name, e.g. "PUBLISH" or "QUERY"
+  bool   namespaced    = 2; // true = REX (PLUGIN:CMD), false = main namespace
+  int32  min_args      = 3;
+  int32  max_args      = 4; // -1 = unlimited
+  bool   readonly      = 5; // hint: command does not mutate state
+  int32  key_arg_index = 6; // -1 = keyless, 0+ = single-key at Args[N]
+  bool   multi_key     = 7; // command touches multiple keys
 }
 
 // HookPhaseV1 specifies when a hook fires relative to command execution.
@@ -105,8 +108,9 @@ message CommandRequestV1 {
 
 // CommandResponseV1 is the plugin's response to a CommandRequestV1.
 message CommandResponseV1 {
-  string   request_id = 1;
-  ResultV1 result     = 2;
+  string   request_id        = 1;
+  ResultV1 result             = 2;
+  bool     suppress_response  = 3; // when true, server skips writing the RESP response (plugin already pushed via ClientPushV1)
 }
 
 // HookRequestV1 is sent by the server when a hook fires.
@@ -275,6 +279,16 @@ message LogEntryEventV1 {
   string              message = 2;
   string              caller  = 3; // source file:line
   map<string, string> fields  = 4; // structured log fields
+}
+
+// --- Client Push ---
+
+// ClientPushV1 is sent by a plugin to push raw RESP data to a specific
+// client connection. The server writes the data verbatim to the connection's
+// writer. Fire-and-forget: no response is sent back to the plugin.
+message ClientPushV1 {
+  string connection_id = 1; // target connection (connOp.ID, received as _connection_id in context)
+  bytes  data          = 2; // pre-formatted RESP bytes
 }
 
 // --- Operation Events ---
