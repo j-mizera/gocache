@@ -1,0 +1,46 @@
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/resp
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkWrite_BulkString-24    	52002032	        26.05 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	46900677	        25.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	51173542	        25.48 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	43674967	        25.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	49983675	        25.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 8501095	       136.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 9337567	       133.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 8621685	       144.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 9491208	       131.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 9055782	       142.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	  110040	     10944 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	  113067	     11209 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	  104612	     11170 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	   99634	     12157 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	  108606	     11022 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2519451	       481.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2518033	       487.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2280685	       488.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2405464	       502.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2281161	       502.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  445538	      2709 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  474853	      2721 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  444165	      2836 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  366949	      3377 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  369507	      3535 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRead_BulkString-24     	 7332336	       160.2 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 7329330	       163.5 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 7416529	       167.0 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 7491243	       187.8 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 3923575	       342.9 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_Array-24          	  353380	      4010 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  310404	      3776 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  552849	      2045 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  651037	      2172 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  762580	      2398 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_ArrayLarge-24     	   10000	    180761 ns/op	   97984 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    7551	    229929 ns/op	   97990 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    5787	    191399 ns/op	   97983 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    6766	    171708 ns/op	   97978 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    6826	    178250 ns/op	   97979 B/op	    3002 allocs/op
+PASS
+ok  	gocache/pkg/resp	62.722s

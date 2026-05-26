@@ -1,0 +1,17 @@
+label=baseline
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=93967a8f8152e699ddbfe611e8c1f632aa9b6817
+gocache_branch=bench/audit-cleanup-baseline
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=18465423
+post_standard_rss_bytes=34959523
+final_rss_bytes=38283509
+delta_rss_bytes=19818086

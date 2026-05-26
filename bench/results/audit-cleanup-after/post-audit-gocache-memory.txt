@@ -1,0 +1,17 @@
+label=post-audit
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=6bfb163a407d0e37f3848d25647c662a5a378247
+gocache_branch=main
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=38084280
+post_standard_rss_bytes=153092096
+final_rss_bytes=191155404
+delta_rss_bytes=153071124

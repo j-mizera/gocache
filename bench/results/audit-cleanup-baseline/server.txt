@@ -1,0 +1,70 @@
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/server
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkInProc_HSET-24                    	{"level":"info","source":"server","time":"2026-05-26T21:47:43Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET-24                    	{"level":"info","source":"server","time":"2026-05-26T21:47:44Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET-24                    	{"level":"info","source":"server","time":"2026-05-26T21:47:46Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET-24                    	{"level":"info","source":"server","time":"2026-05-26T21:47:47Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET-24                    	{"level":"info","source":"server","time":"2026-05-26T21:47:48Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET_Spread-24             	{"level":"info","source":"server","time":"2026-05-26T21:47:49Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET_Spread-24             	{"level":"info","source":"server","time":"2026-05-26T21:47:51Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET_Spread-24             	{"level":"info","source":"server","time":"2026-05-26T21:47:52Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET_Spread-24             	{"level":"info","source":"server","time":"2026-05-26T21:47:54Z","message":"engine stop signal received"}
+BenchmarkInProc_HSET_Spread-24             	{"level":"info","source":"server","time":"2026-05-26T21:47:55Z","message":"engine stop signal received"}
+BenchmarkTCP_HSET_Spread_Standard-24       	{"level":"info","source":"server","time":"2026-05-26T21:47:57Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Spread_Standard-24       	{"level":"info","source":"server","time":"2026-05-26T21:47:59Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Spread_Standard-24       	{"level":"info","source":"server","time":"2026-05-26T21:48:00Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Spread_Standard-24       	{"level":"info","source":"server","time":"2026-05-26T21:48:02Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Spread_Standard-24       	{"level":"info","source":"server","time":"2026-05-26T21:48:03Z","message":"initiating graceful shutdown"}
+BenchmarkInProc_GET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:05Z","message":"engine stop signal received"}
+BenchmarkInProc_GET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:07Z","message":"engine stop signal received"}
+BenchmarkInProc_GET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:09Z","message":"engine stop signal received"}
+BenchmarkInProc_GET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:12Z","message":"engine stop signal received"}
+BenchmarkInProc_GET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:14Z","message":"engine stop signal received"}
+BenchmarkInProc_SET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:16Z","message":"engine stop signal received"}
+BenchmarkInProc_SET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:18Z","message":"engine stop signal received"}
+BenchmarkInProc_SET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:19Z","message":"engine stop signal received"}
+BenchmarkInProc_SET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:21Z","message":"engine stop signal received"}
+BenchmarkInProc_SET-24                     	{"level":"info","source":"server","time":"2026-05-26T21:48:23Z","message":"engine stop signal received"}
+BenchmarkTCP_GET_Pipelined-24              	{"level":"info","source":"server","time":"2026-05-26T21:48:28Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Pipelined-24              	{"level":"info","source":"server","time":"2026-05-26T21:48:36Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Pipelined-24              	{"level":"info","source":"server","time":"2026-05-26T21:48:42Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Pipelined-24              	{"level":"info","source":"server","time":"2026-05-26T21:48:51Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Pipelined-24              	{"level":"info","source":"server","time":"2026-05-26T21:49:01Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Pipelined-24             	{"level":"info","source":"server","time":"2026-05-26T21:49:06Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Pipelined-24             	{"level":"info","source":"server","time":"2026-05-26T21:49:08Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Pipelined-24             	{"level":"info","source":"server","time":"2026-05-26T21:49:09Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Pipelined-24             	{"level":"info","source":"server","time":"2026-05-26T21:49:11Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Pipelined-24             	{"level":"info","source":"server","time":"2026-05-26T21:49:13Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Standard-24              	{"level":"info","source":"server","time":"2026-05-26T21:49:14Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Standard-24              	{"level":"info","source":"server","time":"2026-05-26T21:49:15Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Standard-24              	{"level":"info","source":"server","time":"2026-05-26T21:49:17Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Standard-24              	{"level":"info","source":"server","time":"2026-05-26T21:49:18Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_HSET_Standard-24              	{"level":"info","source":"server","time":"2026-05-26T21:49:19Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:49:24Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:49:31Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:49:40Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:49:50Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_GET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:49:56Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	{"level":"info","source":"server","time":"2026-05-26T21:50:04Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	{"level":"info","source":"server","time":"2026-05-26T21:50:12Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	{"level":"info","source":"server","time":"2026-05-26T21:50:20Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	{"level":"info","source":"server","time":"2026-05-26T21:50:29Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	{"level":"info","source":"server","time":"2026-05-26T21:50:37Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	{"level":"info","source":"server","time":"2026-05-26T21:50:48Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	{"level":"info","source":"server","time":"2026-05-26T21:50:53Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	{"level":"info","source":"server","time":"2026-05-26T21:51:00Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	{"level":"info","source":"server","time":"2026-05-26T21:51:10Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	{"level":"info","source":"server","time":"2026-05-26T21:51:17Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Standard-24      	{"level":"info","source":"server","time":"2026-05-26T21:51:29Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Standard-24      	{"level":"info","source":"server","time":"2026-05-26T21:51:36Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Standard-24      	{"level":"info","source":"server","time":"2026-05-26T21:51:46Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Standard-24      	{"level":"info","source":"server","time":"2026-05-26T21:51:53Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_Mixed_GetSet_Standard-24      	{"level":"info","source":"server","time":"2026-05-26T21:52:03Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_SET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:52:09Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_SET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:52:11Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_SET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:52:12Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_SET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:52:13Z","message":"initiating graceful shutdown"}
+BenchmarkTCP_SET_Standard-24               	{"level":"info","source":"server","time":"2026-05-26T21:52:15Z","message":"initiating graceful shutdown"}
+ok  	gocache/pkg/server	300.873s
