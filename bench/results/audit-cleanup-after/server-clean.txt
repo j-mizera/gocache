@@ -1,0 +1,45 @@
+goos: linux
+goarch: amd64
+pkg: gocache/pkg/server
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkInProc_HSET-24                    	  794647	      1396 ns/op	     564 B/op	      13 allocs/op
+BenchmarkInProc_HSET-24                    	  795453	      1484 ns/op	     564 B/op	      13 allocs/op
+BenchmarkInProc_HSET-24                    	  859627	      1498 ns/op	     559 B/op	      13 allocs/op
+BenchmarkInProc_HSET_Spread-24             	 3434410	       355.4 ns/op	     404 B/op	      12 allocs/op
+BenchmarkInProc_HSET_Spread-24             	 3296289	       357.8 ns/op	     404 B/op	      12 allocs/op
+BenchmarkInProc_HSET_Spread-24             	 3021613	       424.8 ns/op	     405 B/op	      12 allocs/op
+BenchmarkTCP_HSET_Spread_Standard-24       	  886810	      1334 ns/op	     816 B/op	      25 allocs/op
+BenchmarkTCP_HSET_Spread_Standard-24       	  760207	      1831 ns/op	     822 B/op	      25 allocs/op
+BenchmarkTCP_HSET_Spread_Standard-24       	  894230	      1335 ns/op	     816 B/op	      25 allocs/op
+BenchmarkInProc_GET-24                     	 9279711	       123.4 ns/op	     456 B/op	      13 allocs/op
+BenchmarkInProc_GET-24                     	10488506	       137.0 ns/op	     455 B/op	      13 allocs/op
+BenchmarkInProc_GET-24                     	10635265	       120.4 ns/op	     455 B/op	      13 allocs/op
+BenchmarkInProc_SET-24                     	 3462937	       332.9 ns/op	     665 B/op	      14 allocs/op
+BenchmarkInProc_SET-24                     	 3625324	       304.0 ns/op	     693 B/op	      14 allocs/op
+BenchmarkInProc_SET-24                     	 3819823	       326.9 ns/op	     750 B/op	      14 allocs/op
+BenchmarkTCP_GET_Pipelined-24              	  360696	      3463 ns/op	   10626 B/op	     286 allocs/op
+BenchmarkTCP_GET_Pipelined-24              	  323941	      3148 ns/op	   10628 B/op	     286 allocs/op
+BenchmarkTCP_GET_Pipelined-24              	  375756	      3303 ns/op	   10622 B/op	     286 allocs/op
+BenchmarkTCP_HSET_Pipelined-24             	   75045	     18388 ns/op	   13725 B/op	     292 allocs/op
+BenchmarkTCP_HSET_Pipelined-24             	   70501	     18041 ns/op	   13799 B/op	     292 allocs/op
+BenchmarkTCP_HSET_Pipelined-24             	   73828	     21136 ns/op	   13740 B/op	     292 allocs/op
+BenchmarkTCP_HSET_Standard-24              	  299720	      3575 ns/op	    1024 B/op	      27 allocs/op
+BenchmarkTCP_HSET_Standard-24              	  343711	      3413 ns/op	    1001 B/op	      27 allocs/op
+BenchmarkTCP_HSET_Standard-24              	  354294	      3470 ns/op	     997 B/op	      27 allocs/op
+BenchmarkTCP_GET_Standard-24               	  977059	      1227 ns/op	     803 B/op	      26 allocs/op
+BenchmarkTCP_GET_Standard-24               	  810357	      1372 ns/op	     805 B/op	      26 allocs/op
+BenchmarkTCP_GET_Standard-24               	  972747	      1343 ns/op	     804 B/op	      26 allocs/op
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	  356750	      3290 ns/op	    9521 B/op	     274 allocs/op
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	  268515	      4495 ns/op	    9452 B/op	     273 allocs/op
+BenchmarkTCP_Mixed_GetSet_Pipelined-24     	  372226	      3339 ns/op	    9463 B/op	     274 allocs/op
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	  310657	      3416 ns/op	   10746 B/op	     285 allocs/op
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	  363141	      3297 ns/op	   10741 B/op	     285 allocs/op
+BenchmarkTCP_Mixed_GetHset_Pipelined-24    	  367743	      3488 ns/op	   10739 B/op	     285 allocs/op
+BenchmarkTCP_Mixed_GetSet_Standard-24      	  691480	      1879 ns/op	     702 B/op	      25 allocs/op
+BenchmarkTCP_Mixed_GetSet_Standard-24      	  993004	      1246 ns/op	     688 B/op	      25 allocs/op
+BenchmarkTCP_Mixed_GetSet_Standard-24      	  999440	      1256 ns/op	     688 B/op	      25 allocs/op
+BenchmarkTCP_SET_Standard-24               	  828190	      1948 ns/op	     970 B/op	      26 allocs/op
+BenchmarkTCP_SET_Standard-24               	  764776	      1323 ns/op	     952 B/op	      26 allocs/op
+BenchmarkTCP_SET_Standard-24               	  788119	      1351 ns/op	     968 B/op	      26 allocs/op
+PASS
+ok  	gocache/pkg/server	184.852s

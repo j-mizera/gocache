@@ -1,0 +1,66 @@
+goos: linux
+goarch: amd64
+pkg: gocache/commons/resp
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkWrite_BulkString-24    	41726631	        28.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	38381008	        30.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	41600383	        32.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	32975950	        32.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_BulkString-24    	36469498	        30.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 8835404	       175.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 7771218	       162.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 7922671	       153.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 7759736	       157.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArraySmall-24    	 7928246	       146.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	   84454	     14047 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	   85594	     13651 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	   81235	     13899 ns/op	       1 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	   96105	     13845 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_ArrayLarge-24    	   92239	     12399 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2121327	       597.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2136837	       593.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 2156288	       621.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 1908909	       599.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Map-24           	 1737142	       692.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  348297	      3796 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  329036	      3901 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  327332	      3866 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  316836	      3930 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWrite_Pipelined-24     	  304687	      4149 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRead_BulkString-24     	 4173074	       320.8 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 3161755	       354.5 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 3473463	       323.9 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 3254794	       376.4 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_BulkString-24     	 7333759	       212.6 ns/op	      72 B/op	       3 allocs/op
+BenchmarkRead_Array-24          	  848634	      2101 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  622406	      2301 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  701605	      2399 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  879936	      2127 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_Array-24          	  600909	      2147 ns/op	    1009 B/op	      32 allocs/op
+BenchmarkRead_ArrayLarge-24     	    5185	    207747 ns/op	   97984 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    5774	    185250 ns/op	   97981 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    5113	    201676 ns/op	   97986 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    6276	    192832 ns/op	   97980 B/op	    3002 allocs/op
+BenchmarkRead_ArrayLarge-24     	    6468	    189332 ns/op	   97980 B/op	    3002 allocs/op
+BenchmarkEncodeBulkString/alloc-24         	20307153	        49.93 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEncodeBulkString/alloc-24         	25916816	        40.10 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEncodeBulkString/alloc-24         	27469200	        40.46 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEncodeBulkString/alloc-24         	28057749	        40.32 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEncodeBulkString/alloc-24         	32488888	        48.30 ns/op	      48 B/op	       1 allocs/op
+BenchmarkEncodeBulkString/append-24        	100672096	        12.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeBulkString/append-24        	88217463	        12.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeBulkString/append-24        	100000000	        14.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeBulkString/append-24        	100000000	        10.24 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeBulkString/append-24        	135848973	        10.11 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeMessage/alloc-24            	 6277768	       164.2 ns/op	     176 B/op	       3 allocs/op
+BenchmarkEncodeMessage/alloc-24            	 7432600	       230.8 ns/op	     176 B/op	       3 allocs/op
+BenchmarkEncodeMessage/alloc-24            	 7429524	       152.3 ns/op	     176 B/op	       3 allocs/op
+BenchmarkEncodeMessage/alloc-24            	 7698636	       149.7 ns/op	     176 B/op	       3 allocs/op
+BenchmarkEncodeMessage/alloc-24            	 7884729	       181.7 ns/op	     176 B/op	       3 allocs/op
+BenchmarkEncodeMessage/append-24           	32054634	        41.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeMessage/append-24           	41553811	        32.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeMessage/append-24           	34833240	        43.33 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeMessage/append-24           	26068686	        43.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncodeMessage/append-24           	29329218	        36.13 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	gocache/commons/resp	85.854s
