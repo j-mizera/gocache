@@ -122,13 +122,20 @@ type jaegerAPIResponse struct {
 }
 
 type jaegerTrace struct {
-	TraceID string       `json:"traceID"`
-	Spans   []jaegerSpan `json:"spans"`
+	TraceID   string                      `json:"traceID"`
+	Spans     []jaegerSpan                `json:"spans"`
+	Processes map[string]jaegerProcessDef `json:"processes"`
 }
 
 type jaegerSpan struct {
 	OperationName string      `json:"operationName"`
 	Tags          []jaegerTag `json:"tags"`
+	ProcessID     string      `json:"processID"`
+}
+
+type jaegerProcessDef struct {
+	ServiceName string      `json:"serviceName"`
+	Tags        []jaegerTag `json:"tags"`
 }
 
 type jaegerTag struct {
@@ -139,9 +146,25 @@ type jaegerTag struct {
 func convertTraces(raw []jaegerTrace) []Trace {
 	traces := make([]Trace, len(raw))
 	for i, rt := range raw {
+		// Build process tag lookup so resource attributes are accessible on spans.
+		procTags := make(map[string]map[string]string, len(rt.Processes))
+		for pid, pdef := range rt.Processes {
+			tags := make(map[string]string, len(pdef.Tags))
+			for _, tag := range pdef.Tags {
+				tags[tag.Key] = fmt.Sprintf("%v", tag.Value)
+			}
+			procTags[pid] = tags
+		}
+
 		spans := make([]Span, len(rt.Spans))
 		for j, rs := range rt.Spans {
 			tags := make(map[string]string, len(rs.Tags))
+			// Merge process/resource tags first so span tags can override.
+			if pt, ok := procTags[rs.ProcessID]; ok {
+				for k, v := range pt {
+					tags[k] = v
+				}
+			}
 			for _, tag := range rs.Tags {
 				tags[tag.Key] = fmt.Sprintf("%v", tag.Value)
 			}
