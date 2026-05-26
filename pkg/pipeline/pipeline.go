@@ -277,6 +277,9 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	cmdOp.Enrich(apicommand.OperationID, cmdOp.ID)
 	cmdOp.Enrich(apicommand.CommandKey, op)
 	cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(len(args)))
+	if hasSpec && spec.ReadOnly {
+		cmdOp.Enrich(apicommand.ReadOnlyKey, "true")
+	}
 
 	// Inject REX metadata into operation context.
 	if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
@@ -434,10 +437,19 @@ func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.Cl
 	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)
 	defer cancel()
 
-	val, err := b.pluginRouter.Route(ctx, op, args, metadata)
+	if b.hasAnySink() {
+		cmdOp := b.tracker.Start(ops.TypeCommand, client.OperationID)
+		cmdOp.Enrich(apicommand.CommandKey, op)
+		cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(len(args)))
+		if meta := b.pluginRouter.LookupMeta(op); meta != nil && meta.ReadOnly {
+			cmdOp.Enrich(apicommand.ReadOnlyKey, "true")
+		}
+		ctx = ops.WithContext(ctx, cmdOp)
+		defer func() { cmdOp.Complete(); b.tracker.Complete(cmdOp.ID) }()
+	}
+
+	val, suppress, err := b.pluginRouter.Route(ctx, op, args, metadata)
 	if err != nil {
-		// Known sentinels produce stable wire messages; the mapToResp pipeline
-		// formats the default "ERR <msg>" for anything else via Result.Err.
 		if errors.Is(err, router.ErrPluginTimeout) {
 			return apicommand.Result{Value: resp.MarshalError("ERR plugin timeout")}
 		}
@@ -449,7 +461,7 @@ func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.Cl
 	if e, ok := val.(error); ok {
 		return apicommand.Result{Err: e}
 	}
-	return apicommand.Result{Value: val}
+	return apicommand.Result{Value: val, SuppressResponse: suppress}
 }
 
 func resultToHookStrings(r apicommand.Result) (string, string) {

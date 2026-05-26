@@ -39,6 +39,11 @@ type LogCollector interface {
 	AddSource(name string, r io.Reader)
 }
 
+// ClientPusher pushes raw RESP data to a specific client connection.
+type ClientPusher interface {
+	Push(connectionID string, data []byte) error
+}
+
 // Manager handles plugin lifecycle: discovery, fork/exec, registration,
 // health monitoring, restart, and graceful shutdown.
 //
@@ -58,6 +63,7 @@ type Manager struct {
 	eventBus       *serverEvents.Bus
 	logCollector   LogCollector
 	tracker        *serverOps.Tracker
+	clientPusher   ClientPusher
 
 	// cancel terminates the lifecycle context derived inside Start.
 	// nil before Start; reset to nil by Shutdown.
@@ -125,6 +131,12 @@ func (m *Manager) SetLogCollector(lc LogCollector) {
 // goroutines fall back to NoCtx logging just as before.
 func (m *Manager) SetTracker(t *serverOps.Tracker) {
 	m.tracker = t
+}
+
+// SetClientPusher wires the connection push interface so plugins can send
+// unsolicited data to client connections (e.g. Pub/Sub messages).
+func (m *Manager) SetClientPusher(p ClientPusher) {
+	m.clientPusher = p
 }
 
 // startPluginLifecycleOp creates the lifecycle operation for a plugin instance
@@ -689,6 +701,19 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance) {
 				errMsg = qErr.Error()
 			}
 			_ = conn.Send(gcpcv1.NewServerQueryResponse(query.RequestId, data, errMsg))
+		case *gcpcv1.EnvelopeV1_ClientPush:
+			push := env.GetClientPush()
+			if m.clientPusher == nil {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("client push received but no pusher configured")
+				continue
+			}
+			if !m.scopeRegistry.HasScope(inst.Name, scope.ScopeWrite) {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("client push denied: missing 'write' scope")
+				continue
+			}
+			if err := m.clientPusher.Push(push.ConnectionId, push.Data); err != nil {
+				logger.Debug(loopCtx).Str("plugin", inst.Name).Err(err).Msg("client push failed")
+			}
 		default:
 			logger.Debug(loopCtx).Str("plugin", inst.Name).Msg("unexpected message from plugin")
 		}

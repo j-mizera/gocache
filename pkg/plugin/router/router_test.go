@@ -205,7 +205,7 @@ func TestRouteSuccess(t *testing.T) {
 		}
 		// Send response.
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
-		resp := gcpc.NewCommandResponse(req.RequestId, result)
+		resp := gcpc.NewCommandResponse(req.RequestId, result, false)
 		if err := clientConn.Send(resp); err != nil {
 			t.Errorf("plugin send: %v", err)
 		}
@@ -214,7 +214,7 @@ func TestRouteSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	val, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
+	val, _, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -240,13 +240,13 @@ func TestRouteArgValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Too few args.
-	_, err := r.Route(ctx, "EXACT", []string{"one"}, nil)
+	_, _, err := r.Route(ctx, "EXACT", []string{"one"}, nil)
 	if err == nil {
 		t.Error("expected arg validation error for too few args")
 	}
 
 	// Too many args.
-	_, err = r.Route(ctx, "EXACT", []string{"one", "two", "three"}, nil)
+	_, _, err = r.Route(ctx, "EXACT", []string{"one", "two", "three"}, nil)
 	if err == nil {
 		t.Error("expected arg validation error for too many args")
 	}
@@ -267,7 +267,7 @@ func TestRouteTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := r.Route(ctx, "SLOW", nil, nil)
+	_, _, err := r.Route(ctx, "SLOW", nil, nil)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -298,7 +298,7 @@ func TestRouteConcurrent(t *testing.T) {
 				continue
 			}
 			result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: req.RequestId}}
-			_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result))
+			_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result, false))
 		}
 	}()
 
@@ -312,7 +312,7 @@ func TestRouteConcurrent(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, err := r.Route(ctx, "PING", nil, nil)
+			_, _, err := r.Route(ctx, "PING", nil, nil)
 			if err != nil {
 				errs <- err
 			}
@@ -368,7 +368,7 @@ func TestRouteMetadataForwarded(t *testing.T) {
 			}
 		}
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
-		resp := gcpc.NewCommandResponse(req.RequestId, result)
+		resp := gcpc.NewCommandResponse(req.RequestId, result, false)
 		_ = clientConn.Send(resp)
 	}()
 
@@ -379,7 +379,7 @@ func TestRouteMetadataForwarded(t *testing.T) {
 		"traceparent": "00-abc-def-01",
 		"tenant":      "acme",
 	}
-	val, err := r.Route(ctx, "ECHO", []string{"hello"}, metadata)
+	val, _, err := r.Route(ctx, "ECHO", []string{"hello"}, metadata)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}
@@ -418,13 +418,13 @@ func TestRouteNilMetadata(t *testing.T) {
 			t.Errorf("expected empty metadata, got %v", req.Metadata)
 		}
 		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
-		_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result))
+		_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result, false))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
+	_, _, err := r.Route(ctx, "ECHO", []string{"hello"}, nil)
 	if err != nil {
 		t.Fatalf("Route error: %v", err)
 	}

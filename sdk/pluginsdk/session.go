@@ -100,6 +100,13 @@ func (po *PluginOperation) Enrich(key, value string) {
 	po.op.Enrich(key, value)
 }
 
+// PushToClient sends raw RESP data to a specific client connection.
+// The data must be pre-formatted RESP bytes. The server writes them directly
+// to the client's TCP connection, bypassing normal command-response flow.
+func (s *Session) PushToClient(connID string, data []byte) error {
+	return s.conn.Send(gcpc.NewClientPush(connID, data))
+}
+
 // dispatch routes a server query response to the waiting caller.
 // Called from Run()'s recv loop.
 func (s *Session) dispatch(resp *gcpc.ServerQueryResponseV1) {

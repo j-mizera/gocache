@@ -6,8 +6,9 @@ package command
 
 // Result holds the return value or error from a command handler.
 type Result struct {
-	Value any
-	Err   error
+	Value            any
+	Err              error
+	SuppressResponse bool
 }
 
 // Spec defines the minimum and maximum number of arguments a command

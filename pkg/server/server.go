@@ -65,6 +65,7 @@ type Server struct {
 	emitter          events.Emitter
 	tracker          *serverOps.Tracker
 	opHookExecutor   pipeline.OpHookExecutor
+	connRegistry     *ConnectionRegistry
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
@@ -83,7 +84,13 @@ func New(addr string, c *cache.Cache, e *engine.Engine, requirePass string, br *
 		startTime:        time.Now(),
 		emitter:          events.NoopEmitter{},
 		tracker:          tracker,
+		connRegistry:     NewConnectionRegistry(),
 	}
+}
+
+// ConnRegistry returns the connection registry for plugin push access.
+func (srv *Server) ConnRegistry() *ConnectionRegistry {
+	return srv.connRegistry
 }
 
 // CoreCommandNames returns the list of core command names for plugin shadow checking.
@@ -237,6 +244,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	// Create connection operation and derive a connection-scoped ctx.
 	connOp := srv.tracker.Start(ops.TypeConnection, "")
 	connOp.Enrich(apicommand.RemoteAddrKey, remoteAddr)
+	connOp.Enrich(apicommand.ConnectionIDKey, connOp.ID)
 	connCtx := ops.WithContext(serverCtx, connOp)
 	if srv.opHookExecutor != nil {
 		srv.opHookExecutor.RunStartHooks(connCtx, connOp)
@@ -247,6 +255,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	ctx.OperationID = connOp.ID
 
 	defer func() {
+		srv.connRegistry.Unregister(connOp.ID)
 		if srv.watchManager != nil {
 			srv.watchManager.Unwatch(ctx)
 		}
@@ -262,8 +271,9 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	reader := resp.NewReader(conn)
 	writer := resp.NewWriter(conn)
+	connHandle := srv.connRegistry.Register(connOp.ID, writer)
 	defer func() {
-		if err := writer.Flush(); err != nil {
+		if err := connHandle.Flush(); err != nil {
 			logger.Debug(connCtx).Err(err).Msg("final flush on connection close")
 		}
 	}()
@@ -275,7 +285,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 	for {
 		if srv.isShuttingDown.Load() {
-			if err := writer.Write(resp.MarshalError("ERR Server is shutting down")); err != nil {
+			if err := connHandle.WriteValue(resp.MarshalError("ERR Server is shutting down")); err != nil {
 				logger.Debug(connCtx).Err(err).Msg("write shutdown notice failed")
 			}
 			return
@@ -298,11 +308,11 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 			}
 
 			if val.Type != resp.Array {
-				if err := writer.Write(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
+				if err := connHandle.WriteValue(resp.MarshalError("ERR Protocol error: expected array")); err != nil {
 					return
 				}
 				if reader.Buffered() == 0 {
-					if err := writer.Flush(); err != nil {
+					if err := connHandle.Flush(); err != nil {
 						return
 					}
 				}
@@ -327,11 +337,11 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		if ctx.RexVersion > 0 && op == resp.CmdMeta {
 			key, value, err := rex.ParseMeta(args)
 			if err != nil {
-				if writeErr := writer.Write(resp.MarshalError("ERR " + err.Error())); writeErr != nil {
+				if writeErr := connHandle.WriteValue(resp.MarshalError("ERR " + err.Error())); writeErr != nil {
 					return
 				}
 				if reader.Buffered() == 0 {
-					if flushErr := writer.Flush(); flushErr != nil {
+					if flushErr := connHandle.Flush(); flushErr != nil {
 						return
 					}
 				}
@@ -342,11 +352,11 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 				cmdMeta = make(map[string]string)
 			}
 			cmdMeta[key] = value
-			if writeErr := writer.Write(resp.OK()); writeErr != nil {
+			if writeErr := connHandle.WriteValue(resp.OK()); writeErr != nil {
 				return
 			}
 			if reader.Buffered() == 0 {
-				if flushErr := writer.Flush(); flushErr != nil {
+				if flushErr := connHandle.Flush(); flushErr != nil {
 					return
 				}
 			}
@@ -354,7 +364,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		}
 
 		if op == "QUIT" {
-			if err := writer.Write(resp.OK()); err != nil {
+			if err := connHandle.WriteValue(resp.OK()); err != nil {
 				logger.Debug(connCtx).Err(err).Msg("write QUIT ack failed")
 			}
 			return
@@ -364,11 +374,11 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		if srv.requirePass != "" && !ctx.Authenticated {
 			if op != "AUTH" && op != "HELLO" {
 				srv.emitter.Emit(events.NewAuthFailed(remoteAddr, op).WithOperationID(ctx.OperationID))
-				if err := writer.Write(resp.MarshalError("NOAUTH Authentication required.")); err != nil {
+				if err := connHandle.WriteValue(resp.MarshalError("NOAUTH Authentication required.")); err != nil {
 					return
 				}
 				if reader.Buffered() == 0 {
-					if err := writer.Flush(); err != nil {
+					if err := connHandle.Flush(); err != nil {
 						return
 					}
 				}
@@ -378,20 +388,22 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		}
 
 		if reader.Buffered() > 0 && srv.canBatch(ctx, op, args) {
-			pending = srv.runBatch(connCtx, ctx, reader, writer, op, args, cmdMeta)
+			pending = srv.runBatch(connCtx, ctx, reader, connHandle, op, args, cmdMeta)
 			cmdMeta = nil
 		} else {
 			ctx.CmdMeta = cmdMeta
 			res := srv.pipeline.Evaluate(connCtx, ctx, op, args)
 			ctx.CmdMeta = nil
 			cmdMeta = nil
-			if err := writer.Write(srv.mapToResp(ctx, res)); err != nil {
-				return
+			if !res.SuppressResponse {
+				if err := connHandle.WriteValue(srv.mapToResp(ctx, res)); err != nil {
+					return
+				}
 			}
 		}
 
 		if reader.Buffered() == 0 && pending == nil {
-			if err := writer.Flush(); err != nil {
+			if err := connHandle.Flush(); err != nil {
 				return
 			}
 		}
@@ -421,7 +433,7 @@ func (srv *Server) runBatch(
 	connCtx context.Context,
 	ctx *clientctx.ClientContext,
 	reader *resp.Reader,
-	writer *resp.Writer,
+	handle *ConnHandle,
 	firstOp string,
 	firstArgs []string,
 	cmdMeta map[string]string,
@@ -443,7 +455,7 @@ func (srv *Server) runBatch(
 			break
 		}
 		if val.Type != resp.Array || len(val.Array) == 0 {
-			_ = writer.Write(resp.MarshalError("ERR Protocol error: expected array"))
+			_ = handle.WriteValue(resp.MarshalError("ERR Protocol error: expected array"))
 			continue
 		}
 		parts := make([]string, len(val.Array))
@@ -505,7 +517,9 @@ func (srv *Server) runBatch(
 	}
 
 	for _, r := range results {
-		_ = writer.Write(srv.mapToResp(ctx, r))
+		if !r.SuppressResponse {
+			_ = handle.WriteValue(srv.mapToResp(ctx, r))
+		}
 	}
 
 	return overflow

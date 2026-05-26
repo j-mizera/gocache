@@ -1,0 +1,70 @@
+@startuml sequence_pubsub
+!include ../../../design/theme.iuml
+
+mainframe **sd** Pub/Sub Message Flow (IPC Plugin)
+
+actor "Client A\n(subscriber)" as SubClient
+actor "Client B\n(publisher)" as PubClient
+participant "Server\n(handleConnection)" as Server
+participant "ConnHandle\n(per-connection mutex)" as ConnHandle
+participant "Pipeline\n(routeToPlugin)" as Pipeline
+participant "Plugin Router" as Router
+participant "Manager\n(readLoop)" as Manager
+participant "PubSub Plugin\n(IPC process)" as Plugin
+participant "SubscriptionManager\n(in-plugin)" as SubMgr
+
+== SUBSCRIBE ==
+
+SubClient -> Server : SUBSCRIBE mychannel
+Server -> Pipeline : Evaluate("SUBSCRIBE", ["mychannel"])
+Pipeline -> Router : Route(ctx, "SUBSCRIBE", ...)
+Router -> Plugin : GCPC CommandRequestV1
+Plugin -> SubMgr : Subscribe(connID, "mychannel")
+Plugin -> Plugin : encode ["subscribe", "mychannel", 1]
+Plugin -> Manager : ClientPushV1(connID, respBytes)
+Manager -> ConnHandle : Push(connID, data)
+ConnHandle -> SubClient : raw RESP push
+Plugin -> Router : CommandResponseV1(suppress=true)
+Router -> Pipeline : (nil, true, nil)
+note right: SuppressResponse=true\nskips normal write
+
+== PUBLISH ==
+
+PubClient -> Server : PUBLISH mychannel "hello"
+Server -> Pipeline : Evaluate("PUBLISH", ["mychannel", "hello"])
+Pipeline -> Router : Route(ctx, "PUBLISH", ...)
+Router -> Plugin : GCPC CommandRequestV1
+Plugin -> SubMgr : Publish("mychannel")
+SubMgr --> Plugin : [{connID: A}]
+Plugin -> Plugin : encode ["message", "mychannel", "hello"]
+Plugin -> Manager : ClientPushV1(connA, respBytes)
+Manager -> ConnHandle : Push(connA, data)
+ConnHandle -> SubClient : *3\r\n$7\r\nmessage\r\n...
+Plugin -> Router : CommandResponseV1(result=1, suppress=false)
+Router -> Pipeline : (1, false, nil)
+Pipeline -> Server : Result{Value: "1"}
+Server -> PubClient : :1\r\n
+
+== UNSUBSCRIBE ==
+
+SubClient -> Server : UNSUBSCRIBE mychannel
+Server -> Pipeline : Evaluate("UNSUBSCRIBE", ["mychannel"])
+Pipeline -> Router : Route(ctx, "UNSUBSCRIBE", ...)
+Router -> Plugin : GCPC CommandRequestV1
+Plugin -> SubMgr : Unsubscribe(connID, "mychannel")
+Plugin -> Plugin : encode ["unsubscribe", "mychannel", 0]
+Plugin -> Manager : ClientPushV1(connID, respBytes)
+Manager -> ConnHandle : Push(connID, data)
+ConnHandle -> SubClient : raw RESP push
+Plugin -> Router : CommandResponseV1(suppress=true)
+
+== Connection Close (cleanup) ==
+
+SubClient ->x Server : TCP disconnect
+Server -> Server : connRegistry.Unregister(connID)
+Server -> Server : emit connection.close event
+Server -> Manager : EventV1{type: "connection.close"}
+Manager -> Plugin : forward EventV1
+Plugin -> SubMgr : RemoveConnection(connID)
+
+@enduml

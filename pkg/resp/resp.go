@@ -346,6 +346,11 @@ func (w *Writer) Flush() error {
 	return w.writer.Flush()
 }
 
+func (w *Writer) WriteRaw(data []byte) error {
+	_, err := w.writer.Write(data)
+	return err
+}
+
 func (w *Writer) Write(v Value) error {
 	bufp := getScratch()
 	// Reset + release after every exit path. The buffer is fully consumed by

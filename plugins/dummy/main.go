@@ -10,12 +10,17 @@ import (
 	"gocache/sdk/pluginsdk"
 )
 
+const (
+	pluginName    = "dummy"
+	pluginVersion = "0.1.0"
+)
+
 type dummyPlugin struct {
 	log *apilogger.Logger
 }
 
-func (d *dummyPlugin) Name() string    { return "dummy" }
-func (d *dummyPlugin) Version() string { return "0.1.0" }
+func (d *dummyPlugin) Name() string    { return pluginName }
+func (d *dummyPlugin) Version() string { return pluginVersion }
 func (d *dummyPlugin) Critical() bool  { return false }
 
 func (d *dummyPlugin) OnHealthCheck(_ context.Context) error {
