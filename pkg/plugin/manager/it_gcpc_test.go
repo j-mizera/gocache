@@ -14,6 +14,7 @@ import (
 	serverEvents "gocache/pkg/events"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"
+	"gocache/pkg/plugin/router"
 )
 
 // testPlugin connects to the manager via GCPC and exercises all message types.
@@ -90,6 +91,18 @@ func waitForSubscription(t *testing.T, bus *serverEvents.Bus, name string) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("subscription %q not registered within timeout", name)
+}
+
+func waitForOperationHooks(t *testing.T, mgr *Manager) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if mgr.opHookRegistry.HasAny() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("operation hooks not registered within timeout")
 }
 
 // setupManager creates a manager with a temp socket and returns it ready for connections.
@@ -214,10 +227,9 @@ func TestGCPC_OperationHook_Registration(t *testing.T) {
 		t.Fatalf("registration rejected: %s", ack.Reason)
 	}
 
-	// Verify operation hooks were registered.
-	if !mgr.opHookRegistry.HasAny() {
-		t.Fatal("expected operation hooks registered")
-	}
+	// Verify operation hooks were registered after the ack. Registration happens
+	// asynchronously after the handshake write returns.
+	waitForOperationHooks(t, mgr)
 
 	// Verify wildcard match works.
 	matches := mgr.opHookRegistry.Match(ops.TypeCommand)
@@ -226,6 +238,63 @@ func TestGCPC_OperationHook_Registration(t *testing.T) {
 	}
 	if matches[0].PluginName != "test-plugin" {
 		t.Errorf("expected test-plugin, got %s", matches[0].PluginName)
+	}
+}
+
+func TestGCPC_OperationHook_ReplayIsSentAfterRegisterAck(t *testing.T) {
+	mgr, _, _, sockPath := setupManager(t)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "operation:hook"}},
+	}
+	mgr.opHookRegistry.SetOnRegister(func(pluginName string, _ time.Time) {
+		pc := mgr.opHookRegistry.ConnFor(pluginName)
+		if pc == nil {
+			return
+		}
+		pc.SendFireAndForget(gcpc.NewOperationHookReplay(
+			"replay-1", "startup-1", string(ops.TypeStartup), "", nil, time.Now().UnixNano(),
+		))
+	})
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "operation:hook"}, nil,
+		[]*gcpc.OperationHookDeclV1{{Type: "*", Priority: 10}})
+	if !ack.Accepted {
+		t.Fatalf("registration rejected: %s", ack.Reason)
+	}
+
+	env := p.recv()
+	if env.GetOperationHookRequest() == nil {
+		t.Fatalf("expected operation hook replay after ack, got %T", env.Payload)
+	}
+}
+
+func TestGCPC_HookOnlyPluginConnClosedOnDeregister(t *testing.T) {
+	mgr, _, _, sockPath := setupManager(t)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "hook:pre"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "hook:pre"}, []*gcpc.HookDeclV1{
+		{Pattern: "SET", Phase: gcpc.HookPhaseV1_HOOK_PHASE_PRE},
+	}, nil)
+	if !ack.Accepted {
+		t.Fatalf("registration rejected: %s", ack.Reason)
+	}
+
+	pcAny, ok := mgr.pluginConns.Load("test-plugin")
+	if !ok {
+		t.Fatal("expected hook-only PluginConn to be tracked")
+	}
+	pc := pcAny.(*router.PluginConn)
+
+	mgr.deregisterPlugin("test-plugin")
+
+	select {
+	case <-pc.Done():
+	case <-time.After(time.Second):
+		t.Fatal("hook-only PluginConn was not closed during deregister")
 	}
 }
 

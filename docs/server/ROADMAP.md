@@ -42,7 +42,7 @@ related:
 - Hook system: pre/post command interception, priority-based execution, critical hooks can deny
 - Permission/scope system: hierarchical scopes (admin > write > read), key namespace isolation, hook filtering
 - Plugin SDK: Plugin, CommandPlugin, HookPlugin, ScopePlugin interfaces
-- Gobservability metrics plugin: Prometheus `/metrics` endpoint, command counters, latency histograms
+- Prometheus metrics plugin: `/metrics`, `/healthz`, `/readyz`, command counters, latency histograms
 - Hook context system: three-layer namespacing (server `_`, plugin-private, `shared.`)
 
 ## Phase 3: REX Metadata + Observability -- IN PROGRESS
@@ -89,20 +89,20 @@ Plugin-to-server introspection via `ServerQueryV1` / `ServerQueryResponseV1` mes
 - Plugin SDK: `Session.QueryServer(ctx, topic)` with async response correlation
 - `ServerStateProvider` interface decouples plugin manager from server/cache internals
 
-### Health Check Endpoints (Gobservability Plugin) -- DONE
+### Health Check Endpoints (Prometheus Plugin) -- DONE
 
 - `/healthz` — liveness: queries server health topic, returns 200/503 JSON
 - `/readyz` — readiness: queries health + plugins, checks critical plugin states
 - Nil-session guard during plugin startup
 
-### OpenTelemetry Tracing (Gobservability Plugin) -- DONE
+### OpenTelemetry Runtime Instrumentation -- PLANNED
 
-Zero OTEL in core. The gobservability plugin creates spans from post-hook data:
-- Parses W3C `traceparent` from `req.Metadata` (bare keys via GCPC metadata field)
-- Reconstructs accurate timing from `_start_ns` / `_elapsed_ns` hook context
-- Child spans under client traces when traceparent present, root spans otherwise
-- OTLP HTTP export via `GOBSERVABILITY_OTLP_ENDPOINT` env var
-- Prometheus metrics + OTEL traces coexist in the same plugin
+ADR-0023 splits runtime metrics from OTLP instrumentation:
+- Core should own W3C `traceparent` / `tracestate` extraction or generation.
+- Runtime telemetry should flow through async event subscriptions, not command hooks or operation hooks.
+- A future `instrumentation` plugin owns OTLP traces/logs/events export.
+- The `prometheus` plugin owns pull-based metrics and health/readiness endpoints only.
+- Embedded `lifecycleotlp` covers only pre-IPC startup/failure/shutdown visibility.
 
 ### Observability — Remaining
 

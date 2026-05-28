@@ -17,7 +17,9 @@ Valkey is the BSD-licensed community fork of Redis. `valkey-benchmark` is
 
 The harness pulls `valkey/valkey:8` on first use (~50 MB) and builds the
 gocache image locally from the repo's root `Dockerfile` with `PLUGINS=""`
-(no embedded observability — lean binary for fair comparison).
+(no embedded observability — lean binary for fair comparison). IPC-plugin
+runs use `bench/redis-benchmark/Dockerfile.ipc`, which keeps the production
+image unchanged while adding selected plugin binaries to the benchmark image.
 
 ## Usage
 
@@ -26,14 +28,25 @@ gocache image locally from the repo's root `Dockerfile` with `PLUGINS=""`
 ./bench/redis-benchmark/run.sh resp-pool --target gocache
 ./bench/redis-benchmark/run.sh resp-pool --target valkey
 
+# IPC-plugin overhead run with the Prometheus metrics plugin.
+./bench/redis-benchmark/run-ipc.sh resp-pool --target gocache-ipc
+
+# Pub/Sub fanout runs. These use real SUBSCRIBE connections and verify every
+# published message reaches every subscriber.
+./bench/redis-benchmark/run-pubsub.sh resp-pool --target valkey
+./bench/redis-benchmark/run-pubsub.sh resp-pool --target gocache-pubsub
+
+# Full four-way request/response matrix.
+./bench/redis-benchmark/run-matrix.sh resp-pool
+
 # After gc-opaque-index lands:
-./bench/redis-benchmark/run.sh gc-opaque-index --target gocache
-./bench/redis-benchmark/run.sh gc-opaque-index --target valkey
+./bench/redis-benchmark/run-matrix.sh gc-opaque-index
 
 # Compare.
 ./bench/redis-benchmark/compare.sh resp-pool-gocache resp-pool-valkey
+./bench/redis-benchmark/compare.sh resp-pool-gocache resp-pool-gocache-ipc
+./bench/redis-benchmark/compare-pubsub.sh resp-pool-valkey resp-pool-gocache-pubsub
 ./bench/redis-benchmark/compare.sh resp-pool-gocache gc-opaque-index-gocache
-./bench/redis-benchmark/compare.sh gc-opaque-index-gocache gc-opaque-index-valkey
 ```
 
 Output per run lands under `bench/results/<branch>/` (the script derives `<branch>` from `git rev-parse --abbrev-ref HEAD` with `/` rewritten to `-`; override with `RESULTS_DIR=`):
@@ -41,6 +54,22 @@ Output per run lands under `bench/results/<branch>/` (the script derives `<branc
 - `<label>-<target>.csv` — standard suite (no pipelining)
 - `<label>-<target>-pipelined.csv` — same suite with `-P 10`
 - `<label>-<target>-memory.txt` — container RSS before/after + run metadata
+- `<label>-<target>-config.yaml` — generated only for IPC targets, preserving the exact plugin config used for the capture
+
+Targets now form the benchmark matrix:
+
+| Target | Script | What it measures |
+|--------|--------|------------------|
+| `valkey` | `run.sh` | Reference Valkey server with persistence disabled |
+| `gocache` | `run.sh` | Core GoCache with no IPC plugins |
+| `gocache-ipc` | `run-ipc.sh` | GoCache with the `prometheus` IPC plugin registered, Prometheus metrics collected from async `command.post` events |
+| `gocache-pubsub` | `run-pubsub.sh` | GoCache with the `pubsub` IPC plugin, measured with real subscribers and `ClientPushV1` fanout |
+
+Pub/Sub output is separate from the generic matrix:
+
+- `<label>-<target>-pubsub.csv` — `PUBLISH_fanout_<N>` rows with publisher rps/p50/p99 plus verified delivery counts
+- `<label>-<target>-pubsub-memory.txt` — target RSS before/after the Pub/Sub workload
+- `<label>-gocache-pubsub-config.yaml` — exact plugin config for GoCache Pub/Sub captures
 
 ## What the suite measures
 
@@ -63,14 +92,22 @@ Fixed parameters (env-overridable):
 | `BENCH_CLIENT_CPUS` | 4-7     | `cpuset-cpus` for the client container     |
 | `BENCH_MEM_LIMIT` | 2g        | `--memory` on both target and client       |
 | `BENCH_SUITE`     | (see above) | `-t` suite passed to valkey-benchmark    |
+| `GOCACHE_IPC_IMAGE` | `gocache-bench:local-ipc` | IPC benchmark image tag |
+| `IPC_PLUGINS` | `prometheus` | Space-separated IPC plugin list compiled into the IPC benchmark image |
+| `BENCH_PUBSUB_N` | `10000` | PUBLISH requests per Pub/Sub fanout scenario |
+| `BENCH_PUBSUB_FANOUTS` | `0,1,10` | Comma-separated subscriber counts to verify |
+| `BENCH_PUBSUB_MESSAGE_BYTES` | `32` | Message payload size for Pub/Sub tests |
+| `GOCACHE_PUBSUB_IMAGE` | `gocache-bench:local-pubsub` | Pub/Sub IPC benchmark image tag |
+| `BENCH_PYTHON_IMAGE` | `python:3.12-alpine` | Client image used by the Pub/Sub fanout harness |
 
-Total runtime ≈ 1 min per invocation on modern hardware.
+Total runtime ≈ 1 min per target invocation on modern hardware; the full matrix runs three target invocations. Pub/Sub runtime depends on `BENCH_PUBSUB_N` × fanout count.
 
 ## Fairness notes for the thesis
 
 - Target and client run in separate containers on a shared bridge network, with fixed `cpuset-cpus` so neither noise nor resource contention from the host can skew one side vs the other.
 - `valkey-server` starts with `--save "" --appendonly no` — persistence fully off, same as gocache's `--load-on-startup=false`. This excludes fsync variance.
 - The client container is a fresh `docker run --rm` on each invocation, so no state leaks between runs.
+- IPC runs use `failure_policy: halt_server` and wait for `prometheus`'s `/readyz` endpoint before measuring, so the run fails instead of silently measuring core-only traffic if the plugin does not register.
 - `valkey-benchmark` is a self-paced closed-loop workload; it does not model a real open-loop latency distribution. Numbers are throughput-ceiling, not p99-under-target-tps. Useful for relative comparison, weaker for absolute latency claims. Document this caveat in the thesis.
 
 ## Known caveats

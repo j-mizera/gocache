@@ -51,7 +51,7 @@ actor Client
     Evaluator -> HookExec : RunPostHooks("SET", args, "OK", "", hookCtx)
     HookExec -> HookReg : MatchPost("SET")
 
-    hnote over HookExec : command.FilterHookCtx(hookCtx, "gobservability")\nreturns: {_start_ns, _elapsed_ns, shared.*}
+    hnote over HookExec : command.FilterHookCtx(hookCtx, "prometheus")\nreturns: {_start_ns, _elapsed_ns, shared.*}
 
     HookExec ->> PluginM : HookRequestV1 POST\n(fire-and-forget)\ncontext: {_start_ns, _elapsed_ns, shared.rex.*}\nmetadata: {traceparent, tenant}
     note right : Non-critical: no wait.\nReads _elapsed_ns for latency histogram.\nmetadata has bare keys for easy access.

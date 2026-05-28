@@ -1,0 +1,49 @@
+@startuml components_prometheus
+!include ../../../../design/theme.iuml
+
+frame "Prometheus Plugin" as F {
+
+    rectangle "GCPC Interface" as ipc {
+        component [Event Handler] as handler <<EventPlugin\ncommand.post>>
+        component [Plugin Lifecycle] as lifecycle <<health + shutdown>>
+    }
+
+    rectangle "Metrics Engine" as engine {
+        component [Collector] as collector <<mutex-protected\nper-command stats>>
+        component [Histogram] as histo <<9 buckets\n1ms - 1s>>
+        component [Counters] as counters <<total + errors\nper command>>
+    }
+
+    rectangle "HTTP Interface" as http {
+        component [Metrics Handler] as http_handler <</metrics\nPrometheus format>>
+        component [HTTP Server] as http_server <<:9100\nconfigurable>>
+    }
+
+    cloud "GoCache Server" as server
+    cloud "Prometheus" as prom
+
+    ' -- Data flow --
+    server --> handler : EventV1 command.post\nelapsed_ns + error
+    handler --> collector : Record(cmd, elapsed, isError)
+    collector --> counters : increment
+    collector --> histo : place in bucket
+
+    prom --> http_server : GET /metrics
+    http_server --> http_handler : route
+    http_handler --> collector : WritePrometheus()
+
+    note bottom of collector
+      **Thread-safe**: single mutex.
+      Lock on Record() and WritePrometheus().
+      Not on cache hot path (separate process).
+    end note
+
+    note bottom of handler
+      **Async event delivery**.
+      No command or operation hooks.
+      Plugin crash = auto-restart,
+      no command denial/enrichment.
+    end note
+}
+
+@enduml

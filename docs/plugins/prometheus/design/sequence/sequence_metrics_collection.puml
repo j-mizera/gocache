@@ -1,0 +1,42 @@
+@startuml sequence_metrics_collection
+!include ../../../../design/theme.iuml
+
+mainframe **sd** Prometheus Metrics Collection
+
+actor Client
+participant "GoCache Server" as Server
+participant "Event Bus" as Bus
+participant "Prometheus\nPlugin" as Plugin
+participant "Collector" as Collector
+actor "Prometheus" as Prom
+
+== Command Execution ==
+
+Client -> Server : SET user:1 "John"
+Server -> Server : Execute command\nMeasure elapsed time
+
+== Event Delivery ==
+
+Server -> Bus : Emit command.post\ncommand="SET", elapsed_ns=150000, error=""
+Bus ->> Plugin : EventV1 command.post\n(best-effort async)
+note right : Server response path does not wait\nfor metrics processing.
+
+Plugin -> Collector : Record("SET", 150000, false)
+activate Collector
+Collector -> Collector : total["SET"]++\nsum["SET"] += 0.00015\nbucket[0] (le=0.001)++
+deactivate Collector
+
+Server --> Client : +OK
+note left : Response does not wait\nfor Prometheus plugin.
+
+== Prometheus Scrape ==
+
+Prom -> Plugin : GET /metrics
+Plugin -> Collector : WritePrometheus(w)
+activate Collector
+Collector -> Collector : Lock, snapshot, unlock
+Collector --> Plugin : Prometheus text format
+deactivate Collector
+Plugin --> Prom : text/plain\ngocache_commands_total{command="SET"} 1\ngocache_command_duration_seconds_bucket{...}
+
+@enduml

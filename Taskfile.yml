@@ -122,3 +122,28 @@ tasks:
     vars:
       PLUGIN_DIRS:
         sh: find plugins -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+
+  bench:redis:
+    desc: Run valkey-benchmark harness; pass label/target after --, e.g. task bench:redis -- baseline --target gocache
+    cmds:
+      - ./bench/redis-benchmark/run.sh {{.CLI_ARGS}}
+
+  bench:redis:ipc:
+    desc: Run IPC plugin valkey-benchmark harness; pass label/target after --
+    cmds:
+      - ./bench/redis-benchmark/run-ipc.sh {{.CLI_ARGS}}
+
+  bench:redis:matrix:
+    desc: Run full Valkey/Core/IPC benchmark matrix; pass label after --
+    cmds:
+      - ./bench/redis-benchmark/run-matrix.sh {{.CLI_ARGS}}
+
+  bench:redis:pubsub:
+    desc: Run Pub/Sub fanout benchmark; pass label/target after --
+    cmds:
+      - ./bench/redis-benchmark/run-pubsub.sh {{.CLI_ARGS}}
+
+  bench:redis:pubsub:compare:
+    desc: Compare two Pub/Sub benchmark labels; pass labels after --
+    cmds:
+      - ./bench/redis-benchmark/compare-pubsub.sh {{.CLI_ARGS}}

@@ -9,9 +9,9 @@ import (
 
 	opctx "gocache/api/context"
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
+	"gocache/commons/logger"
 	"gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
 )
@@ -31,16 +31,16 @@ type Executor struct {
 	// it re-registers within minRestartInterval, replay is skipped —
 	// crash-looping plugins would otherwise drown in synthetic starts
 	// on every reconnect. Zero interval disables suppression.
-	lastReplay          map[string]time.Time
+	lastReplay         map[string]time.Time
 	minRestartInterval time.Duration
 }
 
 // NewExecutor creates an operation hook executor.
 func NewExecutor(registry *Registry, timeout time.Duration) *Executor {
 	return &Executor{
-		registry:    registry,
-		timeout:     timeout,
-		lastReplay:  make(map[string]time.Time),
+		registry:   registry,
+		timeout:    timeout,
+		lastReplay: make(map[string]time.Time),
 	}
 }
 
@@ -121,7 +121,7 @@ func (e *Executor) RunCompleteHooks(op *ops.Operation) {
 		filteredCtx := op.FilteredContext(h.PluginName, false)
 		reqID := router.NextRequestID()
 		env := gcpc.NewOperationHookRequest(reqID, op.ID, string(op.Type), op.ParentID, apiplugin.PhaseComplete, filteredCtx)
-		go h.Conn.SendFireAndForget(env)
+		h.Conn.SendFireAndForget(env)
 	}
 }
 

@@ -19,8 +19,8 @@ GoCache has three plugin types, each consuming configuration differently:
 | Plugin type | Example | Config delivery |
 |---|---|---|
 | Persistence (embedded) | AOF, Snapshot | `PluginConfig` injected via `Provider.Build(cfg, store)` |
-| Embedded lifecycle | Crashdump, OTLP | Self-fetch via `config.PluginConfigFor(name)` in `ConfigLoaded` |
-| IPC (external process) | Gobservability | `os.Getenv()` only — no access to server YAML |
+| Embedded lifecycle | Crashdump, lifecycleotlp | Self-fetch via `config.PluginConfigFor(name)` in `ConfigLoaded` |
+| IPC (external process) | Prometheus | `os.Getenv()` only — no access to server YAML |
 
 This inconsistency has three costs:
 

@@ -2,6 +2,8 @@ package router
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -458,6 +460,157 @@ func TestReregisterAfterUnregister(t *testing.T) {
 	}
 	if !r.HasCommand("PUBLISH") {
 		t.Error("PUBLISH should be registered after re-registration")
+	}
+}
+
+func TestPluginConnFireAndForgetReturnsWithoutReader(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+
+	pc := NewPluginConn("audit", serverConn)
+	defer pc.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		pc.SendFireAndForget(gcpc.NewOperationHookRequest("req-ff", "op_1", "command", "", "complete", nil))
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("SendFireAndForget blocked without a plugin reader")
+	}
+}
+
+func TestPluginConnFireAndForgetFIFO(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+
+	pc := NewPluginConn("audit", serverConn)
+	defer pc.Close()
+
+	const n = 3
+	for i := 0; i < n; i++ {
+		reqID := fmt.Sprintf("req-ff-%d", i)
+		pc.SendFireAndForget(gcpc.NewOperationHookRequest(reqID, fmt.Sprintf("op_%d", i), "command", "", "complete", nil))
+	}
+
+	for i := 0; i < n; i++ {
+		envCh := make(chan *gcpc.EnvelopeV1, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			env, err := clientConn.Recv()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			envCh <- env
+		}()
+
+		select {
+		case env := <-envCh:
+			req := env.GetOperationHookRequest()
+			if req == nil {
+				t.Fatalf("envelope[%d] is not an OperationHookRequest", i)
+			}
+			wantReqID := fmt.Sprintf("req-ff-%d", i)
+			if req.RequestId != wantReqID {
+				t.Fatalf("envelope[%d] request_id=%q, want %q", i, req.RequestId, wantReqID)
+			}
+		case err := <-errCh:
+			t.Fatalf("recv envelope[%d]: %v", i, err)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for envelope[%d]", i)
+		}
+	}
+}
+
+func TestPluginConnSendAfterCloseReturnsPluginDown(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+
+	pc := NewPluginConn("closed", serverConn)
+	pc.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := pc.Send(ctx, gcpc.NewOperationHookRequest("req-closed", "op_1", "command", "", "start", nil), "req-closed")
+	if !errors.Is(err, ErrPluginDown) {
+		t.Fatalf("Send error=%v, want ErrPluginDown", err)
+	}
+
+	pc.SendFireAndForget(gcpc.NewOperationHookRequest("req-closed-ff", "op_1", "command", "", "complete", nil))
+}
+
+func TestPluginConnPendingSendUnblocksOnClose(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+
+	pc := NewPluginConn("blocked", serverConn)
+
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, err := pc.Send(ctx, gcpc.NewOperationHookRequest("req-blocked", "op_1", "command", "", "start", nil), "req-blocked")
+		errCh <- err
+	}()
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		pc.Close()
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("Send returned nil error after Close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Send did not unblock after Close")
+	}
+}
+
+func TestPluginConnConcurrentDeliverAndCloseDoesNotPanic(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+
+	pc := NewPluginConn("race", serverConn)
+	defer pc.Close()
+
+	const n = 100
+	for i := 0; i < n; i++ {
+		reqID := fmt.Sprintf("req-race-%d", i)
+		ch := make(chan *gcpc.EnvelopeV1, 1)
+		pc.storePending(reqID, ch)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
+			reqID := fmt.Sprintf("req-race-%d", i)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				pc.Deliver(reqID, gcpc.NewOperationHookResponse(reqID, nil))
+			}()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pc.Close()
+		}()
+		wg.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent Deliver and Close did not finish")
 	}
 }
 

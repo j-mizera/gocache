@@ -7,6 +7,7 @@ deciders: [witherxse]
 related:
   - 0006-builtin-vs-third-party-transport
   - 0008-plugin-config-and-reload-contract
+  - 0022-modular-performance-budget
 ---
 
 # ADR-0020: Client Push via GCPC
@@ -35,6 +36,10 @@ We add three generic primitives to GCPC and the server:
 3. **`suppress_response` flag on `CommandResponseV1`**: when a plugin sets this to `true`, the server skips writing the normal RESP response for that command. The plugin has already sent all necessary data via `ClientPushV1`. This handles commands like SUBSCRIBE that send multiple push messages instead of a single response.
 
 Connections are identified by `connOp.ID` (the connection operation ID), exposed to plugins as `_connection_id` in the context map.
+
+### Performance budget follow-up
+
+This ADR remains accepted for the generic push primitive. ADR-0022 adds the performance budget and optimization sequence for the current implementation: direct `ClientPushV1` writes are a correct first data path, but benchmark captures show the current Pub/Sub fanout path is outside the <=20% modular overhead budget for fanout0/fanout1. Future work should optimize batching/backpressure or add a specialized built-in data-plane before treating Pub/Sub performance as accepted.
 
 ## Alternatives Considered
 

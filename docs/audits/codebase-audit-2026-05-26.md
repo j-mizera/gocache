@@ -37,7 +37,7 @@ related:
 | H9 | HIGH | Double crash event — both readLoop and handlePluginExit emit crash events | `pkg/plugin/manager/manager.go` | Removed crash event emission from readLoop; only handlePluginExit emits |
 | H10 | HIGH | Handshake cleanup incomplete — manual cleanup misses subsystems on handshake failure | `pkg/plugin/manager/manager.go` | Replaced manual cleanup with `m.deregisterPlugin(reg.Name)` |
 | H18 | HIGH | BLPOP wake uses bulk lock — DispatchWithResult acquires all shards instead of target shard | `pkg/resp/handler/lists.go` | Replaced with `DispatchToShard(ctx, cache.ShardIndexOf(key), ...)` |
-| H20 | HIGH | Inflight span map unbounded — tracer map grows without bound on abandoned operations | `plugins/gobservability/tracer.go` | Added periodic cleanup: every 1000th StartOperation, evict entries older than 5min |
+| H20 | HIGH | Inflight span map unbounded — tracer map grows without bound on abandoned operations | former observability tracer | Resolved by removing runtime tracing from the Prometheus metrics plugin; future `instrumentation` plugin must carry bounded inflight state from the start |
 | M3 | MEDIUM | SDK session unbounded context — `context.Background()` used for gRPC calls with no timeout | `sdk/pluginsdk/session.go` | Replaced with `context.WithTimeout(context.Background(), 5*time.Second)` |
 | M4 | MEDIUM | Bridge alias removal — deprecated bridge functions in api/command/hookctx.go | `api/command/hookctx.go` | Deleted SharedPrefix, NewHookCtx, MergeHookCtx, FilterHookCtx; updated caller to import api/context directly |
 | M5 | MEDIUM | PushToClient error logging — write errors to client connections silently discarded | `plugins/pubsub/main.go` | Log errors at debug level instead of `_ =` |

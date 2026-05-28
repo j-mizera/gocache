@@ -2,17 +2,20 @@
 title: Performance
 description: Per-shard locking arc — shipped optimizations, measured deltas, and what's still on the table
 status: living
-last_updated: 2026-05-03
+last_updated: 2026-05-28
 related:
   - Audit-per-shard-arc-summary
   - Audit-go-bench-vs-docker-gap
   - Audit-clientctx-cross-goroutine
+  - ADR-0022-modular-performance-budget
   - Server-Architecture
 ---
 
 # Performance
 
 This page is the single entry point for the gocache performance work. It narrates the per-shard locking arc, links every PR/issue that contributed, points at the audits that quantify what shipped, and lists the levers still on the table. It is the wiki-facing companion to the bench captures under `bench/results/<branch>/`.
+
+The current modular-performance arc is tracked in [Modular Overhead Optimization Plan](modular-overhead-optimization-plan.md) and governed by [ADR-0022](../adr/0022-modular-performance-budget.md): IPC, runtime instrumentation, lifecycle OTLP, and Pub/Sub hot-path features must land within a <=20% modular overhead budget before being called performance-acceptable.
 
 ## Why per-shard?
 
@@ -76,13 +79,13 @@ Some costs are the price of the architecture and won't come back without un-shar
 
 ## What's still on the table
 
-Future levers — not shipped, tracked under the command-flow optimization plan in Obsidian:
+The active performance priority is now the modular overhead arc: reduce IPC, runtime instrumentation, lifecycle OTLP, and Pub/Sub regressions without giving up the plugin-isolation model. The sequence is captured in [Modular Overhead Optimization Plan](modular-overhead-optimization-plan.md): per-plugin FIFO writer loop, event-only runtime instrumentation, GCPC stream topology evaluation, GCPC allocation/correlation cleanup, then Pub/Sub push batching or a specialized built-in data-plane if generic push remains over budget.
 
-- **#27 engine pooling** — pool `make(chan any, 1)` resChan + `*command.Context` allocations per command. Profile-attributed projection: +10–15 % uniform across workloads. Single biggest remaining alloc-pressure lever (the `*ops.Operation` per command is ~163 bytes, 38 % of hot-path allocation; engine pooling brackets it directly).
-- **#28 read-lock bypass** — classify commands as read-only, drop LRU-list mutation on the read path, run read handlers inline under `cache.RLock()`. Projection: pipelined GET → ~0.85× valkey (closes the GET gap entirely). The methodology lessons from this work are in `pkg/server/it_concurrency_test.go::TestIT_WatchPropagation_ReadLockBypass`.
-- **#29 batched pipelined dispatch** — single-lock-acquisition for batched same-key pipelined writes. Decision-gated; only worth pursuing if pipelined-write headroom remains ≥30 % after #27/#28.
+Older command-flow levers remain separate from the modular-overhead work:
 
-These three together are projected to close the remaining gap to valkey on every workload except MSET (which is structural). They're sequenced after the persistence-as-plugin arc so persistence is no longer the dominant fixed RSS cost when read-lock bypass is measured.
+- **#27 engine pooling** — still a plausible allocation-pressure lever, but it should be re-benchmarked after the plugin path is no longer the dominant regression.
+- **#28 read-lock bypass** — not an active plan. Later experiments showed the cache-wide read-lock bypass/mode-switching route was a negative result; do not retry it without new runtime or workload evidence.
+- **#29 batched pipelined dispatch** — still decision-gated and only worth pursuing if pipelined-write headroom remains >=30% after higher-confidence fixes land.
 
 ## Lessons
 

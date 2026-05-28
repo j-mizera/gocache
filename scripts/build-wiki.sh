@@ -78,10 +78,10 @@ copy_renamed "$DOCSROOT/server/README.md"                      "Server.md"
 copy_renamed "$DOCSROOT/server/ROADMAP.md"                     "Server-Roadmap.md"
 copy_renamed "$DOCSROOT/server/SOLUTION_ARCHITECTURE.md"       "Server-Architecture.md"
 copy_renamed "$DOCSROOT/plugins/README.md"                     "Plugins.md"
-copy_renamed "$DOCSROOT/plugins/gobservability/README.md"      "Plugin-Gobservability.md"
-copy_renamed "$DOCSROOT/plugins/gobservability/ROADMAP.md"     "Plugin-Gobservability-Roadmap.md"
-copy_renamed "$DOCSROOT/plugins/gobservability/SOLUTION_ARCHITECTURE.md" \
-                                                               "Plugin-Gobservability-Architecture.md"
+copy_renamed "$DOCSROOT/plugins/prometheus/README.md"      "Plugin-Prometheus.md"
+copy_renamed "$DOCSROOT/plugins/prometheus/ROADMAP.md"     "Plugin-Prometheus-Roadmap.md"
+copy_renamed "$DOCSROOT/plugins/prometheus/SOLUTION_ARCHITECTURE.md" \
+                                                               "Plugin-Prometheus-Architecture.md"
 copy_renamed "$DOCSROOT/gcpc/README.md"                        "GCPC.md"
 copy_renamed "$DOCSROOT/performance/README.md"                 "Performance.md"
 
@@ -275,16 +275,16 @@ generate_design_page "$DOCSROOT/gcpc/design/state" \
                     "GCPC-State-Diagrams" \
                     "GCPC: State Diagrams"
 
-generate_design_page "$DOCSROOT/plugins/gobservability/design/component" \
-                    "Plugin-Gobservability-Components-Diagrams" \
-                    "gobservability: Component Diagrams"
-generate_design_page "$DOCSROOT/plugins/gobservability/design/sequence" \
-                    "Plugin-Gobservability-Sequence-Diagrams" \
-                    "gobservability: Sequence Diagrams"
+generate_design_page "$DOCSROOT/plugins/prometheus/design/component" \
+                    "Plugin-Prometheus-Components-Diagrams" \
+                    "prometheus: Component Diagrams"
+generate_design_page "$DOCSROOT/plugins/prometheus/design/sequence" \
+                    "Plugin-Prometheus-Sequence-Diagrams" \
+                    "prometheus: Sequence Diagrams"
 
 # 6. Rewrite known internal links so cross-page navigation works in the wiki.
 #    The body of section pages was authored against the repo path layout
-#    (./gobservability/README.md, ../audits/per-shard-arc-summary.md, …) which
+#    (./prometheus/README.md, ../audits/per-shard-arc-summary.md, …) which
 #    breaks once everything is flat. We rewrite the most common patterns; rare
 #    edge cases will appear as broken-but-clickable links the operator can fix.
 echo "==> Rewriting internal links"
@@ -305,8 +305,8 @@ declare -A REWRITES=(
   ['](performance/README)']='](Performance)'
   ['](../performance/README.md)']='](Performance)'
   ['](../performance/README)']='](Performance)'
-  ['](gobservability/README.md)']='](Plugin-Gobservability)'
-  ['](gobservability/README)']='](Plugin-Gobservability)'
+  ['](prometheus/README.md)']='](Plugin-Prometheus)'
+  ['](prometheus/README)']='](Plugin-Prometheus)'
   ['](SOLUTION_ARCHITECTURE.md)']='](Server-Architecture)'
   ['](SOLUTION_ARCHITECTURE.md#design-diagrams)']='](Server-Architecture#design-diagrams)'
   ['](ROADMAP.md)']='](Server-Roadmap)'

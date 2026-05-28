@@ -95,6 +95,25 @@ func (r *Registry) Register(pluginName string, priority int, pluginCritical bool
 	sort.SliceStable(r.post, func(i, j int) bool { return r.post[i].Priority < r.post[j].Priority })
 }
 
+// ConnFor returns the first connection registered for a plugin. nil if the
+// plugin has no command hooks registered.
+func (r *Registry) ConnFor(pluginName string) *router.PluginConn {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, h := range r.pre {
+		if h.PluginName == pluginName {
+			return h.Conn
+		}
+	}
+	for _, h := range r.post {
+		if h.PluginName == pluginName {
+			return h.Conn
+		}
+	}
+	return nil
+}
+
 // Unregister removes all hooks owned by the named plugin.
 func (r *Registry) Unregister(pluginName string) {
 	r.mu.Lock()

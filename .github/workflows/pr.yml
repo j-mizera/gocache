@@ -118,11 +118,11 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: OTLP integration tests
-        run: go test -race -count=1 -v -tags "otlp,integration" ./plugins/otlp/...
+      - name: Lifecycle OTLP integration tests
+        run: go test -race -count=1 -v -tags "lifecycleotlp,integration" ./plugins/lifecycleotlp/...
 
-      - name: Gobservability integration tests
-        run: go test -race -count=1 -v -tags integration ./plugins/gobservability/...
+      - name: Prometheus integration tests
+        run: go test -race -count=1 -v -tags integration ./plugins/prometheus/...
 
   merge-gate:
     name: PR Ready

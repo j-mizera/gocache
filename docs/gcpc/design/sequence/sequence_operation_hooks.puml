@@ -9,7 +9,7 @@ participant "OpHook\nExecutor" as Exec
 participant "OpHook\nRegistry" as Reg
 participant "PluginConn\n(multiplexed)" as PC
 participant "Auth Plugin\n(priority=1)" as Auth
-participant "Gobservability\n(priority=10)" as Gobs
+participant "Audit Plugin\n(priority=10)" as Audit
 
 == Operation Start ==
 
@@ -21,7 +21,7 @@ Server -> Server : Inject server context\n_start_ns, _operation_id
 Server -> Exec : RunStartHooks(ctx, op)
 
 Exec -> Reg : Match("command")
-Reg --> Exec : [Auth(pri=1), Gobs(pri=10)]
+Reg --> Exec : [Auth(pri=1), Audit(pri=10)]
 
 == Synchronous Hook Chain (priority order) ==
 
@@ -35,15 +35,15 @@ PC --> Exec : response
 
 hnote over Exec : MergeFromPlugin(op, "auth", values)\nop.context now has:\n  shared.username, shared.secret.jwt,\n  auth.cache_hit (auto-prefixed)
 
-Exec -> Exec : op.FilteredContext("gobservability", false)
+Exec -> Exec : op.FilteredContext("audit", false)
 Exec -> PC : OperationHookRequestV1\n{phase: "start", context: filtered}
-PC -> Gobs : (synchronous, waits)
-activate Gobs
-Gobs --> PC : OperationHookResponseV1\n{context_values:\n  shared.traceparent: "00-abc-def-01"\n  span_id: "xyz"}
-deactivate Gobs
+PC -> Audit : (synchronous, waits)
+activate Audit
+Audit --> PC : OperationHookResponseV1\n{context_values:\n  shared.audit_id: "audit-123"\n  risk_score: "low"}
+deactivate Audit
 PC --> Exec : response
 
-hnote over Exec : MergeFromPlugin(op, "gobservability", values)\nop.context now has:\n  shared.traceparent,\n  gobservability.span_id (auto-prefixed)
+hnote over Exec : MergeFromPlugin(op, "audit", values)\nop.context now has:\n  shared.audit_id,\n  audit.risk_score (auto-prefixed)
 
 Exec --> Server : hooks complete, context enriched
 
@@ -56,14 +56,14 @@ Server -> Server : Command handler runs\nContext fully enriched\nBEFORE any work
 Server -> Exec : RunCompleteHooks(op)
 
 Exec ->> Auth : OperationHookRequestV1\n{phase: "complete"}\n(fire-and-forget)
-Exec ->> Gobs : OperationHookRequestV1\n{phase: "complete"}\n(fire-and-forget)
+Exec ->> Audit : OperationHookRequestV1\n{phase: "complete"}\n(fire-and-forget)
 
-note right of Gobs
-  Gobservability finalizes OTEL span
+note right of Audit
+  Audit plugin records final operation decision
   Context available (filtered):
     shared.username = "john"
-    shared.traceparent = "00-abc-def-01"
-  NOT in span attributes:
+    shared.audit_id = "audit-123"
+  NOT in audit record:
     shared.secret.jwt (redacted)
     auth.cache_hit (private to auth)
 end note

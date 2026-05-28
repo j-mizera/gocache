@@ -1,0 +1,17 @@
+label=event-only-prometheus
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=1f34f0510891f5b71dc4c1ff1062eebd5cb428e1
+gocache_branch=perf/modular-overhead-fixes
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=11020533
+post_standard_rss_bytes=26004684
+final_rss_bytes=30597447
+delta_rss_bytes=19576914

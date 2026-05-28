@@ -15,10 +15,10 @@ import (
 	opctx "gocache/api/context"
 	"gocache/api/events"
 	gcpcv1 "gocache/api/gcpc/v1"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
 	"gocache/api/scope"
+	"gocache/commons/logger"
 	"gocache/commons/transport"
 	pkgconfig "gocache/pkg/config"
 	serverEvents "gocache/pkg/events"
@@ -31,7 +31,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 )
-
 
 // LogCollector is the interface for adding log sources.
 // Defined here to avoid importing pkg/logcollector from the manager.
@@ -69,7 +68,8 @@ type Manager struct {
 	// nil before Start; reset to nil by Shutdown.
 	cancel context.CancelFunc
 
-	wg sync.WaitGroup
+	pluginConns sync.Map // map[pluginName]*router.PluginConn
+	wg          sync.WaitGroup
 }
 
 // NewManager creates a plugin manager with the given configuration.
@@ -469,10 +469,14 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 	}
 
-	// Resolve or create the PluginConn once — reused for hooks and op-hooks.
+	// Resolve or create the PluginConn once — reused for hooks, op-hooks,
+	// event forwarding, and any future server-to-plugin async traffic.
 	pc := m.router.GetPluginConn(reg.Name)
 	if pc == nil && (len(reg.Hooks) > 0 || len(reg.OperationHooks) > 0) {
 		pc = router.NewPluginConn(reg.Name, conn)
+	}
+	if pc != nil {
+		m.pluginConns.Store(reg.Name, pc)
 	}
 
 	if len(reg.Hooks) > 0 {
@@ -485,6 +489,21 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		}
 	}
 
+	inst.SetState(StateRegistered)
+
+	grantedStrings := scope.ScopeStrings(grantedScopes)
+	pluginCfgMap := pkgconfig.FlatPluginConfig(reg.Name)
+	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings, pluginCfgMap)); err != nil {
+		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
+		m.deregisterPlugin(reg.Name)
+		_ = conn.Close()
+		return
+	}
+
+	// Operation-hook registration can trigger replay through the registry's
+	// onRegister callback. Register only after RegisterAck is on the wire so
+	// SDK clients always observe the protocol handshake before any replayed
+	// OperationHookRequest frames.
 	if len(reg.OperationHooks) > 0 && m.scopeRegistry.HasScope(reg.Name, scope.ScopeOperationHook) {
 		patterns := make([]string, len(reg.OperationHooks))
 		for i, oh := range reg.OperationHooks {
@@ -499,17 +518,6 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	} else if len(reg.OperationHooks) > 0 {
 		logger.Warn(pluginCtx).Str("plugin", reg.Name).Int("dropped", len(reg.OperationHooks)).
 			Msg("operation hooks dropped due to missing 'operation:hook' scope")
-	}
-
-	inst.SetState(StateRegistered)
-
-	grantedStrings := scope.ScopeStrings(grantedScopes)
-	pluginCfgMap := pkgconfig.FlatPluginConfig(reg.Name)
-	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings, pluginCfgMap)); err != nil {
-		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
-		m.deregisterPlugin(reg.Name)
-		_ = conn.Close()
-		return
 	}
 
 	inst.SetState(StateRunning)
@@ -669,13 +677,18 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("event subscription failed: event bus not set")
 				continue
 			}
+			if pc == nil {
+				pc = router.NewPluginConn(inst.Name, conn)
+				m.pluginConns.Store(inst.Name, pc)
+			}
 			types := make([]events.Type, len(sub.Types))
 			for i, t := range sub.Types {
 				types[i] = events.Type(t)
 			}
-			// Bridge: subscribe on the server bus with a handler that forwards via GCPC.
-			// Context in events is filtered per plugin visibility before forwarding.
-			pluginConn := conn
+			// Bridge: subscribe on the server bus with a handler that forwards via
+			// the per-plugin FIFO writer. Event handlers must not block the event
+			// bus on plugin reads; overloaded plugins drop best-effort telemetry.
+			pluginConn := pc
 			pluginName := inst.Name
 			m.eventBus.Subscribe("plugin:"+inst.Name, types, func(evt events.Event) {
 				cloned := proto.Clone(evt.Proto).(*gcpcv1.EventV1)
@@ -684,7 +697,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 					Version: gcpcv1.ProtocolVersion,
 					Payload: &gcpcv1.EnvelopeV1_Event{Event: cloned},
 				}
-				_ = pluginConn.Send(gcpcEnv)
+				pluginConn.SendFireAndForget(gcpcEnv)
 			})
 		case *gcpcv1.EnvelopeV1_ServerQuery:
 			query := env.GetServerQuery()
@@ -740,6 +753,9 @@ func (m *Manager) deregisterPlugin(name string) {
 	m.hookRegistry.Unregister(name)
 	m.opHookRegistry.Unregister(name)
 	m.scopeRegistry.Unregister(name)
+	if pc, ok := m.pluginConns.LoadAndDelete(name); ok {
+		pc.(*router.PluginConn).Close()
+	}
 	if m.eventBus != nil {
 		m.eventBus.Unsubscribe("plugin:" + name)
 	}

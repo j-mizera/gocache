@@ -14,7 +14,7 @@
 // scope/permission sandbox. In exchange, they run from instruction #1 of
 // main() — the GraalVM/Java-agent equivalent for Go.
 //
-// Canonical use cases: crash dumps, OTLP exporter, early metrics —
+// Canonical use cases: crash dumps, lifecycle OTLP exporter, early metrics —
 // anything the server must be observable for even while its own config is
 // still loading.
 package embedded
@@ -38,7 +38,7 @@ import (
 //     the server keeps running unless the plugin was RegisterStrict'd.
 //  2. ConfigLoaded fires after successful config parse, before goroutines
 //     spawn. Plugins can upgrade from env-var-only config to YAML-backed
-//     config here (e.g. swap OTLP endpoint).
+//     config here (e.g. swap lifecycle OTLP endpoint).
 //  3. ProcessShutdown fires from a top-level deferred call in main() —
 //     runs on normal exit AND after a top-level panic. Last chance to
 //     flush exporters.

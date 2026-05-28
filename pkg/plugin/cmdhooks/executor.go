@@ -18,9 +18,9 @@ import (
 // Sentinel errors returned by the critical hook send path. Callers use
 // errors.Is to distinguish them from unexpected failures.
 var (
-	ErrPluginConnClosed     = errors.New("plugin connection closed")
-	ErrUnexpectedResponse   = errors.New("unexpected response type")
-	ErrHookTimeout          = errors.New("hook timeout")
+	ErrPluginConnClosed   = errors.New("plugin connection closed")
+	ErrUnexpectedResponse = errors.New("unexpected response type")
+	ErrHookTimeout        = errors.New("hook timeout")
 )
 
 // Executor dispatches hooks to plugins over IPC.
@@ -64,7 +64,7 @@ func (e *Executor) RunPreHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, con
 		if !h.Blocking {
 			reqID := router.NextRequestID()
 			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_PRE, cmd, conn, "", "", opctx.FilterForPlugin(hookCtx, h.PluginName), metadata)
-			go h.Conn.SendFireAndForget(env)
+			h.Conn.SendFireAndForget(env)
 		}
 	}
 
@@ -106,7 +106,7 @@ func (e *Executor) RunPostHooks(ctx context.Context, cmd *gcpc.CommandInfoV1, co
 		if !h.Blocking {
 			reqID := router.NextRequestID()
 			env := gcpc.NewHookRequest(reqID, gcpc.HookPhaseV1_HOOK_PHASE_POST, cmd, conn, resultValue, resultError, opctx.FilterForPlugin(hookCtx, h.PluginName), metadata)
-			go h.Conn.SendFireAndForget(env)
+			h.Conn.SendFireAndForget(env)
 		}
 	}
 

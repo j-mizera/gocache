@@ -18,7 +18,7 @@ frame "Event Bus with Replay Ring" as F {
 
     rectangle "Subscribers" as SUB {
         component "LogCollector\n(pkg/logcollector)" as LC
-        component "IPC plugins via GCPC\n(gobservability, custom)" as IPC
+        component "IPC plugins via GCPC\n(prometheus, custom)" as IPC
         component "Embedded plugins\n(otlp, crashdump)" as EMB
     }
 

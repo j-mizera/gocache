@@ -94,22 +94,22 @@ Configuration is hot-reloadable via fsnotify. Changes to memory limits, eviction
 
 ### Embedded plugins (compile-time-linked)
 
-A narrow set of capabilities must be active before config loads or before any IPC plugin can connect — crashdump collection, OTLP emission from t=0, pprof endpoint for production-shape profiling. These ship as **embedded plugins** linked in via build tags. See [docs/plugins/README.md](../plugins/README.md) for the full embedded-vs-IPC story and the api/-only import rule.
+A narrow set of capabilities must be active before config loads or before any IPC plugin can connect — crashdump collection, lifecycle OTLP emission from t=0, pprof endpoint for production-shape profiling. These ship as **embedded plugins** linked in via build tags. See [docs/plugins/README.md](../plugins/README.md) for the full embedded-vs-IPC story and the api/-only import rule.
 
 ```bash
 # Default: no embedded plugins (15 MB).
 go build ./cmd/server
 
-# With embedded crashdump scanner and OTLP exporter (~24 MB).
-go build -tags "crashdump otlp" ./cmd/server
+# With embedded crashdump scanner and lifecycle OTLP exporter (~24 MB).
+go build -tags "crashdump lifecycleotlp" ./cmd/server
 
 # With pprof endpoint enabled (binds 0.0.0.0:6060).
-go build -tags "crashdump otlp pprof" ./cmd/server
+go build -tags "crashdump lifecycleotlp pprof" ./cmd/server
 
 # Docker: per-variant image matrix published to GHCR on every main push.
 docker pull ghcr.io/<org>/gocache:minimal   # no embedded
 docker pull ghcr.io/<org>/gocache:default   # crashdump
-docker pull ghcr.io/<org>/gocache:full      # crashdump + otlp
+docker pull ghcr.io/<org>/gocache:full      # crashdump + lifecycleotlp
 docker pull ghcr.io/<org>/gocache:latest    # alias for :default
 ```
 
@@ -120,11 +120,11 @@ Embedded-plugin env vars (all optional):
 | `GOCACHE_CRASHDUMP_DIR` | `crashes/` | Directory for JSON panic dumps |
 | `GOCACHE_CRASHDUMP_DISABLED` | `false` | Skip crashdump writes (tests) |
 | `GOCACHE_BOOT_STATE_FILE` | `boot.state` | Atomic stage marker file |
-| `GOCACHE_EMBEDDED_OTLP_ENDPOINT` | _(unset)_ | Required for OTLP; unset = dormant |
-| `GOCACHE_EMBEDDED_OTLP_SERVICE` | `gocache` | `service.name` resource attribute |
-| `GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS` | `3000` | Export timeout |
-| `GOCACHE_EMBEDDED_OTLP_INSECURE` | auto | True for `http://` endpoints |
-| `GOCACHE_EMBEDDED_OTLP_DISABLED` | `false` | Hard off-switch |
+| `GOCACHE_LIFECYCLE_OTLP_ENDPOINT` | _(unset)_ | Required for OTLP; unset = dormant |
+| `GOCACHE_LIFECYCLE_OTLP_SERVICE` | `gocache` | `service.name` resource attribute |
+| `GOCACHE_LIFECYCLE_OTLP_TIMEOUT_MS` | `3000` | Export timeout |
+| `GOCACHE_LIFECYCLE_OTLP_INSECURE` | auto | True for `http://` endpoints |
+| `GOCACHE_LIFECYCLE_OTLP_DISABLED` | `false` | Hard off-switch |
 | `GOCACHE_PPROF_ADDR` | `0.0.0.0:6060` | pprof bind address (only with `-tags pprof`) |
 
 ## Supported Commands

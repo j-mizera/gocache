@@ -159,10 +159,10 @@ func TestCollector_MultipleSources(t *testing.T) {
 	c := New(em)
 
 	r1 := strings.NewReader(`{"level":"info","message":"from server","source":"server"}` + "\n")
-	r2 := strings.NewReader(`{"level":"info","message":"from plugin","source":"gobservability"}` + "\n")
+	r2 := strings.NewReader(`{"level":"info","message":"from plugin","source":"prometheus"}` + "\n")
 
 	c.AddSource("server", r1)
-	c.AddSource("gobservability", r2)
+	c.AddSource("prometheus", r2)
 	c.Wait()
 
 	if em.count() != 2 {

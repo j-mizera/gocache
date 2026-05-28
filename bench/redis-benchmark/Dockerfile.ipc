@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1.6
+
+# Benchmark-only image for measuring GoCache with IPC plugins enabled.
+# The production Dockerfile intentionally stays lean; this image adds selected
+# plugin binaries under /usr/local/lib/gocache/plugins for benchmark scenarios.
+
+FROM golang:1.25.5-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION="dev"
+ARG IPC_PLUGINS="prometheus"
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w -X gocache/pkg/version.version=$VERSION" \
+    -o /build/bin/gocache \
+    ./cmd/server
+
+RUN mkdir -p /build/bin/plugins && \
+    for plugin in $IPC_PLUGINS; do \
+        echo "Building IPC plugin: $plugin"; \
+        CGO_ENABLED=0 GOOS=linux go build \
+            -trimpath \
+            -ldflags="-s -w -X gocache/pkg/version.version=$VERSION" \
+            -o "/build/bin/plugins/$plugin" \
+            "./plugins/$plugin"; \
+    done
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata wget && \
+    addgroup -S gocache && adduser -S -G gocache gocache
+
+WORKDIR /var/lib/gocache
+RUN mkdir -p /usr/local/lib/gocache/plugins && \
+    chown -R gocache:gocache /var/lib/gocache /usr/local/lib/gocache
+
+COPY --from=builder /build/bin/gocache /usr/local/bin/gocache
+COPY --from=builder /build/bin/plugins/ /usr/local/lib/gocache/plugins/
+
+USER gocache
+
+EXPOSE 6379 9100
+
+ENV GOCACHE_CRASHDUMP_DIR=/var/lib/gocache/crashes \
+    GOCACHE_BOOT_STATE_FILE=/var/lib/gocache/boot.state
+
+ENTRYPOINT ["/usr/local/bin/gocache"]
