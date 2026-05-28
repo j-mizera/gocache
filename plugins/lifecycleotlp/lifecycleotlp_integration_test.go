@@ -1,6 +1,6 @@
-//go:build otlp && integration
+//go:build lifecycleotlp && integration
 
-package otlp
+package lifecycleotlp
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 	"gocache/testkit/integration"
 )
 
-func TestOTLP_TracesReachJaeger(t *testing.T) {
+func TestLifecycleOTLP_TracesReachJaeger(t *testing.T) {
 	jaeger := integration.StartJaeger(t)
 
-	serviceName := "gocache-otlp-it"
+	serviceName := "gocache-lifecycleotlp-it"
 	t.Setenv(envEndpoint, jaeger.OTLPEndpoint)
 	t.Setenv(envService, serviceName)
 	t.Setenv(envInsecure, "true")

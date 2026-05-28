@@ -1,6 +1,6 @@
-//go:build otlp
+//go:build lifecycleotlp
 
-package otlp
+package lifecycleotlp
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 // TestBootInit_DisabledNoEndpoint verifies the common case: user built
-// with the tag but did not configure OTLP. BootInit must be a no-op and
+// with the tag but did not configure lifecycle OTLP. BootInit must be a no-op and
 // leave the plugin in a state where ConfigLoaded + ProcessShutdown are
 // also safe no-ops (no nil-ptr panics).
 func TestBootInit_DisabledNoEndpoint(t *testing.T) {

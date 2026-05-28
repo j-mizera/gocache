@@ -1,6 +1,6 @@
-//go:build otlp
+//go:build lifecycleotlp
 
-package otlp
+package lifecycleotlp
 
 import (
 	"context"
@@ -18,9 +18,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gocache/api/config"
-	"gocache/sdk/embedded"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
+	"gocache/commons/logger"
+	"gocache/sdk/embedded"
 )
 
 const (
@@ -30,20 +30,21 @@ const (
 	keyInsecure  = "insecure"
 	keyDisabled  = "disabled"
 
-	envEndpoint  = "GOCACHE_EMBEDDED_OTLP_ENDPOINT"
-	envService   = "GOCACHE_EMBEDDED_OTLP_SERVICE"
-	envTimeoutMs = "GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS"
-	envInsecure  = "GOCACHE_EMBEDDED_OTLP_INSECURE"
-	envDisabled  = "GOCACHE_EMBEDDED_OTLP_DISABLED"
+	envEndpoint  = "GOCACHE_LIFECYCLE_OTLP_ENDPOINT"
+	envService   = "GOCACHE_LIFECYCLE_OTLP_SERVICE"
+	envTimeoutMs = "GOCACHE_LIFECYCLE_OTLP_TIMEOUT_MS"
+	envInsecure  = "GOCACHE_LIFECYCLE_OTLP_INSECURE"
+	envDisabled  = "GOCACHE_LIFECYCLE_OTLP_DISABLED"
+
 	defaultService = "gocache"
 	defaultTimeout = 3 * time.Second
 	shutdownGrace  = 2 * time.Second
 
 	// Component marker on every exported span so Grafana can segment
-	// embedded-plugin spans from IPC-plugin (gobservability) spans.
+	// lifecycle spans from runtime IPC instrumentation spans.
 	attrComponent  = "gocache.component"
-	componentValue = "embedded_otlp"
-	tracerName     = "gocache.embedded.otlp"
+	componentValue = "lifecycle_otlp"
+	tracerName     = "gocache.lifecycle.otlp"
 
 	// Canonical span names.
 	spanProcess      = "gocache.process"
@@ -71,17 +72,19 @@ func init() {
 	})
 }
 
-func (p *plugin) Name() string { return "otlp_embedded" }
+func (p *plugin) Name() string { return "lifecycleotlp" }
 
-// BootInit resolves env-var config and opens the OTLP exporter. Emits a
-// long-lived "process" span whose end-time is set in ProcessShutdown so
-// the whole server lifetime appears as a single span in Grafana.
+// BootInit resolves env-var config and opens the lifecycle OTLP exporter.
+// It emits a long-lived "process" span whose end-time is set in
+// ProcessShutdown so the whole server lifetime appears as a single span in
+// Grafana. Runtime operation instrumentation intentionally belongs to IPC
+// instrumentation plugins, not this embedded lifecycle path.
 func (p *plugin) BootInit(ctx context.Context) error {
 	p.applyEnv()
 	if p.disabled || p.endpoint == "" {
-		// Soft-disable when not configured. The plugin still registers
-		// so users see it in the "embedded plugins loaded" log, but it
-		// does nothing at runtime.
+		// Soft-disable when not configured. The plugin still registers so users
+		// see it in the "embedded plugins loaded" log, but it does nothing at
+		// runtime.
 		return nil
 	}
 
@@ -94,7 +97,7 @@ func (p *plugin) BootInit(ctx context.Context) error {
 	}
 	exporter, err := otlptracehttp.New(initCtx, opts...)
 	if err != nil {
-		return fmt.Errorf("otlp exporter: %w", err)
+		return fmt.Errorf("lifecycle otlp exporter: %w", err)
 	}
 
 	res, err := resource.New(initCtx,
@@ -104,7 +107,7 @@ func (p *plugin) BootInit(ctx context.Context) error {
 		),
 	)
 	if err != nil {
-		return fmt.Errorf("otlp resource: %w", err)
+		return fmt.Errorf("lifecycle otlp resource: %w", err)
 	}
 
 	p.provider = sdktrace.NewTracerProvider(
@@ -113,10 +116,10 @@ func (p *plugin) BootInit(ctx context.Context) error {
 	)
 	p.tracer = p.provider.Tracer(tracerName)
 
-	// Open the process span. End() is deferred to ProcessShutdown so the
-	// span duration covers the full process lifetime. On a panic,
-	// ProcessShutdown still fires via main()'s deferred chain, giving the
-	// exporter a final chance to flush.
+	// Open the process span. End() is deferred to ProcessShutdown so the span
+	// duration covers the full process lifetime. On a panic, ProcessShutdown
+	// still fires via main()'s deferred chain, giving the exporter a final
+	// best-effort chance to flush.
 	p.processCtx, p.processSpan = p.tracer.Start(context.Background(), spanProcess,
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
@@ -153,18 +156,17 @@ func (p *plugin) ConfigLoaded(ctx context.Context, cfg *config.Config, pcfg conf
 	return nil
 }
 
-// ProcessShutdown finalizes the process span and force-flushes the
-// exporter. This is the call that makes a panicking server still land in
-// Grafana without a restart: main()'s deferred chain runs this during
-// panic unwind, and ForceFlush pushes whatever's in the batcher out
-// before the process exits.
+// ProcessShutdown finalizes the process span and force-flushes the exporter.
+// This is the call that makes a panicking server visible in Grafana without a
+// restart: main()'s deferred chain runs this during panic unwind, and
+// ForceFlush pushes whatever is in the batcher out before the process exits.
 func (p *plugin) ProcessShutdown(ctx context.Context) error {
 	if p.provider == nil {
 		return nil
 	}
-	// Use a fresh context with a tight timeout — the main ctx may already
-	// be cancelled, and we don't want a slow telemetry backend to delay
-	// process exit. Propagate the operation for log correlation.
+	// Use a fresh context with a tight timeout — the main ctx may already be
+	// cancelled, and we don't want a slow telemetry backend to delay process
+	// exit. Propagate the operation for log correlation.
 	flushCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	if op := ops.FromContext(ctx); op != nil {
 		flushCtx = ops.WithContext(flushCtx, op)
@@ -175,17 +177,17 @@ func (p *plugin) ProcessShutdown(ctx context.Context) error {
 		p.processSpan.AddEvent("shutdown")
 		p.processSpan.End()
 	}
-	// Emit a terminal "shutdown" span so the shutdown path is visible
-	// even in dashboards that don't render long-lived parent spans well.
+	// Emit a terminal "shutdown" span so the shutdown path is visible even in
+	// dashboards that don't render long-lived parent spans well.
 	if p.tracer != nil {
 		_, span := p.tracer.Start(context.Background(), spanShutdown)
 		span.End()
 	}
 	if err := p.provider.ForceFlush(flushCtx); err != nil {
-		logger.Warn(flushCtx).Err(err).Msg("otlp embedded force-flush failed")
+		logger.Warn(flushCtx).Err(err).Msg("lifecycle otlp force-flush failed")
 	}
 	if err := p.provider.Shutdown(flushCtx); err != nil {
-		return fmt.Errorf("otlp embedded shutdown: %w", err)
+		return fmt.Errorf("lifecycle otlp shutdown: %w", err)
 	}
 	return nil
 }
@@ -218,4 +220,3 @@ func (p *plugin) applyEnv() {
 		p.insecure = true
 	}
 }
-

@@ -1,6 +1,6 @@
 # GoCache
 
-Redis-compatible in-memory cache server with a microkernel architecture. The core handles basic caching — 75 commands across 5 data types over a per-shard locking design (default 8 shards, FNV-1a key routing). Everything else (Pub/Sub, Kafka, geospatial, auth, metrics, replication) runs as a plugin: most as separate processes via GCPC over Unix domain sockets, with a thin embedded-plugin tier (`-tags <name>`) for capabilities that must be active before config loads (crashdump, OTLP). A crashing IPC plugin cannot crash the core.
+Redis-compatible in-memory cache server with a microkernel architecture. The core handles basic caching — 75 commands across 5 data types over a per-shard locking design (default 8 shards, FNV-1a key routing). Everything else (Pub/Sub, Kafka, geospatial, auth, metrics, replication) runs as a plugin: most as separate processes via GCPC over Unix domain sockets, with a thin embedded-plugin tier (`-tags <name>`) for capabilities that must be active before config loads (crashdump, lifecycle OTLP). A crashing IPC plugin cannot crash the core.
 
 > Bachelor's thesis project exploring whether safe extensibility and high performance can coexist. See `docs/audits/per-shard-arc-summary.md` for the throughput/RSS deltas and `docs/plugins/README.md` for the plugin contract.
 

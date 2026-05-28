@@ -11,12 +11,12 @@
 # Examples:
 #   docker build -t gocache:minimal .                              # no embedded
 #   docker build --build-arg PLUGINS=crashdump -t gocache:default .
-#   docker build --build-arg PLUGINS=crashdump,otlp -t gocache:full .
+#   docker build --build-arg PLUGINS=crashdump,lifecycleotlp -t gocache:full .
 #
 # Runtime config is still env-var-based (GOCACHE_*) — see the README /
 # gocache.yaml for the full set. Embedded plugins self-disable when their
-# required env var is absent (e.g. GOCACHE_EMBEDDED_OTLP_ENDPOINT unset →
-# OTLP compiled in but dormant), so a "full" image can be deployed without
+# required env var is absent (e.g. GOCACHE_LIFECYCLE_OTLP_ENDPOINT unset →
+# lifecycle OTLP compiled in but dormant), so a "full" image can be deployed without
 # any observability backend and will still serve cache traffic.
 # =============================================================================
 

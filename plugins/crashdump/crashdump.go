@@ -8,7 +8,7 @@
 // deferred recover, which calls pkg/crashdump.WriteFromPanic directly.
 // This plugin handles only the scan-and-report half of the lifecycle:
 // on ConfigLoaded it lists dumps in the configured directory, logs each
-// at WARN (so log collector + gobservability pick them up), and deletes
+// at WARN (so log collector + prometheus pick them up), and deletes
 // successfully reported entries.
 
 package crashdump
@@ -18,8 +18,8 @@ import (
 
 	"gocache/api/config"
 	"gocache/commons/crashdump"
-	"gocache/sdk/embedded"
 	"gocache/commons/logger"
+	"gocache/sdk/embedded"
 )
 
 const (
