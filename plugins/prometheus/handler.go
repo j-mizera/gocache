@@ -21,7 +21,7 @@ func metricsHandler(collector *Collector, name, version string) http.Handler {
 
 // healthzHandler returns an HTTP handler for liveness checks.
 // Queries the server's "health" topic via GCPC.
-func healthzHandler(p *gobservabilityPlugin) http.Handler {
+func healthzHandler(p *prometheusPlugin) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentTypeJSON)
 
@@ -37,7 +37,7 @@ func healthzHandler(p *gobservabilityPlugin) http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"status": "unavailable",
 				"error":  err.Error(),
-				"hint":   "ensure the gobservability plugin has the 'server:query:health' scope in the server config",
+				"hint":   "ensure the prometheus plugin has the 'server:query:health' scope in the server config",
 			})
 			return
 		}
@@ -55,7 +55,7 @@ func healthzHandler(p *gobservabilityPlugin) http.Handler {
 
 // readyzHandler returns an HTTP handler for readiness checks.
 // Queries both "health" and "plugins" topics to determine overall readiness.
-func readyzHandler(p *gobservabilityPlugin) http.Handler {
+func readyzHandler(p *prometheusPlugin) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentTypeJSON)
 
@@ -71,7 +71,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "unavailable",
 				"error":  err.Error(),
-				"hint":   "ensure the gobservability plugin has the 'server:query:health' scope",
+				"hint":   "ensure the prometheus plugin has the 'server:query:health' scope",
 			})
 			return
 		}
@@ -82,7 +82,7 @@ func readyzHandler(p *gobservabilityPlugin) http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "unavailable",
 				"error":  err.Error(),
-				"hint":   "ensure the gobservability plugin has the 'server:query:plugins' scope",
+				"hint":   "ensure the prometheus plugin has the 'server:query:plugins' scope",
 			})
 			return
 		}

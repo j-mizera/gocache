@@ -7,7 +7,7 @@
 
 **Plugins**
 - [Overview](Plugins)
-- [gobservability (IPC)](Plugin-Gobservability)
+- [prometheus (IPC)](Plugin-Prometheus)
 
 **Protocol**
 - [GCPC v1](GCPC)
@@ -34,9 +34,9 @@
 - [Sequences](GCPC-Sequence-Diagrams)
 - [States](GCPC-State-Diagrams)
 
-**Diagrams (gobservability)**
-- [Components](Plugin-Gobservability-Components-Diagrams)
-- [Sequences](Plugin-Gobservability-Sequence-Diagrams)
+**Diagrams (prometheus)**
+- [Components](Plugin-Prometheus-Components-Diagrams)
+- [Sequences](Plugin-Prometheus-Sequence-Diagrams)
 
 **Audits**
 - [Per-shard arc summary](Audit-per-shard-arc-summary)

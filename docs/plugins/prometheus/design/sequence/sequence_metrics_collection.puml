@@ -1,12 +1,12 @@
 @startuml sequence_metrics_collection
 !include ../../../../design/theme.iuml
 
-mainframe **sd** Gobservability Metrics Collection
+mainframe **sd** Prometheus Metrics Collection
 
 actor Client
 participant "GoCache Server" as Server
-participant "Hook Executor" as Exec
-participant "Gobservability\nPlugin" as Plugin
+participant "Event Bus" as Bus
+participant "Prometheus\nPlugin" as Plugin
 participant "Collector" as Collector
 actor "Prometheus" as Prom
 
@@ -15,22 +15,19 @@ actor "Prometheus" as Prom
 Client -> Server : SET user:1 "John"
 Server -> Server : Execute command\nMeasure elapsed time
 
-== Post-Hook Dispatch ==
+== Event Delivery ==
 
-Server -> Exec : RunPostHooks("SET", args, "OK", "", hookCtx)
-note right : hookCtx contains:\n  _start_ns = "171270..."\n  _elapsed_ns = "150000"
+Server -> Bus : Emit command.post\ncommand="SET", elapsed_ns=150000, error=""
+Bus ->> Plugin : EventV1 command.post\n(best-effort async)
+note right : Server response path does not wait\nfor metrics processing.
 
-Exec ->> Plugin : HookRequestV1 (POST)\n(fire-and-forget)
-note right : Non-critical:\nserver does NOT wait
-
-Plugin -> Plugin : Parse _elapsed_ns\nfrom context
 Plugin -> Collector : Record("SET", 150000, false)
 activate Collector
 Collector -> Collector : total["SET"]++\nsum["SET"] += 0.00015\nbucket[0] (le=0.001)++
 deactivate Collector
 
 Server --> Client : +OK
-note left : Response sent immediately.\nDoes not wait for plugin.
+note left : Response does not wait\nfor Prometheus plugin.
 
 == Prometheus Scrape ==
 

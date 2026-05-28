@@ -37,9 +37,9 @@ This wiki is **auto-generated** from `docs/` on every push to `main` via `script
   - [Components](GCPC-Components-Diagrams)
   - [Sequences](GCPC-Sequence-Diagrams)
   - [States](GCPC-State-Diagrams)
-- Design diagrams (gobservability plugin):
-  - [Components](Plugin-Gobservability-Components-Diagrams)
-  - [Sequences](Plugin-Gobservability-Sequence-Diagrams)
+- Design diagrams (prometheus plugin):
+  - [Components](Plugin-Prometheus-Components-Diagrams)
+  - [Sequences](Plugin-Prometheus-Sequence-Diagrams)
 
 ## Active development
 
@@ -70,14 +70,14 @@ scripts/    Build/test/CI helpers
 # Default (no embedded plugins, ~15 MB binary)
 go build -o bin/gocache-server ./cmd/server
 
-# With embedded plugins (crashdump + OTLP from t=0)
-go build -tags "crashdump otlp" -o bin/gocache-server ./cmd/server
+# With embedded plugins (crashdump + lifecycle OTLP from t=0)
+go build -tags "crashdump lifecycleotlp" -o bin/gocache-server ./cmd/server
 
 # With pprof endpoint enabled
-go build -tags "crashdump otlp pprof" -o bin/gocache-server ./cmd/server
+go build -tags "crashdump lifecycleotlp pprof" -o bin/gocache-server ./cmd/server
 
 # Docker (multi-arch, signed, on every main push)
-docker build --build-arg PLUGINS=crashdump,otlp -t gocache:full .
+docker build --build-arg PLUGINS=crashdump,lifecycleotlp -t gocache:full .
 ```
 
 See [Server / build](Server#building) for details.

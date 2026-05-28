@@ -1,10 +1,10 @@
-@startuml components_gobservability
+@startuml components_prometheus
 !include ../../../../design/theme.iuml
 
-frame "Gobservability Plugin" as F {
+frame "Prometheus Plugin" as F {
 
     rectangle "GCPC Interface" as ipc {
-        component [Hook Handler] as handler <<HookPlugin\npattern=*\nphase=POST>>
+        component [Event Handler] as handler <<EventPlugin\ncommand.post>>
         component [Plugin Lifecycle] as lifecycle <<health + shutdown>>
     }
 
@@ -23,7 +23,7 @@ frame "Gobservability Plugin" as F {
     cloud "Prometheus" as prom
 
     ' -- Data flow --
-    server --> handler : HookRequestV1 (POST)\ncontext: {_elapsed_ns}
+    server --> handler : EventV1 command.post\nelapsed_ns + error
     handler --> collector : Record(cmd, elapsed, isError)
     collector --> counters : increment
     collector --> histo : place in bucket
@@ -39,10 +39,10 @@ frame "Gobservability Plugin" as F {
     end note
 
     note bottom of handler
-      **Non-critical, fire-and-forget**.
-      Server does not wait for response.
+      **Async event delivery**.
+      No command or operation hooks.
       Plugin crash = auto-restart,
-      no impact on command execution.
+      no command denial/enrichment.
     end note
 }
 

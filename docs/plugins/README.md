@@ -2,11 +2,11 @@
 title: Plugins
 description: Embedded vs IPC plugin tiers, build-tag matrix, the api/-only contract surface, available plugins
 status: living
-last_updated: 2026-05-03
+last_updated: 2026-05-28
 related:
   - Server
   - GCPC
-  - Plugin-Gobservability
+  - Plugin-Prometheus
 ---
 
 # Plugins
@@ -24,7 +24,7 @@ GoCache extends a microkernel core with two kinds of plugin: **embedded** (compi
 | Hot-swap | No (compile time) | Yes (manager restarts on crash, up to `max_restarts`) |
 | Scope sandbox | None — embedded plugins can do anything the server can | Permission/scope system (`read`, `write`, `admin`, `hook:pre`, `hook:post`, `keys:<pattern>`) |
 | Latency overhead | None — direct function call | One IPC round-trip per call (~tens of microseconds) |
-| Best for | Things that must run before `config.Load`, or that need direct access to cache internals (snapshot dumps, AOF mutation feed, crash dumps, OTLP from t=0) | Anything with heavy dependencies (database drivers, network clients), anything that must isolate failure (metrics exporters, custom auth, rate limiting) |
+| Best for | Things that must run before `config.Load`, or that need direct access to cache internals (snapshot dumps, AOF mutation feed, crash dumps, lifecycle OTLP from t=0) | Anything with heavy dependencies (database drivers, network clients), anything that must isolate failure (metrics exporters, custom auth, rate limiting) |
 
 Both modes use the **same `api/*` interfaces**. The difference is registration and transport — embedded plugins call `embedded.Register(p)` from `init()`, IPC plugins run `pluginsdk.Run(p)` and the manager handshakes them over Unix socket.
 
@@ -59,23 +59,23 @@ Embedded plugins are gated by build tags so default builds carry zero cost. Each
 | Tag | Plugin | What it does | Configured via |
 |---|---|---|---|
 | `crashdump` | `plugins/crashdump` | Scans `<dir>/crashes/` on `ConfigLoaded` and emits crash events into the event bus | `GOCACHE_CRASHDUMP_DIR`, `GOCACHE_CRASHDUMP_DISABLED` |
-| `otlp` | `plugins/otlp` | Exports a root `process_start` OTEL span from `BootInit`; `ForceFlush` in `ProcessShutdown` so panics still land in Grafana | `GOCACHE_EMBEDDED_OTLP_ENDPOINT`, `GOCACHE_EMBEDDED_OTLP_SERVICE`, `GOCACHE_EMBEDDED_OTLP_TIMEOUT_MS`, `GOCACHE_EMBEDDED_OTLP_INSECURE`, `GOCACHE_EMBEDDED_OTLP_DISABLED` |
+| `lifecycleotlp` | `plugins/lifecycleotlp` | Exports lifecycle OTLP spans from `BootInit`, `ConfigLoaded`, and `ProcessShutdown`; scoped to pre-IPC startup/failure/shutdown visibility only | `GOCACHE_LIFECYCLE_OTLP_ENDPOINT`, `GOCACHE_LIFECYCLE_OTLP_SERVICE`, `GOCACHE_LIFECYCLE_OTLP_TIMEOUT_MS`, `GOCACHE_LIFECYCLE_OTLP_INSECURE`, `GOCACHE_LIFECYCLE_OTLP_DISABLED` |
 | `pprof` | `cmd/server/pprof_on.go` | Boots a `net/http/pprof` endpoint on `0.0.0.0:6060` (overridable via `GOCACHE_PPROF_ADDR`); sets `BlockProfileRate` and `MutexProfileFraction` so contention shows up in profiles | `GOCACHE_PPROF_ADDR` |
 
-Combine multiple tags via go's space-separated syntax: `-tags "crashdump otlp"`. The Docker image accepts a `PLUGINS=` build arg that maps to space-separated tags; `PPROF=1` adds the `pprof` tag.
+Combine multiple tags via go's space-separated syntax: `-tags "crashdump lifecycleotlp"`. The Docker image accepts a `PLUGINS=` build arg that maps to space-separated tags; `PPROF=1` adds the `pprof` tag.
 
 ```bash
 # Plain binary — no embedded plugins linked.
 go build -o bin/gocache-server ./cmd/server
 
-# With embedded plugins (crashdump + OTLP from t=0).
-go build -tags "crashdump otlp" -o bin/gocache-server ./cmd/server
+# With embedded plugins (crashdump + lifecycle OTLP from t=0).
+go build -tags "crashdump lifecycleotlp" -o bin/gocache-server ./cmd/server
 
 # Docker (production shape — multi-arch, signed, on every main push).
-docker build --build-arg PLUGINS=crashdump,otlp -t gocache:full .
+docker build --build-arg PLUGINS=crashdump,lifecycleotlp -t gocache:full .
 
 # Docker with pprof port published.
-docker build --build-arg PLUGINS=crashdump,otlp --build-arg PPROF=1 -t gocache:profiling .
+docker build --build-arg PLUGINS=crashdump,lifecycleotlp --build-arg PPROF=1 -t gocache:profiling .
 ```
 
 ## IPC plugins
@@ -99,7 +99,7 @@ Bundled IPC plugins:
 | Plugin | What it does |
 |---|---|
 | `plugins/dummy` | Lifecycle-only test plugin |
-| `plugins/gobservability` | Prometheus `/metrics`, OTEL tracing, `/healthz`/`/readyz`, log-line → span events |
+| `plugins/prometheus` | Prometheus `/metrics`, `/healthz`, and `/readyz`; metrics are collected from async `command.post` events only |
 
 ## Permissions and scopes
 
@@ -116,4 +116,4 @@ Embedded plugins are not scope-checked — they run with full server privilege. 
 - [docs/server/design/component/](../server/design/component/) — Component diagrams (core, memory eviction, event bus ring).
 - [docs/server/design/sequence/](../server/design/sequence/) — Sequence diagrams (command flow, persistence, transactions, graceful shutdown).
 - [docs/gcpc/README.md](../gcpc/README.md) — GCPC v1 protocol specification.
-- [docs/plugins/gobservability/README.md](gobservability/README.md) — Reference IPC plugin.
+- [docs/plugins/prometheus/README.md](prometheus/README.md) — Reference IPC plugin.
