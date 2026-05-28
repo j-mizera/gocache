@@ -181,7 +181,7 @@ func TestFilteredContext(t *testing.T) {
 	op.Enrich("_start_ns", "123")
 	op.Enrich("auth.cache_hit", "true")
 	op.Enrich("auth.secret.api_key", "key123")
-	op.Enrich("gobservability.span_id", "span1")
+	op.Enrich("instrumentation.span_id", "span1")
 	op.Enrich("shared.username", "john")
 	op.Enrich("shared.secret.jwt", "eyJ...")
 
@@ -196,8 +196,8 @@ func TestFilteredContext(t *testing.T) {
 		if filtered["shared.username"] != "john" {
 			t.Error("auth should see shared keys")
 		}
-		if _, ok := filtered["gobservability.span_id"]; ok {
-			t.Error("auth should NOT see gobservability keys")
+		if _, ok := filtered["instrumentation.span_id"]; ok {
+			t.Error("auth should NOT see prometheus keys")
 		}
 	})
 

@@ -411,7 +411,7 @@ op.Enrich("records_processed", "42")
 
 Embedded plugins are compiled into the server binary via build tags. They run in-process and have direct access to Go APIs. Use them when you need to:
 
-- Run before `config.Load` (e.g., OTLP exporter from t=0)
+- Run before `config.Load` (e.g., lifecycle OTLP exporter from t=0)
 - Access cache internals (e.g., persistence Source/Sink)
 - Avoid IPC overhead for hot-path work
 
@@ -430,7 +430,7 @@ type Plugin interface {
 
 | Method | When called | Use for |
 |--------|-------------|---------|
-| `BootInit(ctx)` | Before config load | Early init (OTLP exporter, env-var config) |
+| `BootInit(ctx)` | Before config load | Early init (lifecycle OTLP exporter, env-var config) |
 | `ConfigLoaded(ctx, cfg, pcfg)` | After config load | Config-dependent setup (crash dir scan) |
 | `ProcessShutdown(ctx)` | Server shutting down (LIFO order) | Cleanup, flush |
 
@@ -679,7 +679,7 @@ Operation context keys follow a visibility model:
 | Prefix | Visibility | Examples |
 |--------|------------|---------|
 | `_` (underscore) | Server-only; never sent to plugins | `_start_ns`, `_elapsed_ns`, `_command` |
-| `<plugin>.` | Private to the named plugin | `gobservability.traceparent` |
+| `<plugin>.` | Private to the named plugin | `instrumentation.traceparent` |
 | `shared.` | Visible to all plugins | `shared.audit.user` |
 | `.secret.` | Redacted in snapshots/logs | `.secret.token` |
 
@@ -828,7 +828,7 @@ The binary name must match `Name()`. Place it in the `plugins.dir` directory:
 ```
 plugins/
   myplugin      # binary — Name() returns "myplugin"
-  gobservability # binary — Name() returns "gobservability"
+  prometheus # binary — Name() returns "prometheus"
 ```
 
 ---
@@ -979,4 +979,4 @@ go test -tags myplugin -race ./plugins/myplugin/...
 - [ADR-0008](../adr/0008-plugin-config-and-reload-contract.md) — Plugin config and reload contract
 - [ADR-0018](../adr/0018-plugin-config-autonomy.md) — Plugin config autonomy (SetDefault/BindEnv)
 - [ADR-0019](../adr/0019-unified-plugin-config-delivery.md) — Unified plugin config delivery
-- [gobservability reference](gobservability/README.md) — Full-featured IPC plugin example
+- [prometheus reference](prometheus/README.md) — Full-featured IPC plugin example

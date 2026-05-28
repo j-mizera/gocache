@@ -16,8 +16,8 @@ func TestIsSecret(t *testing.T) {
 		// Plugin-private namespace
 		{"auth.cache_hit", false},
 		{"auth.secret.api_key", true},
-		{"gobservability.span_id", false},
-		{"gobservability.secret.internal", true},
+		{"instrumentation.span_id", false},
+		{"instrumentation.secret.internal", true},
 
 		// Shared namespace
 		{"shared.username", false},
@@ -45,15 +45,15 @@ func TestIsSecret(t *testing.T) {
 
 func TestFilterForPlugin(t *testing.T) {
 	ctx := map[string]string{
-		"_start_ns":                  "123",
-		"_operation_id":              "cmd_1",
-		"_secret.session":            "tok",
-		"auth.cache_hit":             "true",
-		"auth.secret.api_key":        "key123",
-		"gobservability.span_id":     "span1",
-		"gobservability.secret.data": "hidden",
-		"shared.username":            "john",
-		"shared.secret.jwt":          "eyJ...",
+		"_start_ns":                   "123",
+		"_operation_id":               "cmd_1",
+		"_secret.session":             "tok",
+		"auth.cache_hit":              "true",
+		"auth.secret.api_key":         "key123",
+		"instrumentation.span_id":     "span1",
+		"instrumentation.secret.data": "hidden",
+		"shared.username":             "john",
+		"shared.secret.jwt":           "eyJ...",
 	}
 
 	t.Run("auth sees own + server + shared", func(t *testing.T) {
@@ -73,22 +73,22 @@ func TestFilterForPlugin(t *testing.T) {
 				t.Errorf("expected key %q in auth filtered context", k)
 			}
 		}
-		// Should NOT see gobservability.*
-		if _, ok := filtered["gobservability.span_id"]; ok {
-			t.Error("auth should not see gobservability.span_id")
+		// Should NOT see prometheus.*
+		if _, ok := filtered["instrumentation.span_id"]; ok {
+			t.Error("auth should not see instrumentation.span_id")
 		}
-		if _, ok := filtered["gobservability.secret.data"]; ok {
-			t.Error("auth should not see gobservability.secret.data")
+		if _, ok := filtered["instrumentation.secret.data"]; ok {
+			t.Error("auth should not see instrumentation.secret.data")
 		}
 	})
 
-	t.Run("gobservability sees own + server + shared", func(t *testing.T) {
-		filtered := FilterForPlugin(ctx, "gobservability")
-		if _, ok := filtered["gobservability.span_id"]; !ok {
-			t.Error("gobservability should see own span_id")
+	t.Run("instrumentation sees own + server + shared", func(t *testing.T) {
+		filtered := FilterForPlugin(ctx, "instrumentation")
+		if _, ok := filtered["instrumentation.span_id"]; !ok {
+			t.Error("instrumentation should see own span_id")
 		}
 		if _, ok := filtered["auth.cache_hit"]; ok {
-			t.Error("gobservability should not see auth.cache_hit")
+			t.Error("instrumentation should not see auth.cache_hit")
 		}
 	})
 
@@ -154,13 +154,13 @@ func TestMergeFromPlugin(t *testing.T) {
 
 func TestRedactSecrets(t *testing.T) {
 	ctx := map[string]string{
-		"_start_ns":              "123",
-		"_secret.session":        "tok",
-		"shared.username":        "john",
-		"shared.secret.jwt":      "eyJ...",
-		"auth.cache_hit":         "true",
-		"auth.secret.api_key":    "key123",
-		"gobservability.span_id": "span1",
+		"_start_ns":               "123",
+		"_secret.session":         "tok",
+		"shared.username":         "john",
+		"shared.secret.jwt":       "eyJ...",
+		"auth.cache_hit":          "true",
+		"auth.secret.api_key":     "key123",
+		"instrumentation.span_id": "span1",
 	}
 
 	redacted := RedactSecrets(ctx)
