@@ -2,7 +2,7 @@
 title: Architecture Decision Records
 description: Index of architectural decisions captured for gocache — Nygard-format ADRs, one per significant decision
 status: living
-last_updated: 2026-05-03
+last_updated: 2026-05-28
 related:
   - Server-Architecture
   - Performance
@@ -49,6 +49,10 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0017](0017-mutation-replay-execution-path.md) | Mutation replay execution path | accepted | 2026-05-21 |
 | [0018](0018-plugin-config-autonomy.md) | Plugin config autonomy (BindEnv + MergeFile) | proposed | 2026-05-24 |
 | [0019](0019-unified-plugin-config-delivery.md) | Unified plugin config delivery | proposed | 2026-05-25 |
+| [0020](0020-client-push-via-gcpc.md) | Client Push via GCPC | accepted | 2026-05-26 |
+| [0021](0021-commons-package-layer.md) | Introduce commons/ Package Layer | accepted | 2026-05-26 |
+| [0022](0022-modular-performance-budget.md) | Modular Performance Budget | accepted | 2026-05-28 |
+| [0023](0023-lifecycle-otlp-and-runtime-instrumentation.md) | Lifecycle OTLP and Runtime Instrumentation Split | accepted | 2026-05-28 |
 
 ## Writing a new ADR
 

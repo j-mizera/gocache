@@ -19,7 +19,7 @@ ADR-0008 established a library-agnostic `PluginConfig` interface backed by viper
 
 2. **No plugin-owned config file.** A plugin that ships its own `aof.yaml` cannot load it through `PluginConfig`. The only config sources are the server's YAML file + env vars. Operators managing many plugins must edit the central config file for every plugin-specific knob.
 
-Lifecycle plugins (otlp, crashdump) use raw `os.Getenv()` in `BootInit` because they run before `config.Load()`. This is a timing constraint inherent to the embedded plugin lifecycle, not a design flaw — they need configuration before the config system exists.
+Lifecycle plugins (lifecycleotlp, crashdump) use raw `os.Getenv()` in `BootInit` because they run before `config.Load()`. This is a timing constraint inherent to the embedded plugin lifecycle, not a design flaw — they need configuration before the config system exists.
 
 ## Decision
 
@@ -63,10 +63,10 @@ Plugin declares a Go struct with `yaml:"..."` tags. Server decodes the plugin's 
 
 ### Alternative 3: Fully defer lifecycle plugin config to ConfigLoaded
 
-Originally considered impossible because `BootInit` runs before `config.Load()`. Revisited: crashdump's `BootInit` only stores config — all work happens in `ConfigLoaded`. So config reading can move entirely to `ConfigLoaded` using `PluginConfigFor`. OTLP's `BootInit` genuinely creates the exporter (timing constraint is real), so it keeps env-var bootstrap with `PluginConfig` registration in `ConfigLoaded` for consistency.
+Originally considered impossible because `BootInit` runs before `config.Load()`. Revisited: crashdump's `BootInit` only stores config — all work happens in `ConfigLoaded`. So config reading can move entirely to `ConfigLoaded` using `PluginConfigFor`. lifecycleotlp's `BootInit` genuinely creates the exporter (timing constraint is real), so it keeps env-var bootstrap with `PluginConfig` registration in `ConfigLoaded` for consistency.
 
 - **Adopted for crashdump**: full migration to PluginConfig in ConfigLoaded.
-- **Adopted for OTLP**: BootInit keeps `applyEnv()`; ConfigLoaded registers BindEnv + SetDefault so the config schema is documented and YAML-discoverable.
+- **Adopted for lifecycleotlp**: BootInit keeps `applyEnv()`; ConfigLoaded registers BindEnv + SetDefault so the config schema is documented and YAML-discoverable.
 
 ## Consequences
 
@@ -75,7 +75,7 @@ Originally considered impossible because `BootInit` runs before `config.Load()`.
 - Operators use ergonomic env var names: `GOCACHE_AOF_FILE` instead of `GOCACHE_PLUGINS_CONFIG_AOF_FILE`.
 - Plugins can ship their own config file as a self-contained default.
 - Test helper consolidation eliminates ~80 lines of duplicated `mapConfig` implementations.
-- Embedded plugins (crashdump, OTLP) use the same config pattern as persistence plugins — `SetDefault` + `BindEnv` + `Get*` via `PluginConfigFor`.
+- Embedded plugins (crashdump, lifecycleotlp) use the same config pattern as persistence plugins — `SetDefault` + `BindEnv` + `Get*` via `PluginConfigFor`.
 - `api/config.PluginConfigFor` gives all plugins a single entry point to their scoped config, regardless of plugin type.
 
 ### Negative

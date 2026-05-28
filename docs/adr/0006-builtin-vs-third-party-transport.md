@@ -19,8 +19,8 @@ related:
 
 Once persistence is pluggable (ADR-0001) with a Source/Sink contract (ADR-0002), the next question is *how* a plugin runs. Gocache already has two plugin transports:
 
-- **Embedded plugins** — compiled into the server binary, gated by Go build tags (e.g., `-tags crashdump,otlp`). Same process; no IPC overhead. Examples: `crashdump`, `otlp`. Activation is at build time.
-- **IPC plugins** — separate OS processes connected over Unix domain sockets, speaking GCPC v1 (Protobuf). Enabled via YAML at runtime. Example: `gobservability`. Crash isolation between server and plugin.
+- **Embedded plugins** — compiled into the server binary, gated by Go build tags (e.g., `-tags crashdump,lifecycleotlp`). Same process; no IPC overhead. Examples: `crashdump`, `lifecycleotlp`. Activation is at build time.
+- **IPC plugins** — separate OS processes connected over Unix domain sockets, speaking GCPC v1 (Protobuf). Enabled via YAML at runtime. Example: `prometheus`. Crash isolation between server and plugin.
 
 Persistence is unique among plugin domains because it sits squarely on the durability path. A snapshot or AOF crash that loses writes is much worse than a metrics-plugin crash that loses telemetry. At the same time, the third-party use cases enabled by ADR-0001 — Postgres-as-cache, Kafka archival, S3 replication — are exactly the cases where running an external connector in a separate process is the *right* shape (different runtime, different deploy cycle, different blast radius).
 
@@ -77,7 +77,7 @@ Default release builds include `snapshot` (matches the existing default behaviou
 
 - Built-in plugins crash the server if they crash. Snapshot/AOF code has to meet a higher reliability bar than the metrics plugin does.
 - Two transport paths means two test paths. The contract is shared, but the GCPC marshalling for IPC and the in-process direct call for embedded both need exercise.
-- Build matrix complexity: a release with `crashdump,otlp,snapshot,aof` is the "full" build; a release without any of these is the "minimal" build; users picking subsets get something in between. CI has to cover at least the corners.
+- Build matrix complexity: a release with `crashdump,lifecycleotlp,snapshot,aof` is the "full" build; a release without any of these is the "minimal" build; users picking subsets get something in between. CI has to cover at least the corners.
 
 ### Risks
 

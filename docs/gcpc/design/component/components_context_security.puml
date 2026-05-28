@@ -16,9 +16,9 @@ rectangle "Context Bag (map[string]string)" as ctx {
         component [auth.secret.api_key = "k"] as a2 #Pink
     }
 
-    rectangle "Plugin-Private: gobservability" as gobs #LightGreen {
-        component [gobservability.span_id = "x"] as g1
-        component [gobservability.secret.internal = "i"] as g2 #Pink
+    rectangle "Plugin-Private: instrumentation" as gobs #LightGreen {
+        component [instrumentation.span_id = "x"] as g1
+        component [instrumentation.secret.internal = "i"] as g2 #Pink
     }
 
     rectangle "Shared" as shared #LightYellow {
@@ -31,15 +31,15 @@ rectangle "Context Bag (map[string]string)" as ctx {
 
 rectangle "FilterForPlugin(ctx, \"auth\")" as filterAuth {
     component [Sees: _*, auth.*, shared.*] as fAuth
-    component [Hidden: gobservability.*] as fAuthHide #LightGray
+    component [Hidden: instrumentation.*] as fAuthHide #LightGray
 }
 
 rectangle "RedactSecrets(ctx)" as redact {
-    component [Keeps: _start_ns, _operation_id\nauth.cache_hit, shared.username\nshared.traceparent, gobservability.span_id] as rKeep
+    component [Keeps: _start_ns, _operation_id\nauth.cache_hit, shared.username\nshared.traceparent, instrumentation.span_id] as rKeep
     component [Strips: _secret.*, *.secret.*] as rStrip #Pink
 }
 
-rectangle "OTEL Export (gobservability plugin)" as otel {
+rectangle "External Export (instrumentation plugin)" as otel {
     component [Custom Properties:\nusername=john\ntraceparent=00-abc] as otelProps
     component [NEVER exported:\naccountId, jwt,\nsession, api_key] as otelRedact #Pink
 }
