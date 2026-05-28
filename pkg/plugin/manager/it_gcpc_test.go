@@ -93,6 +93,18 @@ func waitForSubscription(t *testing.T, bus *serverEvents.Bus, name string) {
 	t.Fatalf("subscription %q not registered within timeout", name)
 }
 
+func waitForOperationHooks(t *testing.T, mgr *Manager) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if mgr.opHookRegistry.HasAny() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("operation hooks not registered within timeout")
+}
+
 // setupManager creates a manager with a temp socket and returns it ready for connections.
 func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, *serverOps.Tracker, string) {
 	t.Helper()
@@ -215,10 +227,9 @@ func TestGCPC_OperationHook_Registration(t *testing.T) {
 		t.Fatalf("registration rejected: %s", ack.Reason)
 	}
 
-	// Verify operation hooks were registered.
-	if !mgr.opHookRegistry.HasAny() {
-		t.Fatal("expected operation hooks registered")
-	}
+	// Verify operation hooks were registered after the ack. Registration happens
+	// asynchronously after the handshake write returns.
+	waitForOperationHooks(t, mgr)
 
 	// Verify wildcard match works.
 	matches := mgr.opHookRegistry.Match(ops.TypeCommand)
