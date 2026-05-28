@@ -58,10 +58,10 @@ func TestRegistry_RegisterAndMatch(t *testing.T) {
 	defer c.Close()
 	defer s.Close()
 
-	pc := router.NewPluginConn("gobservability", s)
+	pc := router.NewPluginConn("prometheus", s)
 	defer pc.Close()
 
-	reg.Register("gobservability", 10, pc, []string{"*"})
+	reg.Register("prometheus", 10, pc, []string{"*"})
 
 	if !reg.HasAny() {
 		t.Error("expected HasAny=true")
@@ -71,8 +71,8 @@ func TestRegistry_RegisterAndMatch(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(matches))
 	}
-	if matches[0].PluginName != "gobservability" {
-		t.Errorf("expected gobservability, got %s", matches[0].PluginName)
+	if matches[0].PluginName != "prometheus" {
+		t.Errorf("expected prometheus, got %s", matches[0].PluginName)
 	}
 }
 

@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"gocache/api/command"
-	"gocache/commons/crashdump"
-	"gocache/sdk/embedded"
 	"gocache/api/events"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
+	"gocache/api/version"
+	"gocache/commons/crashdump"
+	"gocache/commons/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/bootstate"
 	"gocache/pkg/cache"
@@ -31,9 +31,9 @@ import (
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/plugin/ophooks"
 	"gocache/pkg/server"
-	"gocache/api/version"
 	"gocache/pkg/watch"
 	"gocache/pkg/workers"
+	"gocache/sdk/embedded"
 
 	// Embedded persistence plugin — registers itself via init() per
 	// ADR-0008 (config contract) and ADR-0006 (physical location under
@@ -48,10 +48,10 @@ import (
 	// package carries a tagless doc.go); the tag-gated file inside the
 	// package is what actually registers init(). Pick which ones by
 	// setting the PLUGINS build arg on the Docker image, or by passing
-	// -tags=crashdump,otlp to `go build` directly.
+	// -tags=crashdump,lifecycleotlp to `go build` directly.
 	_ "gocache/plugins/aof"
 	_ "gocache/plugins/crashdump"
-	_ "gocache/plugins/otlp"
+	_ "gocache/plugins/lifecycleotlp"
 
 	"github.com/spf13/pflag"
 )
@@ -77,13 +77,13 @@ const (
 	// Named boot stages written to the boot.state marker. A previous-run
 	// file that doesn't show StageRunning at startup means the prior
 	// process crashed at that stage.
-	stageEmbeddedBoot   = "embedded_boot"
-	stageConfigLoad     = "config_load"
-	stageCoreInit       = "core_init"
-	stagePluginLoad     = "plugin_load"
-	stageSnapshotLoad   = "snapshot_load"
-	stageWorkersStart   = "workers_start"
-	stageListenerStart  = "listener_start"
+	stageEmbeddedBoot  = "embedded_boot"
+	stageConfigLoad    = "config_load"
+	stageCoreInit      = "core_init"
+	stagePluginLoad    = "plugin_load"
+	stageSnapshotLoad  = "snapshot_load"
+	stageWorkersStart  = "workers_start"
+	stageListenerStart = "listener_start"
 )
 
 func main() {
@@ -142,7 +142,7 @@ func main() {
 	defer cancel()
 
 	// Embedded plugins run BEFORE config.Load so they can observe boot-time
-	// failures (e.g. a config parse error surfaces as an OTLP span). Defer
+	// failures (e.g. a config parse error surfaces as an lifecycle OTLP span). Defer
 	// ShutdownAll immediately so it fires on normal exit AND during a panic
 	// unwind — giving exporters a final flush even if main() crashes.
 	_ = bootstate.Write(bootStateFile, stageEmbeddedBoot)
@@ -184,7 +184,7 @@ func main() {
 	logger.InitWithWriter(logWriter, cfg.Server.LogLevel)
 
 	// Hand the parsed config to embedded plugins so they can upgrade
-	// env-var-only defaults with YAML-backed values (e.g. OTLP endpoint).
+	// env-var-only defaults with YAML-backed values (e.g. lifecycle OTLP endpoint).
 	cfgOp := ops.New(ops.TypeConfigReload, "")
 	cfgOp.Enrich("_boot_stage", "config_loaded")
 	embedded.ConfigLoadedAll(ops.WithContext(ctx, cfgOp), cfg)
@@ -240,20 +240,19 @@ func main() {
 		pluginManager.SetLogCollector(logCollector)
 		pluginManager.SetTracker(tracker)
 		pluginManager.SetClientPusher(srv.ConnRegistry())
+		pluginManager.SetEventBus(eventBus)
 		pluginmgr.RegisterOperationHandlers(pluginManager.QueryRegistry(), tracker)
 		if err := pluginManager.Start(ctx); err != nil {
 			logger.FatalNoCtx().Err(err).Msg("failed to start plugin manager")
 		}
-		pluginManager.SetEventBus(eventBus)
 		srv.SetPluginRouter(pluginManager.Router())
 		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
 		opHookExec = ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout)
 		opHookExec.SetTracker(tracker)
 		opHookExec.SetMinRestartInterval(cfg.Plugins.MinRestartIntervalForReplay)
 		// Replay synthesizes PhaseStart for every active op that started
-		// before this plugin joined, so late IPC subscribers (gobservability
-		// and kin) can reconstruct spans rooted at process start instead of
-		// at their own connect time.
+		// before an operation-hook plugin joined, so late subscribers can
+		// reconstruct operation state from the original process timeline.
 		pluginManager.OpHookRegistry().SetOnRegister(opHookExec.Replay)
 		srv.SetOpHookExecutor(opHookExec)
 	}
@@ -504,8 +503,8 @@ func handleShutdown(
 		logger.Warn(shutdownCtx).Err(err).Msg("server shutdown error")
 	}
 
-	// Fire operation complete hooks BEFORE shutting down plugins
-	// so gobservability can finalize the shutdown span.
+	// Fire operation complete hooks before shutting down plugins so
+	// subscribers can observe the shutdown marker.
 	if shutdownOp != nil && opHookExec != nil {
 		opHookExec.RunCompleteHooks(shutdownOp)
 	}
@@ -546,4 +545,3 @@ func handleShutdown(
 
 	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
 }
-

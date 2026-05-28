@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
+	"gocache/commons/logger"
 	"gocache/commons/transport"
 )
 
@@ -18,6 +18,7 @@ var (
 	ErrCommandNotFound = errors.New("unknown command")
 	ErrPluginDown      = errors.New("plugin connection unavailable")
 	ErrPluginTimeout   = errors.New("plugin command timed out")
+	ErrPluginQueueFull = errors.New("plugin outbound queue full")
 	ErrShadowCore      = errors.New("cannot shadow core command")
 	ErrDuplicateCmd    = errors.New("command already registered by another plugin")
 )
@@ -48,63 +49,121 @@ type RouteMeta struct {
 	ReadOnly bool
 }
 
+const pluginOutboundQueueSize = 1024
+
 // PluginConn wraps a transport.Conn with request/response multiplexing.
 // Multiple goroutines can send requests concurrently; responses are
 // correlated by request_id. Used by both the command router and hook executor.
 type PluginConn struct {
-	mu        sync.Mutex // serializes writes
 	conn      *transport.Conn
 	pending   sync.Map // map[requestID]chan *gcpc.EnvelopeV1
+	pendingMu sync.Mutex
+
+	sendMu     sync.Mutex
+	closed     bool
+	outbound   chan outboundEnvelope
+	writerDone chan struct{}
+
 	done      chan struct{}
 	closeOnce sync.Once
 	Name      string // plugin name for logging
 }
 
+type outboundEnvelope struct {
+	env   *gcpc.EnvelopeV1
+	errCh chan error
+}
+
 func NewPluginConn(name string, conn *transport.Conn) *PluginConn {
-	return &PluginConn{
-		conn: conn,
-		done: make(chan struct{}),
-		Name: name,
+	pc := &PluginConn{
+		conn:       conn,
+		outbound:   make(chan outboundEnvelope, pluginOutboundQueueSize),
+		writerDone: make(chan struct{}),
+		done:       make(chan struct{}),
+		Name:       name,
+	}
+	go pc.writeLoop()
+	return pc
+}
+
+func (pc *PluginConn) writeLoop() {
+	defer close(pc.writerDone)
+	for {
+		select {
+		case item := <-pc.outbound:
+			pc.writeOutbound(item)
+		case <-pc.done:
+			for {
+				select {
+				case item := <-pc.outbound:
+					pc.writeOutbound(item)
+				default:
+					return
+				}
+			}
+		}
 	}
 }
 
-// Send writes an envelope and returns a channel for the correlated response.
-// The write is done asynchronously so we can respect context cancellation
-// even if the plugin is slow to read.
+func (pc *PluginConn) writeOutbound(item outboundEnvelope) {
+	err := pc.conn.Send(item.env)
+	if item.errCh != nil {
+		item.errCh <- err
+	}
+}
+
+func (pc *PluginConn) enqueue(ctx context.Context, item outboundEnvelope) error {
+	pc.sendMu.Lock()
+	defer pc.sendMu.Unlock()
+
+	if pc.closed {
+		return ErrPluginDown
+	}
+
+	select {
+	case pc.outbound <- item:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return ErrPluginQueueFull
+	}
+}
+
+// Send enqueues an envelope for the per-plugin FIFO writer and returns a
+// channel for the correlated response after the frame has been accepted by the
+// transport. Context cancellation can still win if the plugin is slow to read.
 func (pc *PluginConn) Send(ctx context.Context, req *gcpc.EnvelopeV1, requestID string) (<-chan *gcpc.EnvelopeV1, error) {
 	ch := make(chan *gcpc.EnvelopeV1, 1)
-	pc.pending.Store(requestID, ch)
+	pc.storePending(requestID, ch)
 
-	// Async write to avoid blocking if plugin is slow to read.
 	errCh := make(chan error, 1)
-	go func() {
-		pc.mu.Lock()
-		err := pc.conn.Send(req)
-		pc.mu.Unlock()
-		errCh <- err
-	}()
+	if err := pc.enqueue(ctx, outboundEnvelope{env: req, errCh: errCh}); err != nil {
+		pc.DeletePending(requestID)
+		return nil, err
+	}
 
 	select {
 	case err := <-errCh:
 		if err != nil {
-			pc.pending.Delete(requestID)
+			pc.DeletePending(requestID)
 			return nil, err
 		}
 		return ch, nil
 	case <-ctx.Done():
-		pc.pending.Delete(requestID)
+		pc.DeletePending(requestID)
 		return nil, ctx.Err()
 	case <-pc.done:
-		pc.pending.Delete(requestID)
+		pc.DeletePending(requestID)
 		return nil, ErrPluginDown
 	}
 }
 
-// SendFireAndForget writes an envelope without waiting for a response.
+// SendFireAndForget enqueues an envelope without waiting for a response. If the
+// plugin is down or its outbound queue is full, the frame is dropped; callers
+// have no response path for these best-effort messages.
 func (pc *PluginConn) SendFireAndForget(env *gcpc.EnvelopeV1) {
-	pc.mu.Lock()
-	_ = pc.conn.Send(env)
-	pc.mu.Unlock()
+	_ = pc.enqueue(context.Background(), outboundEnvelope{env: env})
 }
 
 // StartReadLoop reads all incoming envelopes and dispatches responses
@@ -144,14 +203,21 @@ func (pc *PluginConn) StartReadLoop() {
 			continue // not a response type we handle
 		}
 
-		if ch, ok := pc.pending.LoadAndDelete(reqID); ok {
-			ch.(chan *gcpc.EnvelopeV1) <- env
-		}
+		pc.Deliver(reqID, env)
 	}
+}
+
+func (pc *PluginConn) storePending(requestID string, ch chan *gcpc.EnvelopeV1) {
+	pc.pendingMu.Lock()
+	pc.pending.Store(requestID, ch)
+	pc.pendingMu.Unlock()
 }
 
 // drainPending closes all pending channels so waiters unblock.
 func (pc *PluginConn) drainPending() {
+	pc.pendingMu.Lock()
+	defer pc.pendingMu.Unlock()
+
 	pc.pending.Range(func(key, value any) bool {
 		close(value.(chan *gcpc.EnvelopeV1))
 		pc.pending.Delete(key)
@@ -163,6 +229,9 @@ func (pc *PluginConn) drainPending() {
 // request ID. Called by the manager's read loop to route response types
 // (CommandResponse, HookResponse, OperationHookResponse) to their waiters.
 func (pc *PluginConn) Deliver(requestID string, env *gcpc.EnvelopeV1) {
+	pc.pendingMu.Lock()
+	defer pc.pendingMu.Unlock()
+
 	if ch, ok := pc.pending.LoadAndDelete(requestID); ok {
 		ch.(chan *gcpc.EnvelopeV1) <- env
 	}
@@ -172,11 +241,16 @@ func (pc *PluginConn) Deliver(requestID string, env *gcpc.EnvelopeV1) {
 // Safe to call multiple times.
 func (pc *PluginConn) Close() {
 	pc.closeOnce.Do(func() {
+		pc.sendMu.Lock()
+		pc.closed = true
 		close(pc.done)
-		pc.drainPending()
+		pc.sendMu.Unlock()
+
 		if pc.conn != nil {
 			_ = pc.conn.Close()
 		}
+		<-pc.writerDone
+		pc.drainPending()
 	})
 }
 
@@ -187,7 +261,9 @@ func (pc *PluginConn) Done() <-chan struct{} {
 
 // DeletePending removes a pending request (used for cleanup on timeout).
 func (pc *PluginConn) DeletePending(requestID string) {
+	pc.pendingMu.Lock()
 	pc.pending.Delete(requestID)
+	pc.pendingMu.Unlock()
 }
 
 // Router maps command names to plugin connections and handles IPC dispatch.
@@ -377,7 +453,7 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 		}
 		return gcpc.InterfaceFromResult(cmdResp.Result), cmdResp.SuppressResponse, nil
 	case <-ctx.Done():
-		pc.pending.Delete(requestID)
+		pc.DeletePending(requestID)
 		return nil, false, ErrPluginTimeout
 	}
 }
