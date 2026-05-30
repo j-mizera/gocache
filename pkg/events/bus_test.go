@@ -53,14 +53,14 @@ func TestBus_MultipleSubscribers(t *testing.T) {
 	bus := NewBus()
 	var count1, count2 atomic.Int32
 
-	bus.Subscribe("sub1", []apiEvents.Type{apiEvents.CommandPost}, func(evt apiEvents.Event) {
+	bus.Subscribe("sub1", []apiEvents.Type{apiEvents.CommandCompleted}, func(evt apiEvents.Event) {
 		count1.Add(1)
 	})
-	bus.Subscribe("sub2", []apiEvents.Type{apiEvents.CommandPost}, func(evt apiEvents.Event) {
+	bus.Subscribe("sub2", []apiEvents.Type{apiEvents.CommandCompleted}, func(evt apiEvents.Event) {
 		count2.Add(1)
 	})
 
-	bus.Emit(apiEvents.NewCommandPost("SET", []string{"k", "v"}, 1000, "OK", "", nil))
+	bus.Emit(apiEvents.NewCommandCompleted("SET", []string{"k", "v"}, 1000, "OK", "", nil))
 
 	if count1.Load() != 1 || count2.Load() != 1 {
 		t.Errorf("expected both subscribers to receive: sub1=%d, sub2=%d", count1.Load(), count2.Load())
@@ -104,6 +104,44 @@ func TestBus_HasSubscribers(t *testing.T) {
 // counter semantics that the evaluator's sink-aware fast path relies on:
 // double-subscribe must not double-count, and unknown-name Unsubscribe must
 // not drive the counter negative.
+func TestBus_HasSubscribersForTracksEventTypes(t *testing.T) {
+	bus := NewBus()
+	noop := func(apiEvents.Event) {}
+
+	if bus.HasSubscribersFor(apiEvents.CommandCompleted) {
+		t.Fatal("expected no command.completed interest before subscribe")
+	}
+
+	bus.Subscribe("logs", []apiEvents.Type{apiEvents.LogEntry}, noop)
+	if bus.HasSubscribersFor(apiEvents.CommandCompleted) {
+		t.Fatal("log-only subscriber must not create command.completed interest")
+	}
+	if !bus.HasSubscribersFor(apiEvents.LogEntry) {
+		t.Fatal("expected log.entry interest")
+	}
+
+	bus.Subscribe("metrics", []apiEvents.Type{apiEvents.CommandCompleted}, noop)
+	if !bus.HasSubscribersFor(apiEvents.CommandCompleted) {
+		t.Fatal("expected command.completed interest")
+	}
+
+	bus.Subscribe("metrics", []apiEvents.Type{apiEvents.OperationCompleted}, noop)
+	if bus.HasSubscribersFor(apiEvents.CommandCompleted) {
+		t.Fatal("updated subscription must remove stale command.completed interest")
+	}
+	if !bus.HasSubscribersFor(apiEvents.OperationCompleted) {
+		t.Fatal("expected operation.completed interest after update")
+	}
+
+	bus.Unsubscribe("metrics")
+	if bus.HasSubscribersFor(apiEvents.OperationCompleted) {
+		t.Fatal("unsubscribe must remove operation.completed interest")
+	}
+	if !bus.HasSubscribersFor(apiEvents.LogEntry) {
+		t.Fatal("unrelated log.entry interest should remain")
+	}
+}
+
 func TestBus_HasSubscribers_AtomicCounterInvariants(t *testing.T) {
 	bus := NewBus()
 	noop := func(apiEvents.Event) {}
@@ -154,7 +192,7 @@ func TestBus_ConcurrentEmit(t *testing.T) {
 	bus := NewBus()
 	var received atomic.Int32
 
-	bus.Subscribe("counter", []apiEvents.Type{apiEvents.CommandPost}, func(evt apiEvents.Event) {
+	bus.Subscribe("counter", []apiEvents.Type{apiEvents.CommandCompleted}, func(evt apiEvents.Event) {
 		received.Add(1)
 	})
 
@@ -163,7 +201,7 @@ func TestBus_ConcurrentEmit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			bus.Emit(apiEvents.NewCommandPost("PING", nil, 100, "PONG", "", nil))
+			bus.Emit(apiEvents.NewCommandCompleted("PING", nil, 100, "PONG", "", nil))
 		}()
 	}
 	wg.Wait()
