@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	apicommand "gocache/api/command"
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
-	apicommand "gocache/api/command"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -39,7 +39,8 @@ type mockHookExecutor struct {
 	lastHookCtx map[string]string
 }
 
-func (m *mockHookExecutor) HasAny() bool { return m.hasAny }
+func (m *mockHookExecutor) HasAny() bool                           { return m.hasAny }
+func (m *mockHookExecutor) HasHooksForCommand(command string) bool { return m.hasAny }
 func (m *mockHookExecutor) RunPreHooks(_ context.Context, _ *gcpc.CommandInfoV1, _ *gcpc.ConnectionInfoV1, hookCtx map[string]string) *apicommand.PreHookResult {
 	m.lastHookCtx = hookCtx
 	return m.preResult
@@ -57,7 +58,8 @@ type mockOpHookExecutor struct {
 	enrichOnStart  map[string]string // context values to add during start
 }
 
-func (m *mockOpHookExecutor) HasAny() bool { return m.hasAny }
+func (m *mockOpHookExecutor) HasAny() bool                          { return m.hasAny }
+func (m *mockOpHookExecutor) HasOperationType(opType ops.Type) bool { return m.hasAny }
 func (m *mockOpHookExecutor) RunStartHooks(_ context.Context, op *ops.Operation) {
 	m.startCalled.Add(1)
 	m.lastOp.Store(op)
@@ -81,7 +83,8 @@ func (m *mockEmitter) Emit(evt apiEvents.Event) {
 	m.events = append(m.events, evt)
 }
 
-func (m *mockEmitter) HasSubscribers() bool { return true }
+func (m *mockEmitter) HasSubscribers() bool                           { return true }
+func (m *mockEmitter) HasSubscribersFor(types ...apiEvents.Type) bool { return true }
 
 // --- Tests ---
 
@@ -221,7 +224,7 @@ func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
 	ctx := clientctx.New()
 	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
-	// Should have: operation.start, command.pre, command.post, operation.complete
+	// Should have: operation.started, command.started, command.completed, operation.completed
 	if len(emitter.events) < 4 {
 		t.Fatalf("expected at least 4 events, got %d", len(emitter.events))
 	}
@@ -233,10 +236,10 @@ func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
 
 	// Verify order.
 	expectedOrder := []string{
-		string(apiEvents.OperationStart),
-		string(apiEvents.CommandPre),
-		string(apiEvents.CommandPost),
-		string(apiEvents.OperationComplete),
+		string(apiEvents.OperationStarted),
+		string(apiEvents.CommandStarted),
+		string(apiEvents.CommandCompleted),
+		string(apiEvents.OperationCompleted),
 	}
 	for i, expected := range expectedOrder {
 		if i >= len(types) {
@@ -443,7 +446,7 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 
 	// Find the operation.complete event and check elapsed_ns > 0.
 	for _, evt := range emitter.events {
-		if evt.Proto.Type == string(apiEvents.OperationComplete) {
+		if evt.Proto.Type == string(apiEvents.OperationCompleted) {
 			data := evt.Proto.GetOperationComplete()
 			if data == nil {
 				t.Fatal("expected OperationCompleteEventV1")

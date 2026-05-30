@@ -56,7 +56,7 @@ func TestFastPath_BusEmitter_RoutesToSlowPath(t *testing.T) {
 	}
 
 	// Slow path emits 4 events per command (op.start, command.pre,
-	// command.post, op.complete) → 4n events total.
+	// command.completed, op.completed) → 4n events total.
 	if want, got := 4*n, len(emitter.events); want != got {
 		t.Errorf("events captured: want %d, got %d", want, got)
 	}
@@ -125,6 +125,24 @@ func TestFastPath_OpHookExecutor_RoutesToSlowPath(t *testing.T) {
 // updated under the same write lock that mutates the underlying maps. So
 // once Subscribe / Register returns, all subsequent evaluator calls see
 // the new state.
+func TestFastPath_LogOnlySubscriberKeepsCommandFastPath(t *testing.T) {
+	eval, e, tracker := newTestPipeline()
+	defer e.Stop()
+
+	bus := events.NewBus()
+	eval.SetEmitter(bus)
+	bus.Subscribe("logs", []apiEvents.Type{apiEvents.LogEntry}, func(apiEvents.Event) {})
+
+	ctx := clientctx.New()
+	res := eval.Evaluate(context.Background(), ctx, "PING", nil)
+	if res.Value != "PONG" {
+		t.Fatalf("want PONG, got %v", res.Value)
+	}
+	if got := tracker.SkippedCount(); got != 1 {
+		t.Fatalf("log-only subscriber should keep command on fast path; skipped=%d", got)
+	}
+}
+
 func TestFastPath_MidStreamSubscribe(t *testing.T) {
 	eval, e, tracker := newTestPipeline()
 	defer e.Stop()
@@ -146,8 +164,8 @@ func TestFastPath_MidStreamSubscribe(t *testing.T) {
 	// Attach a subscriber. From now on every command must take the slow path.
 	var captured int
 	bus.Subscribe("test", []apiEvents.Type{
-		apiEvents.OperationStart, apiEvents.OperationComplete,
-		apiEvents.CommandPre, apiEvents.CommandPost,
+		apiEvents.OperationStarted, apiEvents.OperationCompleted,
+		apiEvents.CommandStarted, apiEvents.CommandCompleted,
 	}, func(_ apiEvents.Event) { captured++ })
 
 	const afterN = 3
