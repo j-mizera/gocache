@@ -1,0 +1,51 @@
+@startuml components_async_event_delivery
+!include ../../../design/theme.iuml
+
+title Async Event Delivery Components
+
+package "Core command path" {
+  component "Pipeline / Server\n(event producers)" as Producer
+  component "Event interest checks\n(type/class masks)" as Masks
+}
+
+package "Server event layer" {
+  component "Event Bus" as Bus
+  database "Replay Ring\n(lifecycle/control)" as Ring
+  component "Plugin Event Bridge\n(filter + enqueue)" as Bridge
+}
+
+package "Plugin routing" {
+  queue "Critical traffic\nRPC/hooks/evaluators" as CriticalQ
+  queue "Best-effort event traffic\nruntime telemetry" as EventQ
+  component "PluginConn writer" as Writer
+  component "GCPC transport\nUDS + protobuf" as Transport
+}
+
+package "IPC plugin process" {
+  component "Plugin SDK\nevent dispatcher" as SDK
+  component "Prometheus / other plugin\nsubscriber" as Plugin
+}
+
+Producer --> Masks : ask before building event
+Masks --> Bus : emit requested event only
+Bus --> Ring : retain replayable classes
+Bus --> Bridge : live subscriber callback
+Bridge --> CriticalQ : reaction/control traffic
+Bridge --> EventQ : async runtime events
+CriticalQ --> Writer
+EventQ --> Writer
+Writer --> Transport : serialized frames
+Transport --> SDK
+SDK --> Plugin : HandleEvent / batch dispatch
+
+note right of Producer
+Events are observational.
+They cannot deny or mutate command results.
+end note
+
+note right of EventQ
+Overflow is allowed only for async event traffic
+and must increment visible drop/lag counters.
+end note
+
+@enduml

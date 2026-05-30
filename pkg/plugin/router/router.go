@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
@@ -67,11 +69,63 @@ type PluginConn struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	Name      string // plugin name for logging
+	stats     pluginConnStats
+}
+
+type pluginConnStats struct {
+	sendAttempts               atomic.Uint64
+	sendAccepted               atomic.Uint64
+	sendQueueFull              atomic.Uint64
+	sendPluginDown             atomic.Uint64
+	sendContextCancelled       atomic.Uint64
+	blockingSendAttempts       atomic.Uint64
+	blockingSendLatencyTotalNs atomic.Uint64
+	blockingSendLatencyMaxNs   atomic.Uint64
+	fireAndForgetAttempts      atomic.Uint64
+	fireAndForgetAccepted      atomic.Uint64
+	fireAndForgetDrops         atomic.Uint64
+	enqueueLatencyTotalNs      atomic.Uint64
+	enqueueLatencyMaxNs        atomic.Uint64
+	writeAttempts              atomic.Uint64
+	writeErrors                atomic.Uint64
+	writeLatencyTotalNs        atomic.Uint64
+	writeLatencyMaxNs          atomic.Uint64
+	queueLagTotalNs            atomic.Uint64
+	queueLagMaxNs              atomic.Uint64
+}
+
+// PluginConnStats is a point-in-time snapshot of one plugin connection's
+// outbound IPC queue and writer measurements. Counters are monotonic since the
+// connection was created; queue depth is sampled at snapshot time.
+type PluginConnStats struct {
+	PluginName                 string
+	QueueCapacity              int
+	QueueDepth                 int
+	SendAttempts               uint64
+	SendAccepted               uint64
+	SendQueueFull              uint64
+	SendPluginDown             uint64
+	SendContextCancelled       uint64
+	BlockingSendAttempts       uint64
+	BlockingSendLatencyTotalNs uint64
+	BlockingSendLatencyMaxNs   uint64
+	FireAndForgetAttempts      uint64
+	FireAndForgetAccepted      uint64
+	FireAndForgetDrops         uint64
+	EnqueueLatencyTotalNs      uint64
+	EnqueueLatencyMaxNs        uint64
+	WriteAttempts              uint64
+	WriteErrors                uint64
+	WriteLatencyTotalNs        uint64
+	WriteLatencyMaxNs          uint64
+	QueueLagTotalNs            uint64
+	QueueLagMaxNs              uint64
 }
 
 type outboundEnvelope struct {
-	env   *gcpc.EnvelopeV1
-	errCh chan error
+	env        *gcpc.EnvelopeV1
+	errCh      chan error
+	enqueuedAt time.Time
 }
 
 func NewPluginConn(name string, conn *transport.Conn) *PluginConn {
@@ -106,26 +160,60 @@ func (pc *PluginConn) writeLoop() {
 }
 
 func (pc *PluginConn) writeOutbound(item outboundEnvelope) {
+	if !item.enqueuedAt.IsZero() {
+		observeDuration(&pc.stats.queueLagTotalNs, &pc.stats.queueLagMaxNs, time.Since(item.enqueuedAt))
+	}
+	pc.stats.writeAttempts.Add(1)
+	start := time.Now()
 	err := pc.conn.Send(item.env)
+	observeDuration(&pc.stats.writeLatencyTotalNs, &pc.stats.writeLatencyMaxNs, time.Since(start))
+	if err != nil {
+		pc.stats.writeErrors.Add(1)
+	}
 	if item.errCh != nil {
 		item.errCh <- err
 	}
 }
 
 func (pc *PluginConn) enqueue(ctx context.Context, item outboundEnvelope) error {
+	pc.stats.sendAttempts.Add(1)
+	if item.errCh == nil {
+		pc.stats.fireAndForgetAttempts.Add(1)
+	}
+	start := time.Now()
 	pc.sendMu.Lock()
 	defer pc.sendMu.Unlock()
+	defer func() {
+		observeDuration(&pc.stats.enqueueLatencyTotalNs, &pc.stats.enqueueLatencyMaxNs, time.Since(start))
+	}()
 
 	if pc.closed {
+		pc.stats.sendPluginDown.Add(1)
+		if item.errCh == nil {
+			pc.stats.fireAndForgetDrops.Add(1)
+		}
 		return ErrPluginDown
 	}
 
+	item.enqueuedAt = time.Now()
 	select {
 	case pc.outbound <- item:
+		pc.stats.sendAccepted.Add(1)
+		if item.errCh == nil {
+			pc.stats.fireAndForgetAccepted.Add(1)
+		}
 		return nil
 	case <-ctx.Done():
+		pc.stats.sendContextCancelled.Add(1)
+		if item.errCh == nil {
+			pc.stats.fireAndForgetDrops.Add(1)
+		}
 		return ctx.Err()
 	default:
+		pc.stats.sendQueueFull.Add(1)
+		if item.errCh == nil {
+			pc.stats.fireAndForgetDrops.Add(1)
+		}
 		return ErrPluginQueueFull
 	}
 }
@@ -134,6 +222,12 @@ func (pc *PluginConn) enqueue(ctx context.Context, item outboundEnvelope) error 
 // channel for the correlated response after the frame has been accepted by the
 // transport. Context cancellation can still win if the plugin is slow to read.
 func (pc *PluginConn) Send(ctx context.Context, req *gcpc.EnvelopeV1, requestID string) (<-chan *gcpc.EnvelopeV1, error) {
+	pc.stats.blockingSendAttempts.Add(1)
+	start := time.Now()
+	defer func() {
+		observeDuration(&pc.stats.blockingSendLatencyTotalNs, &pc.stats.blockingSendLatencyMaxNs, time.Since(start))
+	}()
+
 	ch := make(chan *gcpc.EnvelopeV1, 1)
 	pc.storePending(requestID, ch)
 
@@ -164,6 +258,46 @@ func (pc *PluginConn) Send(ctx context.Context, req *gcpc.EnvelopeV1, requestID 
 // have no response path for these best-effort messages.
 func (pc *PluginConn) SendFireAndForget(env *gcpc.EnvelopeV1) {
 	_ = pc.enqueue(context.Background(), outboundEnvelope{env: env})
+}
+
+// Stats returns a point-in-time snapshot of outbound queue and write-loop
+// measurements for this plugin connection.
+func (pc *PluginConn) Stats() PluginConnStats {
+	return PluginConnStats{
+		PluginName:                 pc.Name,
+		QueueCapacity:              cap(pc.outbound),
+		QueueDepth:                 len(pc.outbound),
+		SendAttempts:               pc.stats.sendAttempts.Load(),
+		SendAccepted:               pc.stats.sendAccepted.Load(),
+		SendQueueFull:              pc.stats.sendQueueFull.Load(),
+		SendPluginDown:             pc.stats.sendPluginDown.Load(),
+		SendContextCancelled:       pc.stats.sendContextCancelled.Load(),
+		BlockingSendAttempts:       pc.stats.blockingSendAttempts.Load(),
+		BlockingSendLatencyTotalNs: pc.stats.blockingSendLatencyTotalNs.Load(),
+		BlockingSendLatencyMaxNs:   pc.stats.blockingSendLatencyMaxNs.Load(),
+		FireAndForgetAttempts:      pc.stats.fireAndForgetAttempts.Load(),
+		FireAndForgetAccepted:      pc.stats.fireAndForgetAccepted.Load(),
+		FireAndForgetDrops:         pc.stats.fireAndForgetDrops.Load(),
+		EnqueueLatencyTotalNs:      pc.stats.enqueueLatencyTotalNs.Load(),
+		EnqueueLatencyMaxNs:        pc.stats.enqueueLatencyMaxNs.Load(),
+		WriteAttempts:              pc.stats.writeAttempts.Load(),
+		WriteErrors:                pc.stats.writeErrors.Load(),
+		WriteLatencyTotalNs:        pc.stats.writeLatencyTotalNs.Load(),
+		WriteLatencyMaxNs:          pc.stats.writeLatencyMaxNs.Load(),
+		QueueLagTotalNs:            pc.stats.queueLagTotalNs.Load(),
+		QueueLagMaxNs:              pc.stats.queueLagMaxNs.Load(),
+	}
+}
+
+func observeDuration(total, max *atomic.Uint64, d time.Duration) {
+	ns := uint64(d.Nanoseconds())
+	total.Add(ns)
+	for {
+		current := max.Load()
+		if ns <= current || max.CompareAndSwap(current, ns) {
+			return
+		}
+	}
 }
 
 // StartReadLoop reads all incoming envelopes and dispatches responses
@@ -297,6 +431,25 @@ func (r *Router) GetPluginConn(name string) *PluginConn {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.plugins[name]
+}
+
+// PluginStats returns queue and writer measurements for every known plugin
+// connection, sorted by plugin name for stable query output and tests.
+func (r *Router) PluginStats() []PluginConnStats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make([]string, 0, len(r.plugins))
+	for name := range r.plugins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	stats := make([]PluginConnStats, 0, len(names))
+	for _, name := range names {
+		stats = append(stats, r.plugins[name].Stats())
+	}
+	return stats
 }
 
 // RegisterPlugin registers all commands declared by a plugin.

@@ -2,11 +2,13 @@ package manager
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
 
 	ops "gocache/api/operations"
+	"gocache/pkg/plugin/router"
 )
 
 // ServerStateProvider is the interface the plugin manager uses to query
@@ -65,13 +67,21 @@ func (r *QueryRegistry) Topics() []string {
 	return topics
 }
 
+// PluginIPCStatsProvider returns point-in-time IPC measurements for plugin
+// connections. The manager supplies this from its connection map so event-only
+// plugins are visible even when they do not register commands with the router.
+type PluginIPCStatsProvider func() []router.PluginConnStats
+
 // RegisterBuiltinHandlers registers the built-in query topics on the registry.
-func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, sp ServerStateProvider) {
+func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, ipcStats PluginIPCStatsProvider, sp ServerStateProvider) {
 	if sp != nil {
 		qr.Register("health", healthHandler(sp))
 		qr.Register("stats", statsHandler(sp))
 	}
 	qr.Register("plugins", pluginsHandler(registry))
+	if ipcStats != nil {
+		qr.Register("plugin.ipc", pluginIPCHandler(ipcStats))
+	}
 }
 
 func healthHandler(sp ServerStateProvider) QueryHandlerFunc {
@@ -109,6 +119,54 @@ func pluginsHandler(registry *Registry) QueryHandlerFunc {
 		}
 		return data, nil
 	}
+}
+
+func pluginIPCHandler(ipcStats PluginIPCStatsProvider) QueryHandlerFunc {
+	return func(_ map[string]string) (map[string]string, error) {
+		stats := ipcStats()
+		data := make(map[string]string, len(stats)*21)
+		for _, st := range stats {
+			prefix := st.PluginName + "."
+			data[prefix+"queue_capacity"] = strconv.Itoa(st.QueueCapacity)
+			data[prefix+"queue_depth"] = strconv.Itoa(st.QueueDepth)
+			data[prefix+"send_attempts"] = strconv.FormatUint(st.SendAttempts, 10)
+			data[prefix+"send_accepted"] = strconv.FormatUint(st.SendAccepted, 10)
+			data[prefix+"send_queue_full"] = strconv.FormatUint(st.SendQueueFull, 10)
+			data[prefix+"send_plugin_down"] = strconv.FormatUint(st.SendPluginDown, 10)
+			data[prefix+"send_context_cancelled"] = strconv.FormatUint(st.SendContextCancelled, 10)
+			data[prefix+"blocking_send_attempts"] = strconv.FormatUint(st.BlockingSendAttempts, 10)
+			data[prefix+"blocking_send_latency_total_ns"] = strconv.FormatUint(st.BlockingSendLatencyTotalNs, 10)
+			data[prefix+"blocking_send_latency_max_ns"] = strconv.FormatUint(st.BlockingSendLatencyMaxNs, 10)
+			data[prefix+"fire_and_forget_attempts"] = strconv.FormatUint(st.FireAndForgetAttempts, 10)
+			data[prefix+"fire_and_forget_accepted"] = strconv.FormatUint(st.FireAndForgetAccepted, 10)
+			data[prefix+"fire_and_forget_drops"] = strconv.FormatUint(st.FireAndForgetDrops, 10)
+			data[prefix+"enqueue_latency_total_ns"] = strconv.FormatUint(st.EnqueueLatencyTotalNs, 10)
+			data[prefix+"enqueue_latency_max_ns"] = strconv.FormatUint(st.EnqueueLatencyMaxNs, 10)
+			data[prefix+"write_attempts"] = strconv.FormatUint(st.WriteAttempts, 10)
+			data[prefix+"write_errors"] = strconv.FormatUint(st.WriteErrors, 10)
+			data[prefix+"write_latency_total_ns"] = strconv.FormatUint(st.WriteLatencyTotalNs, 10)
+			data[prefix+"write_latency_max_ns"] = strconv.FormatUint(st.WriteLatencyMaxNs, 10)
+			data[prefix+"queue_lag_total_ns"] = strconv.FormatUint(st.QueueLagTotalNs, 10)
+			data[prefix+"queue_lag_max_ns"] = strconv.FormatUint(st.QueueLagMaxNs, 10)
+		}
+		return data, nil
+	}
+}
+
+func (m *Manager) pluginIPCStats() []router.PluginConnStats {
+	var stats []router.PluginConnStats
+	m.pluginConns.Range(func(_, value any) bool {
+		pc, ok := value.(*router.PluginConn)
+		if !ok {
+			return true
+		}
+		stats = append(stats, pc.Stats())
+		return true
+	})
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].PluginName < stats[j].PluginName
+	})
+	return stats
 }
 
 // OperationTracker is the subset of pkg/operations.Tracker needed by

@@ -1,0 +1,45 @@
+@startuml sequence_pipelined_event_batching
+!include ../../../design/theme.iuml
+
+title Pipelined Command Execution with Batched Event Delivery
+
+actor Client
+participant "Server Connection" as Conn
+participant "runBatch" as Batch
+participant "Pipeline" as Pipeline
+participant "Event Bus" as EventBus
+participant "Plugin Event Queue" as Queue
+participant "GCPC Writer" as Writer
+participant "IPC Plugin SDK" as SDK
+
+Client -> Conn : command A\ncommand B\ncommand C (pipelined)
+Conn -> Batch : collect available commands
+Batch -> Pipeline : EvaluatePreLocked(A)
+Pipeline --> Conn : result A
+Pipeline -> EventBus : command.post(A)
+EventBus -> Queue : enqueue event A
+Batch -> Pipeline : EvaluatePreLocked(B)
+Pipeline --> Conn : result B
+Pipeline -> EventBus : command.post(B)
+EventBus -> Queue : enqueue event B
+Batch -> Pipeline : EvaluatePreLocked(C)
+Pipeline --> Conn : result C
+Pipeline -> EventBus : command.post(C)
+EventBus -> Queue : enqueue event C
+Conn --> Client : ordered replies A, B, C
+
+Queue -> Writer : flush event batch [A,B,C]
+Writer -> SDK : GCPC EventBatchV1 or compatible batch
+SDK -> SDK : dispatch per-event records
+
+note over Conn,Pipeline
+RESP pipelining remains N commands with N ordered replies.
+Event batching is transport-only.
+end note
+
+note over Queue,Writer
+Batch limits: max count, max bytes, max delay.
+Overflow/gaps must be visible.
+end note
+
+@enduml

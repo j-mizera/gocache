@@ -2,7 +2,7 @@
 title: Performance
 description: Per-shard locking arc — shipped optimizations, measured deltas, and what's still on the table
 status: living
-last_updated: 2026-05-28
+last_updated: 2026-05-29
 related:
   - Audit-per-shard-arc-summary
   - Audit-go-bench-vs-docker-gap
@@ -79,7 +79,7 @@ Some costs are the price of the architecture and won't come back without un-shar
 
 ## What's still on the table
 
-The active performance priority is now the modular overhead arc: reduce IPC, runtime instrumentation, lifecycle OTLP, and Pub/Sub regressions without giving up the plugin-isolation model. The sequence is captured in [Modular Overhead Optimization Plan](modular-overhead-optimization-plan.md): per-plugin FIFO writer loop, event-only runtime instrumentation, GCPC stream topology evaluation, GCPC allocation/correlation cleanup, then Pub/Sub push batching or a specialized built-in data-plane if generic push remains over budget.
+The active performance priority is now the modular overhead arc: reduce IPC, runtime instrumentation, lifecycle OTLP, and Pub/Sub regressions without giving up the plugin-isolation model. The sequence is captured in [Modular Overhead Optimization Plan](modular-overhead-optimization-plan.md): per-plugin FIFO writer loop, event-only runtime instrumentation, GCPC stream topology evaluation, GCPC allocation/correlation cleanup, then Pub/Sub push batching or a specialized built-in data-plane if generic push remains over budget. The async event IPC measurement kickoff is tracked in [Async Event IPC Phase 1A](async-event-ipc-phase-1a.md).
 
 Older command-flow levers remain separate from the modular-overhead work:
 

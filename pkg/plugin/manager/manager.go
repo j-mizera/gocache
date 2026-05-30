@@ -43,6 +43,26 @@ type ClientPusher interface {
 	Push(connectionID string, data []byte) error
 }
 
+type eventBridgeMode string
+
+const (
+	eventBridgeModeFull      eventBridgeMode = "full"
+	eventBridgeModeBridgeOff eventBridgeMode = "bridge-off"
+
+	benchEventBridgeModeEnv = "GOCACHE_BENCH_EVENT_BRIDGE_MODE"
+)
+
+func benchEventBridgeMode() eventBridgeMode {
+	switch os.Getenv(benchEventBridgeModeEnv) {
+	case "", string(eventBridgeModeFull):
+		return eventBridgeModeFull
+	case string(eventBridgeModeBridgeOff):
+		return eventBridgeModeBridgeOff
+	default:
+		return eventBridgeModeFull
+	}
+}
+
 // Manager handles plugin lifecycle: discovery, fork/exec, registration,
 // health monitoring, restart, and graceful shutdown.
 //
@@ -78,8 +98,7 @@ type Manager struct {
 func NewManager(cfg plugin.PluginsConfig, coreCommands []string, stateProvider ServerStateProvider) *Manager {
 	reg := NewRegistry()
 	qr := NewQueryRegistry()
-	RegisterBuiltinHandlers(qr, reg, stateProvider)
-	return &Manager{
+	mgr := &Manager{
 		cfg:            cfg,
 		registry:       reg,
 		router:         router.NewRouter(coreCommands),
@@ -88,6 +107,8 @@ func NewManager(cfg plugin.PluginsConfig, coreCommands []string, stateProvider S
 		scopeRegistry:  permissions.NewRegistry(),
 		queryRegistry:  qr,
 	}
+	RegisterBuiltinHandlers(qr, reg, mgr.pluginIPCStats, stateProvider)
+	return mgr
 }
 
 // Router returns the command router for use by the evaluator.
@@ -690,7 +711,14 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 			// bus on plugin reads; overloaded plugins drop best-effort telemetry.
 			pluginConn := pc
 			pluginName := inst.Name
+			bridgeMode := benchEventBridgeMode()
+			if bridgeMode == eventBridgeModeBridgeOff {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("benchmark event bridge mode active: dropping events before IPC enqueue")
+			}
 			m.eventBus.Subscribe("plugin:"+inst.Name, types, func(evt events.Event) {
+				if bridgeMode == eventBridgeModeBridgeOff {
+					return
+				}
 				cloned := proto.Clone(evt.Proto).(*gcpcv1.EventV1)
 				filterEventContext(cloned, pluginName)
 				gcpcEnv := &gcpcv1.EnvelopeV1{

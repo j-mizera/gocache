@@ -53,6 +53,10 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0021](0021-commons-package-layer.md) | Introduce commons/ Package Layer | accepted | 2026-05-26 |
 | [0022](0022-modular-performance-budget.md) | Modular Performance Budget | accepted | 2026-05-28 |
 | [0023](0023-lifecycle-otlp-and-runtime-instrumentation.md) | Lifecycle OTLP and Runtime Instrumentation Split | accepted | 2026-05-28 |
+| [0024](0024-async-event-delivery-and-command-reaction-points.md) | Async Event Delivery and Command Reaction Points | proposed | 2026-05-29 |
+| [0025](0025-connection-evaluators-and-connection-events.md) | Connection Evaluators and Connection Events | proposed | 2026-05-29 |
+| [0026](0026-event-traffic-classes-and-backpressure.md) | Event Traffic Classes and Backpressure | proposed | 2026-05-29 |
+| [0027](0027-event-replay-cursors-and-gaps.md) | Event Replay, Cursors, and Gaps | proposed | 2026-05-29 |
 
 ## Writing a new ADR
 
