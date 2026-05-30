@@ -1,0 +1,17 @@
+label=continuation
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=a26f91960414d0674f92cd2e5d120e4437d953cc
+gocache_branch=perf/pipelined-ipc-observability
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=31279022
+post_standard_rss_bytes=143340339
+final_rss_bytes=148268646
+delta_rss_bytes=116989624
