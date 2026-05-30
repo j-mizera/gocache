@@ -57,6 +57,7 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0025](0025-connection-evaluators-and-connection-events.md) | Connection Evaluators and Connection Events | proposed | 2026-05-29 |
 | [0026](0026-event-traffic-classes-and-backpressure.md) | Event Traffic Classes and Backpressure | proposed | 2026-05-29 |
 | [0027](0027-event-replay-cursors-and-gaps.md) | Event Replay, Cursors, and Gaps | proposed | 2026-05-29 |
+| [0028](0028-operation-observability-and-log-records.md) | Operation Observability and Log Records | proposed | 2026-05-30 |
 
 ## Writing a new ADR
 
