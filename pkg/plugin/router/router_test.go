@@ -526,6 +526,200 @@ func TestPluginConnFireAndForgetFIFO(t *testing.T) {
 	}
 }
 
+func TestPluginConnWriteOutboundBatchPreservesFrameOrderAndStats(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	pc := &PluginConn{
+		conn: serverConn,
+		Name: "audit",
+	}
+	batch := []outboundEnvelope{
+		{env: gcpc.NewHealthCheck()},
+		{env: gcpc.NewOperationHookRequest("req-1", "op_1", "command", "", "complete", nil)},
+		{build: func() *gcpc.EnvelopeV1 {
+			return gcpc.NewOperationHookRequest("req-2", "op_2", "command", "", "complete", nil)
+		}},
+	}
+
+	errCh := make(chan struct{}, 1)
+	go func() {
+		pc.writeOutboundBatch(batch)
+		close(errCh)
+	}()
+
+	if env, err := clientConn.Recv(); err != nil {
+		t.Fatalf("recv health: %v", err)
+	} else if env.GetHealthCheck() == nil {
+		t.Fatalf("first envelope is %T, want HealthCheck", env.Payload)
+	}
+	for i, wantReqID := range []string{"req-1", "req-2"} {
+		env, err := clientConn.Recv()
+		if err != nil {
+			t.Fatalf("recv operation hook %d: %v", i, err)
+		}
+		req := env.GetOperationHookRequest()
+		if req == nil {
+			t.Fatalf("envelope %d is %T, want OperationHookRequest", i+1, env.Payload)
+		}
+		if req.RequestId != wantReqID {
+			t.Fatalf("request_id=%q, want %q", req.RequestId, wantReqID)
+		}
+	}
+	<-errCh
+
+	stats := pc.Stats()
+	if stats.WriteAttempts != 3 {
+		t.Fatalf("WriteAttempts=%d, want 3", stats.WriteAttempts)
+	}
+	if stats.WriteBatches != 1 {
+		t.Fatalf("WriteBatches=%d, want 1", stats.WriteBatches)
+	}
+	if stats.WriteBatchEnvelopes != 3 {
+		t.Fatalf("WriteBatchEnvelopes=%d, want 3", stats.WriteBatchEnvelopes)
+	}
+	if stats.WriteBatchMaxSize != 3 {
+		t.Fatalf("WriteBatchMaxSize=%d, want 3", stats.WriteBatchMaxSize)
+	}
+}
+
+func TestPluginConnWriteOutboundBatchSkipsNilFireAndForgetEnvelope(t *testing.T) {
+	serverConn, clientConn := testPipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	pc := &PluginConn{
+		conn: serverConn,
+		Name: "audit",
+	}
+	blockingErrCh := make(chan error, 1)
+	batch := []outboundEnvelope{
+		{build: func() *gcpc.EnvelopeV1 { return nil }},
+		{env: gcpc.NewOperationHookRequest("req-valid", "op_1", "command", "", "complete", nil), errCh: blockingErrCh},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		pc.writeOutboundBatch(batch)
+		close(done)
+	}()
+
+	env, err := clientConn.Recv()
+	if err != nil {
+		t.Fatalf("recv valid envelope: %v", err)
+	}
+	req := env.GetOperationHookRequest()
+	if req == nil {
+		t.Fatalf("received %T, want OperationHookRequest", env.Payload)
+	}
+	if req.RequestId != "req-valid" {
+		t.Fatalf("request_id=%q, want req-valid", req.RequestId)
+	}
+
+	<-done
+	if err := <-blockingErrCh; err != nil {
+		t.Fatalf("valid blocking item error=%v, want nil", err)
+	}
+	stats := pc.Stats()
+	if stats.WriteAttempts != 2 {
+		t.Fatalf("WriteAttempts=%d, want 2", stats.WriteAttempts)
+	}
+	if stats.WriteErrors != 1 {
+		t.Fatalf("WriteErrors=%d, want 1 nil-envelope error", stats.WriteErrors)
+	}
+	if stats.WriteBatchEnvelopes != 1 {
+		t.Fatalf("WriteBatchEnvelopes=%d, want 1", stats.WriteBatchEnvelopes)
+	}
+	if stats.WriteBatchMaxSize != 1 {
+		t.Fatalf("WriteBatchMaxSize=%d, want 1", stats.WriteBatchMaxSize)
+	}
+}
+
+func TestPluginConnWriteOutboundBatchReturnsErrorForNilBlockingEnvelope(t *testing.T) {
+	pc := &PluginConn{Name: "audit"}
+	errCh := make(chan error, 1)
+
+	pc.writeOutboundBatch([]outboundEnvelope{{errCh: errCh}})
+
+	if err := <-errCh; !errors.Is(err, errNilOutboundEnvelope) {
+		t.Fatalf("blocking nil envelope error=%v, want errNilOutboundEnvelope", err)
+	}
+	stats := pc.Stats()
+	if stats.WriteAttempts != 1 {
+		t.Fatalf("WriteAttempts=%d, want 1", stats.WriteAttempts)
+	}
+	if stats.WriteErrors != 1 {
+		t.Fatalf("WriteErrors=%d, want 1", stats.WriteErrors)
+	}
+	if stats.WriteBatchEnvelopes != 0 {
+		t.Fatalf("WriteBatchEnvelopes=%d, want 0", stats.WriteBatchEnvelopes)
+	}
+}
+
+func TestPluginConnCollectBatchFlushesWhenBlockingSendArrives(t *testing.T) {
+	pc := &PluginConn{
+		outbound: make(chan outboundEnvelope, pluginOutboundBatchMax),
+		done:     make(chan struct{}),
+		Name:     "metrics",
+	}
+	blockingErrCh := make(chan error, 1)
+	resultCh := make(chan []outboundEnvelope, 1)
+
+	start := time.Now()
+	go func() {
+		resultCh <- pc.collectBatchWithDelay(outboundEnvelope{env: gcpc.NewHealthCheck()}, 500*time.Millisecond)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	pc.outbound <- outboundEnvelope{env: gcpc.NewHealthCheck(), errCh: blockingErrCh}
+
+	select {
+	case batch := <-resultCh:
+		if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
+			t.Fatalf("collectBatch returned after %v, want prompt flush before telemetry delay", elapsed)
+		}
+		if len(batch) != 2 {
+			t.Fatalf("len(batch)=%d, want 2", len(batch))
+		}
+		if batch[1].errCh != blockingErrCh {
+			t.Fatal("blocking envelope was not preserved in the collected batch")
+		}
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("collectBatch waited for telemetry delay after blocking send arrived")
+	}
+}
+
+func TestPluginConnLazyFireAndForgetSkipsBuildWhenQueueFull(t *testing.T) {
+	pc := &PluginConn{
+		outbound: make(chan outboundEnvelope, 1),
+		done:     make(chan struct{}),
+		Name:     "metrics",
+	}
+
+	built := 0
+	builder := func() *gcpc.EnvelopeV1 {
+		built++
+		return gcpc.NewHealthCheck()
+	}
+	pc.SendFireAndForgetLazy(builder)
+	pc.SendFireAndForgetLazy(builder)
+
+	if built != 0 {
+		t.Fatalf("lazy builder ran during enqueue/drop: built=%d", built)
+	}
+	stats := pc.Stats()
+	if stats.SendAccepted != 1 {
+		t.Fatalf("SendAccepted=%d, want 1", stats.SendAccepted)
+	}
+	if stats.SendQueueFull != 1 {
+		t.Fatalf("SendQueueFull=%d, want 1", stats.SendQueueFull)
+	}
+	if stats.FireAndForgetDrops != 1 {
+		t.Fatalf("FireAndForgetDrops=%d, want 1", stats.FireAndForgetDrops)
+	}
+}
+
 func TestPluginConnStatsTracksFireAndForgetDrops(t *testing.T) {
 	pc := &PluginConn{
 		outbound: make(chan outboundEnvelope, 1),

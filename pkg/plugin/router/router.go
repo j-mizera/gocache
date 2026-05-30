@@ -23,6 +23,8 @@ var (
 	ErrPluginQueueFull = errors.New("plugin outbound queue full")
 	ErrShadowCore      = errors.New("cannot shadow core command")
 	ErrDuplicateCmd    = errors.New("command already registered by another plugin")
+
+	errNilOutboundEnvelope = errors.New("nil outbound envelope")
 )
 
 // requestSeq is a package-private monotonic counter; callers outside the
@@ -51,7 +53,11 @@ type RouteMeta struct {
 	ReadOnly bool
 }
 
-const pluginOutboundQueueSize = 1024
+const (
+	pluginOutboundQueueSize     = 1024
+	pluginOutboundBatchMax      = 32
+	pluginOutboundBatchMaxDelay = 200 * time.Microsecond
+)
 
 // PluginConn wraps a transport.Conn with request/response multiplexing.
 // Multiple goroutines can send requests concurrently; responses are
@@ -88,6 +94,9 @@ type pluginConnStats struct {
 	enqueueLatencyMaxNs        atomic.Uint64
 	writeAttempts              atomic.Uint64
 	writeErrors                atomic.Uint64
+	writeBatches               atomic.Uint64
+	writeBatchEnvelopes        atomic.Uint64
+	writeBatchMaxSize          atomic.Uint64
 	writeLatencyTotalNs        atomic.Uint64
 	writeLatencyMaxNs          atomic.Uint64
 	queueLagTotalNs            atomic.Uint64
@@ -116,6 +125,9 @@ type PluginConnStats struct {
 	EnqueueLatencyMaxNs        uint64
 	WriteAttempts              uint64
 	WriteErrors                uint64
+	WriteBatches               uint64
+	WriteBatchEnvelopes        uint64
+	WriteBatchMaxSize          uint64
 	WriteLatencyTotalNs        uint64
 	WriteLatencyMaxNs          uint64
 	QueueLagTotalNs            uint64
@@ -124,8 +136,19 @@ type PluginConnStats struct {
 
 type outboundEnvelope struct {
 	env        *gcpc.EnvelopeV1
+	build      func() *gcpc.EnvelopeV1
 	errCh      chan error
 	enqueuedAt time.Time
+}
+
+func (item outboundEnvelope) envelope() *gcpc.EnvelopeV1 {
+	if item.env != nil {
+		return item.env
+	}
+	if item.build != nil {
+		return item.build()
+	}
+	return nil
 }
 
 func NewPluginConn(name string, conn *transport.Conn) *PluginConn {
@@ -145,12 +168,12 @@ func (pc *PluginConn) writeLoop() {
 	for {
 		select {
 		case item := <-pc.outbound:
-			pc.writeOutbound(item)
+			pc.writeOutboundBatch(pc.collectBatch(item))
 		case <-pc.done:
 			for {
 				select {
 				case item := <-pc.outbound:
-					pc.writeOutbound(item)
+					pc.writeOutboundBatch(pc.collectBatch(item))
 				default:
 					return
 				}
@@ -159,19 +182,116 @@ func (pc *PluginConn) writeLoop() {
 	}
 }
 
-func (pc *PluginConn) writeOutbound(item outboundEnvelope) {
-	if !item.enqueuedAt.IsZero() {
-		observeDuration(&pc.stats.queueLagTotalNs, &pc.stats.queueLagMaxNs, time.Since(item.enqueuedAt))
+func (pc *PluginConn) collectBatch(first outboundEnvelope) []outboundEnvelope {
+	return pc.collectBatchWithDelay(first, pluginOutboundBatchMaxDelay)
+}
+
+func (pc *PluginConn) collectBatchWithDelay(first outboundEnvelope, maxDelay time.Duration) []outboundEnvelope {
+	batch := make([]outboundEnvelope, 0, pluginOutboundBatchMax)
+	batch = append(batch, first)
+
+	hasBlocking := first.errCh != nil
+	batch, drainedBlocking := pc.drainAvailable(batch)
+	hasBlocking = hasBlocking || drainedBlocking
+	if hasBlocking || len(batch) == pluginOutboundBatchMax || pc.doneClosed() {
+		return batch
 	}
-	pc.stats.writeAttempts.Add(1)
+
+	timer := time.NewTimer(maxDelay)
+	defer timer.Stop()
+	for len(batch) < pluginOutboundBatchMax {
+		select {
+		case item := <-pc.outbound:
+			batch = append(batch, item)
+			if item.errCh != nil {
+				batch, _ = pc.drainAvailable(batch)
+				return batch
+			}
+		case <-timer.C:
+			batch, _ = pc.drainAvailable(batch)
+			return batch
+		case <-pc.done:
+			batch, _ = pc.drainAvailable(batch)
+			return batch
+		}
+	}
+	return batch
+}
+
+func (pc *PluginConn) drainAvailable(batch []outboundEnvelope) ([]outboundEnvelope, bool) {
+	hasBlocking := false
+	for len(batch) < pluginOutboundBatchMax {
+		select {
+		case item := <-pc.outbound:
+			if item.errCh != nil {
+				hasBlocking = true
+			}
+			batch = append(batch, item)
+		default:
+			return batch, hasBlocking
+		}
+	}
+	return batch, hasBlocking
+}
+
+func (pc *PluginConn) doneClosed() bool {
+	select {
+	case <-pc.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (pc *PluginConn) writeOutboundBatch(batch []outboundEnvelope) {
+	if len(batch) == 0 {
+		return
+	}
+
+	envs := make([]*gcpc.EnvelopeV1, 0, len(batch))
+	nilEnvelopes := 0
+	for i := range batch {
+		item := &batch[i]
+		if !item.enqueuedAt.IsZero() {
+			observeDuration(&pc.stats.queueLagTotalNs, &pc.stats.queueLagMaxNs, time.Since(item.enqueuedAt))
+		}
+		env := item.envelope()
+		if env == nil {
+			nilEnvelopes++
+			continue
+		}
+		item.env = env
+		item.build = nil
+		envs = append(envs, env)
+	}
+
+	pc.stats.writeAttempts.Add(uint64(len(batch)))
+	pc.stats.writeBatches.Add(1)
+	pc.stats.writeBatchEnvelopes.Add(uint64(len(envs)))
+	observeMax(&pc.stats.writeBatchMaxSize, uint64(len(envs)))
+
 	start := time.Now()
-	err := pc.conn.Send(item.env)
-	observeDuration(&pc.stats.writeLatencyTotalNs, &pc.stats.writeLatencyMaxNs, time.Since(start))
-	if err != nil {
-		pc.stats.writeErrors.Add(1)
+	var writeErr error
+	if len(envs) == 1 {
+		writeErr = pc.conn.Send(envs[0])
+	} else if len(envs) > 1 {
+		writeErr = pc.conn.SendBatch(envs)
 	}
-	if item.errCh != nil {
-		item.errCh <- err
+	observeDuration(&pc.stats.writeLatencyTotalNs, &pc.stats.writeLatencyMaxNs, time.Since(start))
+	if writeErr != nil {
+		pc.stats.writeErrors.Add(uint64(len(envs)))
+	}
+	if nilEnvelopes > 0 {
+		pc.stats.writeErrors.Add(uint64(nilEnvelopes))
+	}
+	for _, item := range batch {
+		if item.errCh != nil {
+			if item.env == nil {
+				item.errCh <- errNilOutboundEnvelope
+				continue
+			}
+			item.errCh <- writeErr
+		}
 	}
 }
 
@@ -260,6 +380,17 @@ func (pc *PluginConn) SendFireAndForget(env *gcpc.EnvelopeV1) {
 	_ = pc.enqueue(context.Background(), outboundEnvelope{env: env})
 }
 
+// SendFireAndForgetLazy enqueues a best-effort envelope builder. The builder is
+// evaluated by the FIFO writer only after the frame has been accepted into the
+// outbound queue, so overloaded IPC plugins can drop observability frames
+// without paying projection/protobuf-envelope construction costs first.
+func (pc *PluginConn) SendFireAndForgetLazy(build func() *gcpc.EnvelopeV1) {
+	if build == nil {
+		return
+	}
+	_ = pc.enqueue(context.Background(), outboundEnvelope{build: build})
+}
+
 // Stats returns a point-in-time snapshot of outbound queue and write-loop
 // measurements for this plugin connection.
 func (pc *PluginConn) Stats() PluginConnStats {
@@ -282,6 +413,9 @@ func (pc *PluginConn) Stats() PluginConnStats {
 		EnqueueLatencyMaxNs:        pc.stats.enqueueLatencyMaxNs.Load(),
 		WriteAttempts:              pc.stats.writeAttempts.Load(),
 		WriteErrors:                pc.stats.writeErrors.Load(),
+		WriteBatches:               pc.stats.writeBatches.Load(),
+		WriteBatchEnvelopes:        pc.stats.writeBatchEnvelopes.Load(),
+		WriteBatchMaxSize:          pc.stats.writeBatchMaxSize.Load(),
 		WriteLatencyTotalNs:        pc.stats.writeLatencyTotalNs.Load(),
 		WriteLatencyMaxNs:          pc.stats.writeLatencyMaxNs.Load(),
 		QueueLagTotalNs:            pc.stats.queueLagTotalNs.Load(),
@@ -292,9 +426,13 @@ func (pc *PluginConn) Stats() PluginConnStats {
 func observeDuration(total, max *atomic.Uint64, d time.Duration) {
 	ns := uint64(d.Nanoseconds())
 	total.Add(ns)
+	observeMax(max, ns)
+}
+
+func observeMax(max *atomic.Uint64, value uint64) {
 	for {
 		current := max.Load()
-		if ns <= current || max.CompareAndSwap(current, ns) {
+		if value <= current || max.CompareAndSwap(current, value) {
 			return
 		}
 	}
