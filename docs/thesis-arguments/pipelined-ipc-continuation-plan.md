@@ -10,6 +10,14 @@ Evidence anchor: `bench/results/heavy-event-hotpath-20260530/summary.md`.
 
 The current PR should be treated as a successful checkpoint for producer-side observability gating and measurement coverage. Further pipelined IPC improvements should be a continuation PR, not folded into this checkpoint.
 
+## Continuation implementation result
+
+The first continuation branch implemented normal-frame GCPC batching, lazy fire-and-forget envelope construction, per-plugin outbound writer statistics, and a bounded 200 µs telemetry-only batch collection window. Evidence is stored in `bench/results/pipelined-ipc-observability-20260530/summary.md`.
+
+Result: delayed batching improved the IPC Prometheus path versus the PR #89 IPC anchor (`+13.89%` pipelined geometric-mean RPS, `-6.07%` p99) and versus the first no-delay continuation capture (`+20.66%` pipelined RPS, `-10.48%` p99). It does **not** close the thesis-visible pipelined IPC gap: delayed IPC full remains `-51.35%` geometric-mean RPS versus Valkey and `-42.19%` versus the current GoCache core capture in pipelined mode.
+
+Updated conclusion: lower-level frame batching is useful but insufficient. The next optimization should focus on reducing per-command event volume for metrics-only consumers, coarser Prometheus aggregation, and cheaper event projection before considering protocol-level batch messages or stream-topology work.
+
 ## Planned continuation PR scope
 
 ### 1. Batch GCPC event delivery
