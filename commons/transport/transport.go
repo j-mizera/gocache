@@ -39,25 +39,50 @@ func NewConn(c net.Conn) *Conn {
 
 // Send marshals the envelope and writes it as a length-prefixed frame.
 func (c *Conn) Send(env *gcpc.EnvelopeV1) error {
-	data, err := proto.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("marshal envelope: %w", err)
-	}
-	if len(data) > MaxFrameSize {
-		return ErrFrameTooLarge
+	return c.SendBatch([]*gcpc.EnvelopeV1{env})
+}
+
+// SendBatch marshals envelopes and writes their length-prefixed frames with one
+// locked write. The wire format remains a stream of normal GCPC frames, so
+// receivers continue to call Recv once per envelope while bursty producers avoid
+// one syscall per frame.
+func (c *Conn) SendBatch(envs []*gcpc.EnvelopeV1) error {
+	if len(envs) == 0 {
+		return nil
 	}
 
-	header := make([]byte, frameHeaderSize)
-	binary.BigEndian.PutUint32(header, uint32(len(data)))
+	frames := make([][]byte, len(envs))
+	total := 0
+	for i, env := range envs {
+		data, err := proto.Marshal(env)
+		if err != nil {
+			return fmt.Errorf("marshal envelope: %w", err)
+		}
+		if len(data) > MaxFrameSize {
+			return ErrFrameTooLarge
+		}
+		frames[i] = data
+		total += frameHeaderSize + len(data)
+	}
+
+	buf := make([]byte, total)
+	offset := 0
+	for _, data := range frames {
+		binary.BigEndian.PutUint32(buf[offset:offset+frameHeaderSize], uint32(len(data)))
+		offset += frameHeaderSize
+		copy(buf[offset:offset+len(data)], data)
+		offset += len(data)
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if _, err := c.conn.Write(header); err != nil {
-		return fmt.Errorf("write frame header: %w", err)
+	n, err := c.conn.Write(buf)
+	if err != nil {
+		return fmt.Errorf("write frame batch: %w", err)
 	}
-	if _, err := c.conn.Write(data); err != nil {
-		return fmt.Errorf("write frame payload: %w", err)
+	if n != len(buf) {
+		return io.ErrShortWrite
 	}
 	return nil
 }
