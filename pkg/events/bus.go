@@ -18,7 +18,6 @@ import (
 	"gocache/commons/logger"
 )
 
-
 // Handler is a function that processes an event. Must be non-blocking.
 type Handler func(apiEvents.Event)
 
@@ -33,6 +32,7 @@ type Subscription struct {
 type Bus struct {
 	mu          sync.RWMutex
 	subscribers map[string]*Subscription
+	typeCounts  map[apiEvents.Type]int
 	ring        *ring
 
 	// subCount mirrors len(subscribers) for the lock-free HasSubscribers
@@ -41,6 +41,11 @@ type Bus struct {
 	// lock cost on every command. The eventual-consistency window is
 	// ≤ a single Subscribe/Unsubscribe call.
 	subCount atomic.Int32
+
+	// interestMask mirrors typeCounts for known event types. It lets command
+	// producers ask whether a specific event type has subscribers before they
+	// allocate protobuf payloads or context snapshots.
+	interestMask atomic.Uint64
 }
 
 // NewBus creates a server-wide event bus with the default replay capacity.
@@ -54,6 +59,7 @@ func NewBus() *Bus {
 func NewBusWithCapacity(capacity int) *Bus {
 	return &Bus{
 		subscribers: make(map[string]*Subscription),
+		typeCounts:  make(map[apiEvents.Type]int),
 		ring:        newRing(capacity),
 	}
 }
@@ -74,12 +80,16 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 	}
 
 	b.mu.Lock()
-	_, existed := b.subscribers[name]
+	previous, existed := b.subscribers[name]
+	if existed {
+		b.applyTypeDeltaLocked(previous.Types, -1)
+	}
 	b.subscribers[name] = &Subscription{
 		Name:    name,
 		Types:   typeSet,
 		Handler: handler,
 	}
+	b.applyTypeDeltaLocked(typeSet, 1)
 	if !existed {
 		b.subCount.Add(1)
 	}
@@ -120,7 +130,8 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 // Unsubscribe removes a subscriber.
 func (b *Bus) Unsubscribe(name string) {
 	b.mu.Lock()
-	if _, ok := b.subscribers[name]; ok {
+	if sub, ok := b.subscribers[name]; ok {
+		b.applyTypeDeltaLocked(sub.Types, -1)
 		delete(b.subscribers, name)
 		b.subCount.Add(-1)
 	}
@@ -187,4 +198,81 @@ func (b *Bus) HasSubscriber(name string) bool {
 // that mutates the map.
 func (b *Bus) HasSubscribers() bool {
 	return b.subCount.Load() > 0
+}
+
+// HasSubscribersFor reports whether any subscriber is interested in at least
+// one of the given event types. Known event types are checked with a lock-free
+// bitmask so command producers can skip event-specific payload construction.
+func (b *Bus) HasSubscribersFor(types ...apiEvents.Type) bool {
+	mask := b.interestMask.Load()
+	if mask == 0 {
+		return false
+	}
+	for _, eventType := range types {
+		bit := eventTypeBit(eventType)
+		if bit == 0 {
+			return b.HasSubscribers()
+		}
+		if mask&bit != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bus) applyTypeDeltaLocked(types map[apiEvents.Type]bool, delta int) {
+	if len(types) == 0 || delta == 0 {
+		return
+	}
+	mask := b.interestMask.Load()
+	for eventType := range types {
+		count := b.typeCounts[eventType] + delta
+		if count <= 0 {
+			delete(b.typeCounts, eventType)
+			mask &^= eventTypeBit(eventType)
+			continue
+		}
+		b.typeCounts[eventType] = count
+		mask |= eventTypeBit(eventType)
+	}
+	b.interestMask.Store(mask)
+}
+
+func eventTypeBit(eventType apiEvents.Type) uint64 {
+	switch eventType {
+	case apiEvents.CommandStarted:
+		return 1 << 0
+	case apiEvents.CommandCompleted:
+		return 1 << 1
+	case apiEvents.ConnectionOpen:
+		return 1 << 2
+	case apiEvents.ConnectionClose:
+		return 1 << 3
+	case apiEvents.ServerStart:
+		return 1 << 4
+	case apiEvents.ServerShutdown:
+		return 1 << 5
+	case apiEvents.PluginRegistered:
+		return 1 << 6
+	case apiEvents.PluginCrashed:
+		return 1 << 7
+	case apiEvents.PluginRestarted:
+		return 1 << 8
+	case apiEvents.ConfigReloaded:
+		return 1 << 9
+	case apiEvents.AuthFailed:
+		return 1 << 10
+	case apiEvents.CacheEviction:
+		return 1 << 11
+	case apiEvents.LogEntry:
+		return 1 << 12
+	case apiEvents.OperationStarted:
+		return 1 << 13
+	case apiEvents.OperationCompleted:
+		return 1 << 14
+	case apiEvents.ReplayGap:
+		return 1 << 15
+	default:
+		return 0
+	}
 }
