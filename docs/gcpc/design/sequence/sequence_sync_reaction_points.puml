@@ -1,0 +1,50 @@
+@startuml sequence_sync_reaction_points
+!include ../../../design/theme.iuml
+
+title Synchronous Reaction Points vs Async Events
+
+actor Client
+participant "Server Connection" as Conn
+participant "Pipeline" as Pipeline
+participant "Command Hook Executor" as CmdHooks
+participant "Connection Evaluator" as ConnEval
+participant "IPC Plugin" as Plugin
+participant "Event Bus" as EventBus
+
+== Connection admission ==
+Client -> Conn : open TCP connection
+Conn -> ConnEval : connection.start/evaluate
+ConnEval -> Plugin : GCPC evaluator request
+Plugin --> ConnEval : allow/deny/enrich/close
+alt denied
+  ConnEval --> Conn : deny/close
+  Conn -> EventBus : emit connection.close/drop event (async)
+else allowed
+  ConnEval --> Conn : install session/context
+  Conn -> EventBus : emit connection.open event (async)
+end
+
+== Command reaction ==
+Client -> Conn : RESP command
+Conn -> Pipeline : Evaluate(command)
+Pipeline -> CmdHooks : command.pre
+CmdHooks -> Plugin : blocking hook request
+Plugin --> CmdHooks : allow/deny/enrich
+alt denied
+  Pipeline --> Conn : error reply
+  Pipeline -> EventBus : command.post event (async observation)
+else allowed
+  Pipeline -> Pipeline : execute command
+  Pipeline -> CmdHooks : command.post if response/order semantics require sync reaction
+  CmdHooks -> Plugin : optional blocking post hook
+  Plugin --> CmdHooks : reaction result
+  Pipeline --> Conn : ordered RESP reply
+  Pipeline -> EventBus : command.post event (async observation)
+end
+
+note over EventBus
+Events report what happened.
+They do not affect admission, command result, or reply ordering.
+end note
+
+@enduml

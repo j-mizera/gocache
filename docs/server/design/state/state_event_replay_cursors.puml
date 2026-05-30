@@ -1,0 +1,39 @@
+@startuml state_event_replay_cursors
+!include ../../../design/theme.iuml
+
+title Event Replay, Cursor, and Gap States
+
+[*] --> NoSubscriber
+
+NoSubscriber --> LiveSubscriber : subscribe(live-only)
+NoSubscriber --> ReplaySubscriber : subscribe(replayable class)
+NoSubscriber --> CursorSubscriber : subscribe(cursor runtime class)
+
+ReplaySubscriber --> ReplayingHistory : snapshot bounded ring
+ReplayingHistory --> LiveSubscriber : replay complete
+ReplayingHistory --> GapReported : ring overflow detected
+GapReported --> LiveSubscriber : deliver gap marker + continue live
+
+CursorSubscriber --> CursorActive : assign cursor/sequence
+CursorActive --> CursorLagging : consumer falls behind
+CursorLagging --> GapReported : queue/ring overflow or skipped range
+CursorLagging --> CursorActive : catches up
+
+LiveSubscriber --> DroppingEvents : best-effort queue full
+DroppingEvents --> LiveSubscriber : increment drop counter / coalesce gap
+
+LiveSubscriber --> [*] : unsubscribe/disconnect
+CursorActive --> [*] : unsubscribe/disconnect
+ReplaySubscriber --> [*] : unsubscribe/disconnect
+
+note right of ReplaySubscriber
+Lifecycle/control events are candidates
+for eager bounded replay.
+end note
+
+note right of CursorSubscriber
+High-rate runtime telemetry uses
+cursors/gaps, not guaranteed full replay.
+end note
+
+@enduml
