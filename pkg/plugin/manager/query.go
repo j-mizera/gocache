@@ -124,7 +124,7 @@ func pluginsHandler(registry *Registry) QueryHandlerFunc {
 func pluginIPCHandler(ipcStats PluginIPCStatsProvider) QueryHandlerFunc {
 	return func(_ map[string]string) (map[string]string, error) {
 		stats := ipcStats()
-		data := make(map[string]string, len(stats)*21)
+		data := make(map[string]string, len(stats)*24)
 		for _, st := range stats {
 			prefix := st.PluginName + "."
 			data[prefix+"queue_capacity"] = strconv.Itoa(st.QueueCapacity)
@@ -144,6 +144,9 @@ func pluginIPCHandler(ipcStats PluginIPCStatsProvider) QueryHandlerFunc {
 			data[prefix+"enqueue_latency_max_ns"] = strconv.FormatUint(st.EnqueueLatencyMaxNs, 10)
 			data[prefix+"write_attempts"] = strconv.FormatUint(st.WriteAttempts, 10)
 			data[prefix+"write_errors"] = strconv.FormatUint(st.WriteErrors, 10)
+			data[prefix+"write_batches"] = strconv.FormatUint(st.WriteBatches, 10)
+			data[prefix+"write_batch_envelopes"] = strconv.FormatUint(st.WriteBatchEnvelopes, 10)
+			data[prefix+"write_batch_max_size"] = strconv.FormatUint(st.WriteBatchMaxSize, 10)
 			data[prefix+"write_latency_total_ns"] = strconv.FormatUint(st.WriteLatencyTotalNs, 10)
 			data[prefix+"write_latency_max_ns"] = strconv.FormatUint(st.WriteLatencyMaxNs, 10)
 			data[prefix+"queue_lag_total_ns"] = strconv.FormatUint(st.QueueLagTotalNs, 10)

@@ -717,12 +717,14 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 				if bridgeMode == eventBridgeModeBridgeOff {
 					return
 				}
-				projected := projectEventForPlugin(evt.Proto, pluginName)
-				gcpcEnv := &gcpcv1.EnvelopeV1{
-					Version: gcpcv1.ProtocolVersion,
-					Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
-				}
-				pluginConn.SendFireAndForget(gcpcEnv)
+				evtProto := evt.Proto
+				pluginConn.SendFireAndForgetLazy(func() *gcpcv1.EnvelopeV1 {
+					projected := projectEventForPlugin(evtProto, pluginName)
+					return &gcpcv1.EnvelopeV1{
+						Version: gcpcv1.ProtocolVersion,
+						Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
+					}
+				})
 			})
 		case *gcpcv1.EnvelopeV1_ServerQuery:
 			query := env.GetServerQuery()
