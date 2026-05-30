@@ -9,11 +9,12 @@ import (
 	"sync"
 	"time"
 
+	apicommand "gocache/api/command"
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
-	apicommand "gocache/api/command"
+	"gocache/commons/logger"
+	"gocache/commons/resp"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -21,7 +22,6 @@ import (
 	"gocache/pkg/engine"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
-	"gocache/commons/resp"
 	resphandler "gocache/pkg/resp/handler"
 	"gocache/pkg/rex"
 	rexhandler "gocache/pkg/rex/handler"
@@ -59,6 +59,7 @@ func putCmdCtx(c *command.Context) {
 // Defined here to avoid an import cycle with pkg/plugin/ophooks.
 type OpHookExecutor interface {
 	HasAny() bool
+	HasOperationType(opType ops.Type) bool
 	RunStartHooks(ctx context.Context, op *ops.Operation)
 	RunCompleteHooks(op *ops.Operation)
 }
@@ -85,7 +86,7 @@ type Pipeline struct {
 	emitter            events.Emitter
 	tracker            *serverOps.Tracker
 	opHookExecutor     OpHookExecutor
-	persistenceFeed command.MutationEmitter
+	persistenceFeed    command.MutationEmitter
 }
 
 func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Pipeline {
@@ -265,7 +266,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// The handler still receives a real *ops.Operation in opCtx so logger
 	// correlation works; the operation is simply never registered, enriched,
 	// emitted, or hook-fired.
-	if !b.hasAnySink() {
+	if !b.hasAnySink(op) {
 		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
 	}
 
@@ -296,14 +297,18 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	opCtx := ops.WithContext(parentCtx, cmdOp)
 
 	// Fire operation start hooks (synchronous — enriches context before work).
-	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
+	if b.hasCommandOperationHookSink() {
 		b.opHookExecutor.RunStartHooks(opCtx, cmdOp)
 	}
 
-	// Emit operation.start + command.pre events.
+	// Emit operation.started + command.started events only for interested subscribers.
 	if b.emitter != nil {
-		b.emitter.Emit(events.NewOperationStart(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, cmdOp.ContextSnapshot(false)))
-		b.emitter.Emit(events.NewCommandPre(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+		if b.emitter.HasSubscribersFor(events.OperationStarted) {
+			b.emitter.Emit(events.NewOperationStarted(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, cmdOp.ContextSnapshot(false)))
+		}
+		if b.emitter.HasSubscribersFor(events.CommandStarted) {
+			b.emitter.Emit(events.NewCommandStarted(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+		}
 	}
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
@@ -314,7 +319,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 
 	// --- Command hooks (pre) ---
 	var hookCtx map[string]string
-	hasHooks := b.hookExecutor != nil && b.hookExecutor.HasAny()
+	hasHooks := b.hasCommandHookSink(op)
 	connInfo := &gcpc.ConnectionInfoV1{Id: ctx.ConnectionID, RemoteAddr: ctx.RemoteAddr}
 	cmdInfo := &gcpc.CommandInfoV1{Name: op, Args: args}
 	if hasHooks {
@@ -358,13 +363,17 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		cmdOp.Enrich(apicommand.ErrorKey, resultErr)
 	}
 
-	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
+	if b.hasCommandOperationHookSink() {
 		b.opHookExecutor.RunCompleteHooks(cmdOp)
 	}
 
 	if b.emitter != nil {
-		b.emitter.Emit(events.NewCommandPost(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
-		b.emitter.Emit(events.NewOperationComplete(cmdOp.ID, string(cmdOp.Type), elapsedNs, "completed", "", cmdOp.ContextSnapshot(false)))
+		if b.emitter.HasSubscribersFor(events.CommandCompleted) {
+			b.emitter.Emit(events.NewCommandCompleted(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+		}
+		if b.emitter.HasSubscribersFor(events.OperationCompleted) {
+			b.emitter.Emit(events.NewOperationCompleted(cmdOp.ID, string(cmdOp.Type), elapsedNs, "completed", "", cmdOp.ContextSnapshot(false)))
+		}
 	}
 
 	b.tracker.Complete(cmdOp.ID)
@@ -441,7 +450,7 @@ func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.Cl
 	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)
 	defer cancel()
 
-	if b.hasAnySink() {
+	if b.hasAnySink(op) {
 		cmdOp := b.tracker.Start(ops.TypeCommand, client.OperationID)
 		cmdOp.Enrich(apicommand.CommandKey, op)
 		cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(len(args)))

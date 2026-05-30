@@ -1,5 +1,10 @@
 package pipeline
 
+import (
+	"gocache/api/events"
+	ops "gocache/api/operations"
+)
+
 // hasAnySink reports whether any observer is currently attached to the
 // evaluator's three sinks: the event bus, the command-hook executor, and
 // the operation-hook executor.
@@ -17,15 +22,23 @@ package pipeline
 // event bus replay ring covers Emit'd events; ophook lifecycle replay is
 // out of scope (see ophooks.Executor.Replay — it only fires for ops the
 // tracker still holds, which the fast path does not register).
-func (b *Pipeline) hasAnySink() bool {
-	if b.emitter != nil && b.emitter.HasSubscribers() {
-		return true
-	}
-	if b.hookExecutor != nil && b.hookExecutor.HasAny() {
-		return true
-	}
-	if b.opHookExecutor != nil && b.opHookExecutor.HasAny() {
-		return true
-	}
-	return false
+func (b *Pipeline) hasAnySink(op string) bool {
+	return b.hasCommandEventSink() || b.hasCommandHookSink(op) || b.hasCommandOperationHookSink()
+}
+
+func (b *Pipeline) hasCommandEventSink() bool {
+	return b.emitter != nil && b.emitter.HasSubscribersFor(
+		events.OperationStarted,
+		events.OperationCompleted,
+		events.CommandStarted,
+		events.CommandCompleted,
+	)
+}
+
+func (b *Pipeline) hasCommandHookSink(op string) bool {
+	return b.hookExecutor != nil && b.hookExecutor.HasHooksForCommand(op)
+}
+
+func (b *Pipeline) hasCommandOperationHookSink() bool {
+	return b.opHookExecutor != nil && b.opHookExecutor.HasOperationType(ops.TypeCommand)
 }
