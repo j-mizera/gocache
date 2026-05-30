@@ -2,12 +2,13 @@
 title: GCPC
 description: GoCache Plugin Communication Protocol v1 — Protobuf over Unix domain sockets, the contract IPC plugins implement
 status: stable
-last_updated: 2026-05-03
+last_updated: 2026-05-30
 related:
   - Plugins
   - GCPC-Components-Diagrams
   - GCPC-Sequence-Diagrams
   - GCPC-State-Diagrams
+  - ADR-0028
 ---
 
 # GCPC -- GoCache Plugin Communication Protocol
@@ -92,6 +93,12 @@ The `replayed` and `replay_start_unix_ns` fields (tags 7/8) are used when a plug
 |---------|-----------|---------|
 | EventSubscribe | Plugin -> Server | Declares which event types the plugin consumes |
 | Event | Server -> Plugin | Fire-and-forget delivery — server also retains every Event in a bounded replay ring so a plugin subscribing mid-run catches up on history before switching to live. See the Event Replay section below. |
+
+ADR-0028 defines the target operation-first event contract for the next event-schema revision: `operation.started` and `operation.completed` are the canonical lifecycle events, while command facts, connection facts, plugin facts, and replay gaps are opt-in child facts. `command.pre`/`command.post` are hook-phase names and should not define the public event taxonomy once the ADR-0028 contract lands.
+
+Subscriptions are also the source of producer-side interest masks. The server should aggregate current `EventSubscribe`/future detail subscriptions into a cheap mask that emitters can check before building optional payloads. Filtering after command args, key snapshots, context maps, or protobuf payloads are already constructed is not sufficient for the performance budget.
+
+Logs follow a separate diagnostic signal in the ADR-0028 target contract. A future `LogRecord`-style GCPC payload/subscription should carry operation correlation and log metadata through a bounded, batched, sampled log pipeline instead of routing every structured log line through `Event` as `log.entry`.
 
 ## Registration Handshake
 
@@ -273,6 +280,8 @@ The server retains every emitted event in a bounded FIFO ring (`events.replay_ca
 3. Switches the subscription to live-only delivery.
 
 This lets an IPC plugin that connects at t=500 ms still observe events emitted at t=0. When overflow occurs (ring saturated), the oldest entry is dropped and a synthetic `replay.gap` event is delivered ahead of the retained events so subscribers can alert on misses. Setting `events.replay_capacity: 0` disables the ring entirely.
+
+Under the ADR-0028 target contract, this replay ring applies to event classes that explicitly choose replay/cursor behavior. High-volume log records use log-pipeline retention/exporter policy instead of the generic event replay ring.
 
 ## Operation Hook Replay
 

@@ -2,11 +2,12 @@
 title: Plugins
 description: Embedded vs IPC plugin tiers, build-tag matrix, the api/-only contract surface, available plugins
 status: living
-last_updated: 2026-05-28
+last_updated: 2026-05-30
 related:
   - Server
   - GCPC
   - Plugin-Prometheus
+  - ADR-0028
 ---
 
 # Plugins
@@ -99,7 +100,13 @@ Bundled IPC plugins:
 | Plugin | What it does |
 |---|---|
 | `plugins/dummy` | Lifecycle-only test plugin |
-| `plugins/prometheus` | Prometheus `/metrics`, `/healthz`, and `/readyz`; metrics are collected from async `command.post` events only |
+| `plugins/prometheus` | Prometheus `/metrics`, `/healthz`, and `/readyz`; current metrics use async command-completion events, with ADR-0028 targeting cheap `operation.completed` summaries instead of hook-phase `command.post` taxonomy |
+
+## Observability contract direction
+
+ADR-0028 defines the next operation-first observability contract. Plugins should treat `operation.started` and `operation.completed` as the canonical lifecycle events once that contract lands. Other event records are opt-in child facts attached to operations, and high-volume logs use a separate correlated `LogRecord`/diagnostic signal rather than default `log.entry` event-bus delivery.
+
+Event and log subscriptions contribute to server-side interest masks. Those masks let hot-path producers skip optional payload construction entirely when no plugin/exporter requested a signal or detail level. This means a metrics plugin can request cheap completion summaries without forcing command args, key values, hook context maps, or structured log records to be built for every command.
 
 ## Permissions and scopes
 
