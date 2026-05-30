@@ -1,0 +1,17 @@
+label=async-event-ipc-phase1a-hooks-20260529
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=72d67412ee18c3c17146a2c53a68f9024168ae25
+gocache_branch=perf/async-event-ipc
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=8941207
+post_standard_rss_bytes=24452792
+final_rss_bytes=27409776
+delta_rss_bytes=18468569
