@@ -8,8 +8,8 @@ import (
 
 	apicommand "gocache/api/command"
 	gcpc "gocache/api/gcpc/v1"
-	"gocache/pkg/command"
 	"gocache/commons/resp"
+	"gocache/pkg/command"
 )
 
 // fakeHookExecutor is an in-process command.HookExecutor that captures the
@@ -20,7 +20,8 @@ type fakeHookExecutor struct {
 	postCalls []map[string]string
 }
 
-func (f *fakeHookExecutor) HasAny() bool { return true }
+func (f *fakeHookExecutor) HasAny() bool                           { return true }
+func (f *fakeHookExecutor) HasHooksForCommand(command string) bool { return true }
 
 func (f *fakeHookExecutor) RunPreHooks(_ context.Context, _ *gcpc.CommandInfoV1, _ *gcpc.ConnectionInfoV1, hookCtx map[string]string) *apicommand.PreHookResult {
 	f.mu.Lock()

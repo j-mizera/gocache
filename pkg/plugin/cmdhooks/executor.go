@@ -43,6 +43,13 @@ func (e *Executor) HasAny() bool {
 	return e.registry.HasAny()
 }
 
+// HasHooksForCommand reports whether any registered command hook matches the
+// command. Pipeline uses this optional narrow guard to avoid building hook
+// context for commands unrelated to the registered hooks.
+func (e *Executor) HasHooksForCommand(command string) bool {
+	return e.registry.HasCommand(command)
+}
+
 // RunPreHooks fires all matching pre-hooks for the command.
 //   - Non-blocking hooks fire async (fire-and-forget).
 //   - Blocking hooks fire sequentially in priority order.

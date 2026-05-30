@@ -147,6 +147,29 @@ func (r *Registry) HasAny() bool {
 	return r.total.Load() > 0
 }
 
+// HasCommand reports whether any pre or post hook matches command. It lets
+// the evaluator keep commands on the fast path when hooks exist only for
+// unrelated commands.
+func (r *Registry) HasCommand(command string) bool {
+	if !r.HasAny() {
+		return false
+	}
+	command = strings.ToUpper(command)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, h := range r.pre {
+		if h.matches(command) {
+			return true
+		}
+	}
+	for _, h := range r.post {
+		if h.matches(command) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Registry) match(command string, pre bool) []*HookEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
