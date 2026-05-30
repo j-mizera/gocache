@@ -356,6 +356,35 @@ func TestGCPC_EventSubscription(t *testing.T) {
 	}
 }
 
+func TestGCPC_EventSubscription_BridgeOffKeepsSubscriptionButSkipsIPCEnqueue(t *testing.T) {
+	t.Setenv(benchEventBridgeModeEnv, string(eventBridgeModeBridgeOff))
+
+	mgr, eventBus, _, sockPath := setupManager(t)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "events"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "events"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("rejected: %s", ack.Reason)
+	}
+
+	p.send(gcpc.NewEventSubscribe([]string{"command.post"}))
+	waitForSubscription(t, eventBus, "plugin:test-plugin")
+
+	eventBus.Emit(apiEvents.NewCommandPost("SET", []string{"key", "val"}, 1000, "OK", "", nil).WithOperationID("cmd_1"))
+
+	stats := mgr.pluginIPCStats()
+	if len(stats) != 1 {
+		t.Fatalf("len(stats)=%d, want 1", len(stats))
+	}
+	if stats[0].SendAttempts != 0 || stats[0].FireAndForgetAttempts != 0 || stats[0].WriteAttempts != 0 {
+		t.Fatalf("bridge-off stats = send_attempts:%d fire_and_forget:%d write_attempts:%d; want all zero",
+			stats[0].SendAttempts, stats[0].FireAndForgetAttempts, stats[0].WriteAttempts)
+	}
+}
+
 func TestGCPC_EventSubscription_ContextFiltered(t *testing.T) {
 	mgr, eventBus, _, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{

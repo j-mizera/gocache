@@ -526,6 +526,95 @@ func TestPluginConnFireAndForgetFIFO(t *testing.T) {
 	}
 }
 
+func TestPluginConnStatsTracksFireAndForgetDrops(t *testing.T) {
+	pc := &PluginConn{
+		outbound: make(chan outboundEnvelope, 1),
+		done:     make(chan struct{}),
+		Name:     "metrics",
+	}
+
+	pc.SendFireAndForget(gcpc.NewHealthCheck())
+	pc.SendFireAndForget(gcpc.NewHealthCheck())
+
+	stats := pc.Stats()
+	if stats.SendAttempts != 2 {
+		t.Fatalf("SendAttempts=%d, want 2", stats.SendAttempts)
+	}
+	if stats.SendAccepted != 1 {
+		t.Fatalf("SendAccepted=%d, want 1", stats.SendAccepted)
+	}
+	if stats.SendQueueFull != 1 {
+		t.Fatalf("SendQueueFull=%d, want 1", stats.SendQueueFull)
+	}
+	if stats.FireAndForgetAttempts != 2 {
+		t.Fatalf("FireAndForgetAttempts=%d, want 2", stats.FireAndForgetAttempts)
+	}
+	if stats.FireAndForgetAccepted != 1 {
+		t.Fatalf("FireAndForgetAccepted=%d, want 1", stats.FireAndForgetAccepted)
+	}
+	if stats.FireAndForgetDrops != 1 {
+		t.Fatalf("FireAndForgetDrops=%d, want 1", stats.FireAndForgetDrops)
+	}
+	if stats.QueueDepth != 1 || stats.QueueCapacity != 1 {
+		t.Fatalf("queue depth/capacity=%d/%d, want 1/1", stats.QueueDepth, stats.QueueCapacity)
+	}
+}
+
+func TestPluginConnStatsTracksClosedAndCancelledDrops(t *testing.T) {
+	pc := &PluginConn{
+		outbound: make(chan outboundEnvelope, 1),
+		done:     make(chan struct{}),
+		Name:     "metrics",
+	}
+	pc.sendMu.Lock()
+	pc.closed = true
+	pc.sendMu.Unlock()
+
+	pc.SendFireAndForget(gcpc.NewHealthCheck())
+	stats := pc.Stats()
+	if stats.SendPluginDown != 1 {
+		t.Fatalf("SendPluginDown=%d, want 1", stats.SendPluginDown)
+	}
+	if stats.FireAndForgetDrops != 1 {
+		t.Fatalf("FireAndForgetDrops=%d, want 1", stats.FireAndForgetDrops)
+	}
+
+	pc = &PluginConn{
+		outbound: make(chan outboundEnvelope, 1),
+		done:     make(chan struct{}),
+		Name:     "metrics",
+	}
+	pc.SendFireAndForget(gcpc.NewHealthCheck())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := pc.enqueue(ctx, outboundEnvelope{env: gcpc.NewHealthCheck()}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("enqueue error=%v, want context.Canceled", err)
+	}
+	stats = pc.Stats()
+	if stats.SendContextCancelled != 1 {
+		t.Fatalf("SendContextCancelled=%d, want 1", stats.SendContextCancelled)
+	}
+	if stats.FireAndForgetDrops != 1 {
+		t.Fatalf("FireAndForgetDrops=%d, want 1", stats.FireAndForgetDrops)
+	}
+}
+
+func TestRouterPluginStatsSorted(t *testing.T) {
+	r := NewRouter(nil)
+	r.mu.Lock()
+	r.plugins["zeta"] = &PluginConn{outbound: make(chan outboundEnvelope, 1), Name: "zeta"}
+	r.plugins["alpha"] = &PluginConn{outbound: make(chan outboundEnvelope, 1), Name: "alpha"}
+	r.mu.Unlock()
+
+	stats := r.PluginStats()
+	if len(stats) != 2 {
+		t.Fatalf("len(stats)=%d, want 2", len(stats))
+	}
+	if stats[0].PluginName != "alpha" || stats[1].PluginName != "zeta" {
+		t.Fatalf("stats order=%q,%q; want alpha,zeta", stats[0].PluginName, stats[1].PluginName)
+	}
+}
+
 func TestPluginConnSendAfterCloseReturnsPluginDown(t *testing.T) {
 	serverConn, clientConn := testPipe()
 	defer clientConn.Close()
