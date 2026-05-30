@@ -43,6 +43,11 @@ GOCACHE_MAX_MEMORY_MB="${BENCH_GOCACHE_MAX_MEMORY_MB:-1024}"
 VALKEY_IMAGE="${VALKEY_IMAGE:-valkey/valkey:8}"
 GOCACHE_IPC_IMAGE="${GOCACHE_IPC_IMAGE:-gocache-bench:local-ipc}"
 IPC_PLUGINS="${IPC_PLUGINS:-prometheus}"
+BENCH_IPC_EVENT_MODE="${BENCH_IPC_EVENT_MODE:-full}"
+case "$BENCH_IPC_EVENT_MODE" in
+    full|events-off|bridge-off) ;;
+    *) echo "BENCH_IPC_EVENT_MODE must be one of: full, events-off, bridge-off; got: $BENCH_IPC_EVENT_MODE" >&2; exit 64 ;;
+esac
 
 REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
@@ -52,6 +57,11 @@ NET="gocache-bench-net"
 TARGET_NAME="gocache-bench-target-ipc"
 CONFIG_FILE="$RESULTS_DIR/$LABEL-$TARGET-config.yaml"
 mkdir -p "$RESULTS_DIR"
+
+PROMETHEUS_EVENT_SCOPE='        - "events"'
+if [[ "$BENCH_IPC_EVENT_MODE" == "events-off" ]]; then
+    PROMETHEUS_EVENT_SCOPE='        # events scope disabled by BENCH_IPC_EVENT_MODE=events-off'
+fi
 
 docker_cmd() { command docker "$@"; }
 
@@ -102,13 +112,16 @@ plugins:
       failure_policy: "halt_server"
       priority: 10
       scopes:
-        - "events"
+$PROMETHEUS_EVENT_SCOPE
         - "server:query:health"
         - "server:query:plugins"
 EOF_CFG
 
 # Keep the metrics server inside the target container for readiness checks.
 TARGET_ENV=(-e PROMETHEUS_PORT=":9100")
+if [[ "$BENCH_IPC_EVENT_MODE" == "bridge-off" ]]; then
+    TARGET_ENV+=(-e GOCACHE_BENCH_EVENT_BRIDGE_MODE="bridge-off")
+fi
 
 echo "Starting $TARGET ($GOCACHE_IPC_IMAGE, cpuset=$TARGET_CPUS, mem=$MEM_LIMIT)..."
 docker_cmd run -d \
@@ -212,6 +225,7 @@ target=$TARGET
 mode=ipc
 gocache_ipc_image=$GOCACHE_IPC_IMAGE
 ipc_plugins=$IPC_PLUGINS
+ipc_event_mode=$BENCH_IPC_EVENT_MODE
 gocache_commit=$(git -C "$REPO_ROOT" rev-parse HEAD)
 gocache_branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)
 config_file=$CONFIG_FILE

@@ -94,6 +94,7 @@ Fixed parameters (env-overridable):
 | `BENCH_SUITE`     | (see above) | `-t` suite passed to valkey-benchmark    |
 | `GOCACHE_IPC_IMAGE` | `gocache-bench:local-ipc` | IPC benchmark image tag |
 | `IPC_PLUGINS` | `prometheus` | Space-separated IPC plugin list compiled into the IPC benchmark image |
+| `BENCH_IPC_EVENT_MODE` | `full` | IPC event attribution mode for `run-ipc.sh`: `full`, `events-off`, or `bridge-off` |
 | `BENCH_PUBSUB_N` | `10000` | PUBLISH requests per Pub/Sub fanout scenario |
 | `BENCH_PUBSUB_FANOUTS` | `0,1,10` | Comma-separated subscriber counts to verify |
 | `BENCH_PUBSUB_MESSAGE_BYTES` | `32` | Message payload size for Pub/Sub tests |
