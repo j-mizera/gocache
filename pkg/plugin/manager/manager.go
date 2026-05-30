@@ -28,8 +28,6 @@ import (
 	"gocache/pkg/plugin/ophooks"
 	"gocache/pkg/plugin/permissions"
 	"gocache/pkg/plugin/router"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // LogCollector is the interface for adding log sources.
@@ -172,7 +170,7 @@ func (m *Manager) startPluginLifecycleOp(inst *PluginInstance) {
 	op.Enrich(apicommand.PluginNameKey, inst.Name)
 	inst.SetLifecycleOp(op)
 	if m.eventBus != nil {
-		m.eventBus.Emit(events.NewOperationStart(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
+		m.eventBus.Emit(events.NewOperationStarted(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
 	}
 }
 
@@ -192,7 +190,7 @@ func (m *Manager) finishPluginLifecycleOp(inst *PluginInstance, failReason strin
 		op.Complete()
 	}
 	if m.eventBus != nil {
-		m.eventBus.Emit(events.NewOperationComplete(op.ID, string(op.Type),
+		m.eventBus.Emit(events.NewOperationCompleted(op.ID, string(op.Type),
 			uint64(op.Duration().Nanoseconds()), status, failReason, op.ContextSnapshot(false)))
 	}
 	if m.tracker != nil {
@@ -719,11 +717,10 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 				if bridgeMode == eventBridgeModeBridgeOff {
 					return
 				}
-				cloned := proto.Clone(evt.Proto).(*gcpcv1.EventV1)
-				filterEventContext(cloned, pluginName)
+				projected := projectEventForPlugin(evt.Proto, pluginName)
 				gcpcEnv := &gcpcv1.EnvelopeV1{
 					Version: gcpcv1.ProtocolVersion,
-					Payload: &gcpcv1.EnvelopeV1_Event{Event: cloned},
+					Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
 				}
 				pluginConn.SendFireAndForget(gcpcEnv)
 			})
@@ -825,30 +822,73 @@ func (m *Manager) handlePluginExit(ctx context.Context, inst *PluginInstance) {
 	m.launchPlugin(ctx, inst)
 }
 
-// filterEventContext filters context maps in event data per plugin visibility.
-// Events carrying context (operation start/complete, command post, log entry) have
-// their context filtered so plugins only see _*, shared.*, and their own namespace.
-func filterEventContext(evt *gcpcv1.EventV1, pluginName string) {
+// projectEventForPlugin builds the per-plugin event view without a full proto clone.
+// The event envelope and context-bearing payload are copied before filtering so
+// visibility rules never mutate the server-owned event or another plugin's view.
+func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.EventV1 {
+	if evt == nil {
+		return nil
+	}
+	projected := &gcpcv1.EventV1{
+		Type:        evt.Type,
+		Timestamp:   evt.Timestamp,
+		OperationId: evt.OperationId,
+		Data:        evt.Data,
+	}
 	switch d := evt.Data.(type) {
 	case *gcpcv1.EventV1_OperationStart:
 		if d.OperationStart != nil {
-			d.OperationStart.Context = opctx.FilterForPlugin(d.OperationStart.Context, pluginName)
+			payload := d.OperationStart
+			projected.Data = &gcpcv1.EventV1_OperationStart{OperationStart: &gcpcv1.OperationStartEventV1{
+				Id:       payload.Id,
+				Type:     payload.Type,
+				ParentId: payload.ParentId,
+				Context:  opctx.FilterForPlugin(payload.Context, pluginName),
+			}}
 		}
 	case *gcpcv1.EventV1_OperationComplete:
 		if d.OperationComplete != nil {
-			d.OperationComplete.Context = opctx.FilterForPlugin(d.OperationComplete.Context, pluginName)
+			payload := d.OperationComplete
+			projected.Data = &gcpcv1.EventV1_OperationComplete{OperationComplete: &gcpcv1.OperationCompleteEventV1{
+				Id:         payload.Id,
+				Type:       payload.Type,
+				ElapsedNs:  payload.ElapsedNs,
+				Status:     payload.Status,
+				FailReason: payload.FailReason,
+				Context:    opctx.FilterForPlugin(payload.Context, pluginName),
+			}}
 		}
 	case *gcpcv1.EventV1_CommandPost:
 		if d.CommandPost != nil {
-			d.CommandPost.Metadata = opctx.FilterForPlugin(d.CommandPost.Metadata, pluginName)
+			payload := d.CommandPost
+			projected.Data = &gcpcv1.EventV1_CommandPost{CommandPost: &gcpcv1.CommandPostEventV1{
+				Command:   payload.Command,
+				Args:      payload.Args,
+				ElapsedNs: payload.ElapsedNs,
+				Result:    payload.Result,
+				Error:     payload.Error,
+				Metadata:  opctx.FilterForPlugin(payload.Metadata, pluginName),
+			}}
 		}
 	case *gcpcv1.EventV1_CommandPre:
 		if d.CommandPre != nil {
-			d.CommandPre.Metadata = opctx.FilterForPlugin(d.CommandPre.Metadata, pluginName)
+			payload := d.CommandPre
+			projected.Data = &gcpcv1.EventV1_CommandPre{CommandPre: &gcpcv1.CommandPreEventV1{
+				Command:  payload.Command,
+				Args:     payload.Args,
+				Metadata: opctx.FilterForPlugin(payload.Metadata, pluginName),
+			}}
 		}
 	case *gcpcv1.EventV1_LogEntry:
 		if d.LogEntry != nil {
-			d.LogEntry.Fields = opctx.FilterForPlugin(d.LogEntry.Fields, pluginName)
+			payload := d.LogEntry
+			projected.Data = &gcpcv1.EventV1_LogEntry{LogEntry: &gcpcv1.LogEntryEventV1{
+				Level:   payload.Level,
+				Message: payload.Message,
+				Caller:  payload.Caller,
+				Fields:  opctx.FilterForPlugin(payload.Fields, pluginName),
+			}}
 		}
 	}
+	return projected
 }
