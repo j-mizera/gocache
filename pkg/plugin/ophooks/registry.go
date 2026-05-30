@@ -158,3 +158,21 @@ func (r *Registry) Match(opType ops.Type) []*HookEntry {
 func (r *Registry) HasAny() bool {
 	return r.total.Load() > 0
 }
+
+// HasOperationType reports whether any hook matches opType. It lets command
+// producers avoid operation lifecycle work when all registered hooks target
+// other operation classes.
+func (r *Registry) HasOperationType(opType ops.Type) bool {
+	if !r.HasAny() {
+		return false
+	}
+	t := strings.ToLower(string(opType))
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, h := range r.hooks {
+		if h.Pattern == "*" || h.Pattern == t {
+			return true
+		}
+	}
+	return false
+}

@@ -66,6 +66,11 @@ func (e *Executor) HasAny() bool {
 	return e.registry.HasAny()
 }
 
+// HasOperationType reports whether any operation hook matches opType.
+func (e *Executor) HasOperationType(opType ops.Type) bool {
+	return e.registry.HasOperationType(opType)
+}
+
 // RunStartHooks fires operation start hooks synchronously in priority order.
 // Each hook can enrich the operation context. Timeout per hook, fail-open on timeout.
 func (e *Executor) RunStartHooks(ctx context.Context, op *ops.Operation) {
