@@ -1,0 +1,17 @@
+label=reference
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=4b62f81596395e2896e87e8fb5ac977ee0862f69
+gocache_branch=impl/event-hotpath-observability
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=18025021
+post_standard_rss_bytes=32359055
+final_rss_bytes=36270243
+delta_rss_bytes=18245222
