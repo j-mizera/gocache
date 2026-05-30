@@ -49,7 +49,7 @@ func (p *prometheusPlugin) OnShutdown(ctx context.Context) error {
 }
 
 func (p *prometheusPlugin) EventTypes() []string {
-	return []string{"command.post"}
+	return []string{"command.completed"}
 }
 
 func (p *prometheusPlugin) HandleEvent(_ context.Context, evt *gcpc.EventV1) {
