@@ -23,6 +23,10 @@ type HookExecutor interface {
 	// when there are no listeners.
 	HasAny() bool
 
+	// HasHooksForCommand reports whether any registered hook matches command.
+	// It is a narrower hot-path guard than HasAny.
+	HasHooksForCommand(command string) bool
+
 	// RunPreHooks fires all matching pre-hooks for the command. Returns nil
 	// if there are no matching hooks. Otherwise returns a PreHookResult that
 	// indicates whether the command was denied and carries the accumulated

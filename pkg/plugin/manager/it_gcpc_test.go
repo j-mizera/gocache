@@ -324,12 +324,12 @@ func TestGCPC_EventSubscription(t *testing.T) {
 		t.Fatalf("rejected: %s", ack.Reason)
 	}
 
-	// Subscribe to command.post events.
-	p.send(gcpc.NewEventSubscribe([]string{"command.post"}))
+	// Subscribe to command.completed events.
+	p.send(gcpc.NewEventSubscribe([]string{"command.completed"}))
 	waitForSubscription(t, eventBus, "plugin:test-plugin")
 
-	// Emit a command.post event.
-	eventBus.Emit(apiEvents.NewCommandPost("SET", []string{"key", "val"}, 1000, "OK", "", nil).WithOperationID("cmd_1"))
+	// Emit a command.completed event.
+	eventBus.Emit(apiEvents.NewCommandCompleted("SET", []string{"key", "val"}, 1000, "OK", "", nil).WithOperationID("cmd_1"))
 
 	// Plugin should receive it.
 	env := p.recv()
@@ -337,8 +337,8 @@ func TestGCPC_EventSubscription(t *testing.T) {
 	if evt == nil {
 		t.Fatal("expected EventV1")
 	}
-	if evt.Type != "command.post" {
-		t.Errorf("expected command.post, got %q", evt.Type)
+	if evt.Type != "command.completed" {
+		t.Errorf("expected command.completed, got %q", evt.Type)
 	}
 	if evt.OperationId != "cmd_1" {
 		t.Errorf("expected operation_id cmd_1, got %q", evt.OperationId)
@@ -370,10 +370,10 @@ func TestGCPC_EventSubscription_BridgeOffKeepsSubscriptionButSkipsIPCEnqueue(t *
 		t.Fatalf("rejected: %s", ack.Reason)
 	}
 
-	p.send(gcpc.NewEventSubscribe([]string{"command.post"}))
+	p.send(gcpc.NewEventSubscribe([]string{"command.completed"}))
 	waitForSubscription(t, eventBus, "plugin:test-plugin")
 
-	eventBus.Emit(apiEvents.NewCommandPost("SET", []string{"key", "val"}, 1000, "OK", "", nil).WithOperationID("cmd_1"))
+	eventBus.Emit(apiEvents.NewCommandCompleted("SET", []string{"key", "val"}, 1000, "OK", "", nil).WithOperationID("cmd_1"))
 
 	stats := mgr.pluginIPCStats()
 	if len(stats) != 1 {
@@ -393,17 +393,17 @@ func TestGCPC_EventSubscription_ContextFiltered(t *testing.T) {
 	p := newTestPlugin(t, sockPath)
 
 	p.register("test-plugin", []string{"read", "events"}, nil, nil)
-	p.send(gcpc.NewEventSubscribe([]string{"operation.complete"}))
+	p.send(gcpc.NewEventSubscribe([]string{"operation.completed"}))
 	waitForSubscription(t, eventBus, "plugin:test-plugin")
 
-	// Emit operation.complete with context containing private keys.
+	// Emit operation.completed with context containing private keys.
 	ctx := map[string]string{
 		"_start_ns":            "12345",
 		"shared.traceparent":   "00-abc-def-01",
 		"other-plugin.private": "should-be-hidden",
 		"test-plugin.own":      "should-be-visible",
 	}
-	eventBus.Emit(apiEvents.NewOperationComplete("cmd_1", "command", 5000, "completed", "", ctx))
+	eventBus.Emit(apiEvents.NewOperationCompleted("cmd_1", "command", 5000, "completed", "", ctx))
 
 	env := p.recv()
 	evt := env.GetEvent()
@@ -438,7 +438,7 @@ func TestGCPC_EventSubscription_DeniedWithoutScope(t *testing.T) {
 	}
 
 	// Try to subscribe — should be silently denied.
-	p.send(gcpc.NewEventSubscribe([]string{"command.post"}))
+	p.send(gcpc.NewEventSubscribe([]string{"command.completed"}))
 
 	// Poll briefly to let the manager process the subscribe message, then
 	// assert the subscription was NOT registered on the bus.

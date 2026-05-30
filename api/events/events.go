@@ -18,8 +18,8 @@ import (
 type Type string
 
 const (
-	CommandPre  Type = "command.pre"
-	CommandPost Type = "command.post"
+	CommandStarted   Type = "command.started"
+	CommandCompleted Type = "command.completed"
 
 	ConnectionOpen  Type = "connection.open"
 	ConnectionClose Type = "connection.close"
@@ -39,8 +39,8 @@ const (
 
 	LogEntry Type = "log.entry"
 
-	OperationStart    Type = "operation.start"
-	OperationComplete Type = "operation.complete"
+	OperationStarted   Type = "operation.started"
+	OperationCompleted Type = "operation.completed"
 
 	// ReplayGap marks that the event bus's replay ring dropped events before
 	// a subscriber connected. The payload is a LogEntryEventV1 whose fields
@@ -55,18 +55,18 @@ type Event struct {
 	Proto *gcpc.EventV1
 }
 
-// NewCommandPre creates a command.pre event.
-func NewCommandPre(command string, args []string, metadata map[string]string) Event {
-	e := newEventProto(CommandPre)
+// NewCommandStarted creates a command.started event.
+func NewCommandStarted(command string, args []string, metadata map[string]string) Event {
+	e := newEventProto(CommandStarted)
 	e.Data = &gcpc.EventV1_CommandPre{CommandPre: &gcpc.CommandPreEventV1{
 		Command: command, Args: args, Metadata: metadata,
 	}}
 	return Event{Proto: e}
 }
 
-// NewCommandPost creates a command.post event.
-func NewCommandPost(command string, args []string, elapsedNs uint64, result, errStr string, metadata map[string]string) Event {
-	e := newEventProto(CommandPost)
+// NewCommandCompleted creates a command.completed event.
+func NewCommandCompleted(command string, args []string, elapsedNs uint64, result, errStr string, metadata map[string]string) Event {
+	e := newEventProto(CommandCompleted)
 	e.Data = &gcpc.EventV1_CommandPost{CommandPost: &gcpc.CommandPostEventV1{
 		Command: command, Args: args, ElapsedNs: elapsedNs, Result: result, Error: errStr, Metadata: metadata,
 	}}
@@ -202,9 +202,9 @@ func (e Event) WithOperationID(id string) Event {
 	return e
 }
 
-// NewOperationStart creates an operation.start event.
-func NewOperationStart(id, opType, parentID string, ctx map[string]string) Event {
-	e := newEventProto(OperationStart)
+// NewOperationStarted creates an operation.started event.
+func NewOperationStarted(id, opType, parentID string, ctx map[string]string) Event {
+	e := newEventProto(OperationStarted)
 	e.Data = &gcpc.EventV1_OperationStart{OperationStart: &gcpc.OperationStartEventV1{
 		Id: id, Type: opType, ParentId: parentID, Context: ctx,
 	}}
@@ -212,9 +212,9 @@ func NewOperationStart(id, opType, parentID string, ctx map[string]string) Event
 	return Event{Proto: e}
 }
 
-// NewOperationComplete creates an operation.complete event.
-func NewOperationComplete(id, opType string, elapsedNs uint64, status, failReason string, ctx map[string]string) Event {
-	e := newEventProto(OperationComplete)
+// NewOperationCompleted creates an operation.completed event.
+func NewOperationCompleted(id, opType string, elapsedNs uint64, status, failReason string, ctx map[string]string) Event {
+	e := newEventProto(OperationCompleted)
 	e.Data = &gcpc.EventV1_OperationComplete{OperationComplete: &gcpc.OperationCompleteEventV1{
 		Id: id, Type: opType, ElapsedNs: elapsedNs, Status: status, FailReason: failReason, Context: ctx,
 	}}
@@ -231,10 +231,12 @@ func NewOperationComplete(id, opType string, elapsedNs uint64, status, failReaso
 type Emitter interface {
 	Emit(Event)
 	HasSubscribers() bool
+	HasSubscribersFor(types ...Type) bool
 }
 
 // NoopEmitter discards all events. Used when plugins are disabled.
 type NoopEmitter struct{}
 
-func (NoopEmitter) Emit(Event)            {}
-func (NoopEmitter) HasSubscribers() bool  { return false }
+func (NoopEmitter) Emit(Event)                           {}
+func (NoopEmitter) HasSubscribers() bool                 { return false }
+func (NoopEmitter) HasSubscribersFor(types ...Type) bool { return false }

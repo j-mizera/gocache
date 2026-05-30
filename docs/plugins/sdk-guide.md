@@ -2,12 +2,13 @@
 title: Plugin SDK Guide
 description: How to write GoCache plugins — IPC and embedded, interfaces, configuration, operations, logging, scopes
 status: living
-last_updated: 2026-05-25
+last_updated: 2026-05-30
 related:
   - Plugins
   - GCPC
   - Persistence-Plugin-Guide
   - ADR-0019
+  - ADR-0028
 ---
 
 # Plugin SDK Guide
@@ -278,7 +279,7 @@ type EventPlugin interface {
 }
 ```
 
-Events are fire-and-forget notifications. Available event types:
+Events are fire-and-forget notifications. The current implementation exposes these event type strings:
 
 | Type | Fires when |
 |------|------------|
@@ -296,6 +297,8 @@ Events are fire-and-forget notifications. Available event types:
 | `log.entry` | Structured log line emitted |
 | `operation.start` | Operation begins |
 | `operation.complete` | Operation ends |
+
+ADR-0028 defines the target operation-first contract for the next schema update: lifecycle events become `operation.started` and `operation.completed`; hook-phase names such as `command.post` stop being the public event taxonomy; logs move to a separate correlated `LogRecord`/diagnostic subscription path. Event/log subscriptions should contribute to server-side interest masks so producers skip optional payload construction unless a plugin requested the exact signal and detail level.
 
 ```go
 func (p *myPlugin) EventTypes() []string {

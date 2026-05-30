@@ -2,10 +2,11 @@
 title: Prometheus Plugin Architecture
 description: Design decisions for the metrics exporter — event-only metrics, IPC plugin, in-memory aggregation, /metrics serving
 status: living
-last_updated: 2026-05-28
+last_updated: 2026-05-30
 related:
   - Plugins
   - ADR-0023
+  - ADR-0028
 ---
 
 # Prometheus Plugin — Solution Architecture
@@ -18,16 +19,16 @@ The Prometheus plugin is a non-critical GoCache IPC plugin that collects command
 
 ### Event-only metrics
 
-The plugin subscribes only to `command.post` events. This means:
+The current plugin subscribes only to command-completion events. ADR-0028 changes the target taxonomy from hook-phase `command.post` to cheap `operation.completed` summaries. This means:
 
 - Metrics collection is off the blocking command hook path.
 - The plugin cannot deny, mutate, or enrich commands.
-- The server only pays async event enqueue/delivery cost when an event subscriber is attached.
+- The server should pay optional payload construction cost only when the aggregate interest mask says a subscriber requested command-completion summary fields.
 - The permission surface is limited to `events` and health/readiness query scopes.
 
 ### Server-measured latency
 
-The plugin reads `CommandPostEventV1.elapsed_ns`. This is measured by the server around command execution, not by the plugin around IPC delivery.
+The current prototype reads `CommandPostEventV1.elapsed_ns`. Under ADR-0028, the plugin should read equivalent server-measured duration from `operation.completed` summary fields, not from plugin-side IPC timing.
 
 ### No OTLP responsibilities
 
@@ -50,9 +51,10 @@ The metrics collector uses a single mutex protecting a map of per-command statis
 ### Command to Metric
 
 1. Server executes the command and measures elapsed time.
-2. Server emits a `command.post` event with command name, elapsed nanoseconds, result, and error string.
-3. Plugin ignores every non-`command.post` event.
-4. Plugin records command, duration, and error status into the collector.
+2. The aggregate interest mask indicates whether a Prometheus-style subscriber wants cheap command-completion summary fields.
+3. Server emits the requested command-completion summary (`command.post` today; `operation.completed` target under ADR-0028) without constructing rich args/context/log payloads.
+4. Plugin ignores every non-command-completion record.
+5. Plugin records command, duration, and error status into the collector.
 
 ### Prometheus Scrape
 
@@ -78,7 +80,7 @@ Histogram bucket boundaries (seconds): 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2
 | Interface | Implementation |
 |-----------|---------------|
 | `Plugin` | Name: "prometheus", Version: project version, Critical: false |
-| `EventPlugin` | EventTypes: [`command.post`] |
+| `EventPlugin` | EventTypes: command-completion summary (`command.post` today; `operation.completed` target under ADR-0028) |
 | `QueryPlugin` | `/healthz` and `/readyz` server queries |
 | `ScopePlugin` | Scopes: [`events`, `server:query:health`, `server:query:plugins`] |
 
@@ -98,4 +100,4 @@ Architecture belongs in the PlantUML diagrams rather than inline prose diagrams.
 | Category | Diagram | Description |
 |----------|---------|-------------|
 | Component | [Architecture](design/component/components_prometheus.puml) | Plugin internal structure and data flow |
-| Sequence | [Metrics Collection](design/sequence/sequence_metrics_collection.puml) | End-to-end flow from `command.post` event to scrape |
+| Sequence | [Metrics Collection](design/sequence/sequence_metrics_collection.puml) | End-to-end flow from command-completion telemetry to scrape |

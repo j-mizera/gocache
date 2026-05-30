@@ -1,0 +1,17 @@
+label=baseline
+target=gocache
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=4b62f81596395e2896e87e8fb5ac977ee0862f69
+gocache_branch=main
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=12698255
+post_standard_rss_bytes=134322585
+final_rss_bytes=138412032
+delta_rss_bytes=125713777

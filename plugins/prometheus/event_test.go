@@ -19,14 +19,14 @@ func TestPrometheusRuntimeTelemetryUsesEventsOnly(t *testing.T) {
 	}
 
 	got := plugin.EventTypes()
-	if len(got) != 1 || got[0] != string(apiEvents.CommandPost) {
-		t.Fatalf("event subscriptions = %v, want only %q", got, apiEvents.CommandPost)
+	if len(got) != 1 || got[0] != string(apiEvents.CommandCompleted) {
+		t.Fatalf("event subscriptions = %v, want only %q", got, apiEvents.CommandCompleted)
 	}
 }
 
 func TestPrometheusRecordsCommandMetricsFromCommandPostEvent(t *testing.T) {
 	plugin := &prometheusPlugin{collector: NewCollector()}
-	evt := apiEvents.NewCommandPost("SET", []string{"k", "v"}, 42_000, "OK", "", nil)
+	evt := apiEvents.NewCommandCompleted("SET", []string{"k", "v"}, 42_000, "OK", "", nil)
 
 	plugin.HandleEvent(context.Background(), evt.Proto)
 
@@ -47,13 +47,13 @@ func TestPrometheusRecordsCommandMetricsFromCommandPostEvent(t *testing.T) {
 func TestPrometheusIgnoresNonMetricEvents(t *testing.T) {
 	plugin := &prometheusPlugin{collector: NewCollector()}
 
-	plugin.HandleEvent(context.Background(), apiEvents.NewOperationStart("cmd_1", "command", "", nil).Proto)
-	plugin.HandleEvent(context.Background(), apiEvents.NewOperationComplete("cmd_1", "command", 10_000, "failed", "disk full", nil).Proto)
+	plugin.HandleEvent(context.Background(), apiEvents.NewOperationStarted("cmd_1", "command", "", nil).Proto)
+	plugin.HandleEvent(context.Background(), apiEvents.NewOperationCompleted("cmd_1", "command", 10_000, "failed", "disk full", nil).Proto)
 	plugin.HandleEvent(context.Background(), apiEvents.NewLogEntry("info", "hello", "test", nil).WithOperationID("cmd_1").Proto)
 
 	plugin.collector.mu.Lock()
 	defer plugin.collector.mu.Unlock()
 	if len(plugin.collector.stats) != 0 {
-		t.Fatalf("unexpected metrics from non-command.post events: %#v", plugin.collector.stats)
+		t.Fatalf("unexpected metrics from non-command.completed events: %#v", plugin.collector.stats)
 	}
 }
