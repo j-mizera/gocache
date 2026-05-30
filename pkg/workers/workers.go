@@ -7,14 +7,14 @@ import (
 
 	"gocache/api/command"
 	"gocache/api/events"
-	"gocache/commons/logger"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
+	"gocache/commons/logger"
 	"gocache/pkg/cache"
 	pkgcommand "gocache/pkg/command"
 	"gocache/pkg/engine"
-	"gocache/pkg/pipeline"
 	serverOps "gocache/pkg/operations"
+	"gocache/pkg/pipeline"
 )
 
 const defaultInterval = 5 * time.Minute
@@ -64,7 +64,7 @@ func (w *baseWorker) startOp(parentCtx context.Context, opType ops.Type) (*ops.O
 		w.opHookExecutor.RunStartHooks(opCtx, op)
 	}
 	if w.emitter != nil {
-		w.emitter.Emit(events.NewOperationStart(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
+		w.emitter.Emit(events.NewOperationStarted(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
 	}
 	return op, opCtx
 }
@@ -79,7 +79,7 @@ func (w *baseWorker) completeOp(op *ops.Operation) {
 		w.opHookExecutor.RunCompleteHooks(op)
 	}
 	if w.emitter != nil {
-		w.emitter.Emit(events.NewOperationComplete(op.ID, string(op.Type), uint64(op.Duration().Nanoseconds()), "completed", "", op.ContextSnapshot(false)))
+		w.emitter.Emit(events.NewOperationCompleted(op.ID, string(op.Type), uint64(op.Duration().Nanoseconds()), "completed", "", op.ContextSnapshot(false)))
 	}
 	w.tracker.Complete(op.ID)
 }
@@ -94,7 +94,7 @@ func (w *baseWorker) failOp(op *ops.Operation, reason string) {
 		w.opHookExecutor.RunCompleteHooks(op)
 	}
 	if w.emitter != nil {
-		w.emitter.Emit(events.NewOperationComplete(op.ID, string(op.Type), uint64(op.Duration().Nanoseconds()), "failed", reason, op.ContextSnapshot(false)))
+		w.emitter.Emit(events.NewOperationCompleted(op.ID, string(op.Type), uint64(op.Duration().Nanoseconds()), "failed", reason, op.ContextSnapshot(false)))
 	}
 	w.tracker.Fail(op.ID, reason)
 }

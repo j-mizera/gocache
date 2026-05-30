@@ -264,7 +264,7 @@ func main() {
 	if opHookExec != nil && opHookExec.HasAny() {
 		opHookExec.RunStartHooks(ctx, bootOp)
 	}
-	eventBus.Emit(events.NewOperationStart(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
+	eventBus.Emit(events.NewOperationStarted(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
 
 	// Build all registered persistence providers generically. Each
 	// blank-imported plugin (plugins/snapshot, plugins/aof, …) called
@@ -325,14 +325,14 @@ func main() {
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
 		}
-		eventBus.Emit(events.NewOperationStart(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
+		eventBus.Emit(events.NewOperationStarted(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
 		if _, err := coordinator.BootInto(snapCtx); err != nil {
 			logger.Warn(snapCtx).Err(err).Msg("failed to load snapshot")
 			snapOp.Fail(err.Error())
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
 			}
-			eventBus.Emit(events.NewOperationComplete(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "failed", err.Error(), snapOp.ContextSnapshot(false)))
+			eventBus.Emit(events.NewOperationCompleted(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "failed", err.Error(), snapOp.ContextSnapshot(false)))
 			tracker.Fail(snapOp.ID, err.Error())
 		} else {
 			logger.Info(snapCtx).Msg("snapshot loaded")
@@ -340,7 +340,7 @@ func main() {
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
 			}
-			eventBus.Emit(events.NewOperationComplete(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "completed", "", snapOp.ContextSnapshot(false)))
+			eventBus.Emit(events.NewOperationCompleted(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "completed", "", snapOp.ContextSnapshot(false)))
 			tracker.Complete(snapOp.ID)
 		}
 	}
@@ -390,7 +390,7 @@ func main() {
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(reloadOp)
 			}
-			eventBus.Emit(events.NewOperationComplete(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "failed", err.Error(), reloadOp.ContextSnapshot(false)))
+			eventBus.Emit(events.NewOperationCompleted(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "failed", err.Error(), reloadOp.ContextSnapshot(false)))
 			tracker.Fail(reloadOp.ID, err.Error())
 			return
 		}
@@ -414,7 +414,7 @@ func main() {
 		if opHookExec != nil {
 			opHookExec.RunCompleteHooks(reloadOp)
 		}
-		eventBus.Emit(events.NewOperationComplete(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "completed", "", reloadOp.ContextSnapshot(false)))
+		eventBus.Emit(events.NewOperationCompleted(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "completed", "", reloadOp.ContextSnapshot(false)))
 		tracker.Complete(reloadOp.ID)
 	})
 
@@ -423,7 +423,7 @@ func main() {
 	if opHookExec != nil {
 		opHookExec.RunCompleteHooks(bootOp)
 	}
-	eventBus.Emit(events.NewOperationComplete(bootOp.ID, string(bootOp.Type), uint64(bootOp.Duration().Nanoseconds()), "completed", "", bootOp.ContextSnapshot(false)))
+	eventBus.Emit(events.NewOperationCompleted(bootOp.ID, string(bootOp.Type), uint64(bootOp.Duration().Nanoseconds()), "completed", "", bootOp.ContextSnapshot(false)))
 	tracker.Complete(bootOp.ID)
 
 	sigChan := make(chan os.Signal, 1)
@@ -538,7 +538,7 @@ func handleShutdown(
 	if shutdownOp != nil {
 		shutdownOp.Complete()
 		if eventBus != nil {
-			eventBus.Emit(events.NewOperationComplete(shutdownOp.ID, string(shutdownOp.Type), uint64(shutdownOp.Duration().Nanoseconds()), "completed", "", shutdownOp.ContextSnapshot(false)))
+			eventBus.Emit(events.NewOperationCompleted(shutdownOp.ID, string(shutdownOp.Type), uint64(shutdownOp.Duration().Nanoseconds()), "completed", "", shutdownOp.ContextSnapshot(false)))
 		}
 		tracker.Complete(shutdownOp.ID)
 	}
