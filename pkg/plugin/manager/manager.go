@@ -862,66 +862,91 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 	if evt == nil {
 		return nil
 	}
-	projected := &gcpcv1.EventV1{
-		Type:        evt.Type,
-		Timestamp:   evt.Timestamp,
-		OperationId: evt.OperationId,
-		Data:        evt.Data,
-	}
 	switch d := evt.Data.(type) {
 	case *gcpcv1.EventV1_OperationStart:
-		if d.OperationStart != nil {
-			payload := d.OperationStart
-			projected.Data = &gcpcv1.EventV1_OperationStart{OperationStart: &gcpcv1.OperationStartEventV1{
+		if d.OperationStart == nil || len(d.OperationStart.Context) == 0 {
+			return evt
+		}
+		payload := d.OperationStart
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_OperationStart{OperationStart: &gcpcv1.OperationStartEventV1{
 				Id:       payload.Id,
 				Type:     payload.Type,
 				ParentId: payload.ParentId,
 				Context:  opctx.FilterForPlugin(payload.Context, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_OperationComplete:
-		if d.OperationComplete != nil {
-			payload := d.OperationComplete
-			projected.Data = &gcpcv1.EventV1_OperationComplete{OperationComplete: &gcpcv1.OperationCompleteEventV1{
+		if d.OperationComplete == nil || len(d.OperationComplete.Context) == 0 {
+			return evt
+		}
+		payload := d.OperationComplete
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_OperationComplete{OperationComplete: &gcpcv1.OperationCompleteEventV1{
 				Id:         payload.Id,
 				Type:       payload.Type,
 				ElapsedNs:  payload.ElapsedNs,
 				Status:     payload.Status,
 				FailReason: payload.FailReason,
 				Context:    opctx.FilterForPlugin(payload.Context, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_CommandPost:
-		if d.CommandPost != nil {
-			payload := d.CommandPost
-			projected.Data = &gcpcv1.EventV1_CommandPost{CommandPost: &gcpcv1.CommandPostEventV1{
+		if d.CommandPost == nil || len(d.CommandPost.Metadata) == 0 {
+			return evt
+		}
+		payload := d.CommandPost
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_CommandPost{CommandPost: &gcpcv1.CommandPostEventV1{
 				Command:   payload.Command,
 				Args:      payload.Args,
 				ElapsedNs: payload.ElapsedNs,
 				Result:    payload.Result,
 				Error:     payload.Error,
 				Metadata:  opctx.FilterForPlugin(payload.Metadata, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_CommandPre:
-		if d.CommandPre != nil {
-			payload := d.CommandPre
-			projected.Data = &gcpcv1.EventV1_CommandPre{CommandPre: &gcpcv1.CommandPreEventV1{
+		if d.CommandPre == nil || len(d.CommandPre.Metadata) == 0 {
+			return evt
+		}
+		payload := d.CommandPre
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_CommandPre{CommandPre: &gcpcv1.CommandPreEventV1{
 				Command:  payload.Command,
 				Args:     payload.Args,
 				Metadata: opctx.FilterForPlugin(payload.Metadata, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_LogEntry:
-		if d.LogEntry != nil {
-			payload := d.LogEntry
-			projected.Data = &gcpcv1.EventV1_LogEntry{LogEntry: &gcpcv1.LogEntryEventV1{
+		if d.LogEntry == nil || len(d.LogEntry.Fields) == 0 {
+			return evt
+		}
+		payload := d.LogEntry
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_LogEntry{LogEntry: &gcpcv1.LogEntryEventV1{
 				Level:   payload.Level,
 				Message: payload.Message,
 				Caller:  payload.Caller,
 				Fields:  opctx.FilterForPlugin(payload.Fields, pluginName),
-			}}
+			}},
 		}
+	default:
+		return evt
 	}
-	return projected
 }

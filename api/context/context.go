@@ -59,16 +59,24 @@ func FilterForPlugin(ctx map[string]string, pluginName string) map[string]string
 		return nil
 	}
 	prefix := pluginName + "."
-	filtered := make(map[string]string)
+	visible := 0
+	for k := range ctx {
+		if strings.HasPrefix(k, ServerPrefix) ||
+			strings.HasPrefix(k, prefix) ||
+			strings.HasPrefix(k, SharedPrefix) {
+			visible++
+		}
+	}
+	if visible == 0 {
+		return nil
+	}
+	filtered := make(map[string]string, visible)
 	for k, v := range ctx {
 		if strings.HasPrefix(k, ServerPrefix) ||
 			strings.HasPrefix(k, prefix) ||
 			strings.HasPrefix(k, SharedPrefix) {
 			filtered[k] = v
 		}
-	}
-	if len(filtered) == 0 {
-		return nil
 	}
 	return filtered
 }
