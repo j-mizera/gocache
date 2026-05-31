@@ -9,6 +9,21 @@ import (
 	"gocache/pkg/events"
 )
 
+type mockCommandMetricsRecorder struct {
+	active    bool
+	commands  []string
+	elapsedNs []uint64
+	errors    []bool
+}
+
+func (m *mockCommandMetricsRecorder) HasCommandMetricsSink() bool { return m.active }
+
+func (m *mockCommandMetricsRecorder) RecordCommand(command string, elapsedNs uint64, isError bool) {
+	m.commands = append(m.commands, command)
+	m.elapsedNs = append(m.elapsedNs, elapsedNs)
+	m.errors = append(m.errors, isError)
+}
+
 // TestFastPath_NoSinks_BypassesTracker confirms that with no emitter,
 // command-hook executor, or op-hook executor wired, the evaluator skips
 // the tracker entirely. ActiveCount stays zero and SkippedCount climbs by
@@ -140,6 +155,35 @@ func TestFastPath_LogOnlySubscriberKeepsCommandFastPath(t *testing.T) {
 	}
 	if got := tracker.SkippedCount(); got != 1 {
 		t.Fatalf("log-only subscriber should keep command on fast path; skipped=%d", got)
+	}
+}
+
+func TestFastPath_CommandMetricsSinkUsesMetricsOnlyPath(t *testing.T) {
+	eval, e, tracker := newTestPipeline()
+	defer e.Stop()
+
+	metrics := &mockCommandMetricsRecorder{active: true}
+	eval.SetCommandMetricsRecorder(metrics)
+
+	ctx := clientctx.New()
+	res := eval.Evaluate(context.Background(), ctx, "PING", nil)
+	if res.Value != "PONG" {
+		t.Fatalf("want PONG, got %v", res.Value)
+	}
+	if got := tracker.SkippedCount(); got != 1 {
+		t.Fatalf("metrics-only path should still skip tracker registration; skipped=%d", got)
+	}
+	if len(metrics.commands) != 1 {
+		t.Fatalf("recorded commands=%v, want one", metrics.commands)
+	}
+	if metrics.commands[0] != "PING" {
+		t.Fatalf("recorded command=%q, want PING", metrics.commands[0])
+	}
+	if metrics.elapsedNs[0] == 0 {
+		t.Fatal("expected non-zero elapsed time")
+	}
+	if metrics.errors[0] {
+		t.Fatal("PING should not record an error")
 	}
 }
 
