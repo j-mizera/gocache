@@ -5,9 +5,9 @@ mainframe **sd** Prometheus Metrics Collection
 
 actor Client
 participant "GoCache Server" as Server
-participant "Event Bus" as Bus
+participant "Command Metrics\nCollector" as ServerCollector
 participant "Prometheus\nPlugin" as Plugin
-participant "Collector" as Collector
+participant "Local Collector" as Collector
 actor "Prometheus" as Prom
 
 == Command Execution ==
@@ -15,28 +15,31 @@ actor "Prometheus" as Prom
 Client -> Server : SET user:1 "John"
 Server -> Server : Execute command\nMeasure elapsed time
 
-== Event Delivery ==
+== In-process Metrics Aggregation ==
 
-Server -> Bus : Emit command.post\ncommand="SET", elapsed_ns=150000, error=""
-Bus ->> Plugin : EventV1 command.post\n(best-effort async)
-note right : Server response path does not wait\nfor metrics processing.
-
-Plugin -> Collector : Record("SET", 150000, false)
-activate Collector
-Collector -> Collector : total["SET"]++\nsum["SET"] += 0.00015\nbucket[0] (le=0.001)++
-deactivate Collector
+Server -> ServerCollector : RecordCommand("SET", 150000, false)
+activate ServerCollector
+ServerCollector -> ServerCollector : total["SET"]++\nsum_ns["SET"] += 150000\nbucket[0]++
+deactivate ServerCollector
 
 Server --> Client : +OK
-note left : Response does not wait\nfor Prometheus plugin.
+note left : Response does not wait\nfor Prometheus plugin IPC.
 
 == Prometheus Scrape ==
 
 Prom -> Plugin : GET /metrics
+Plugin -> Server : QueryServer("metrics.commands")
+activate Server
+Server -> ServerCollector : Snapshot()
+ServerCollector --> Server : aggregate rows
+Server --> Plugin : ServerQueryResponseV1\ncounts + buckets + errors
+Plugin -> Collector : ReplaceFromQuery(snapshot)
 Plugin -> Collector : WritePrometheus(w)
 activate Collector
 Collector -> Collector : Lock, snapshot, unlock
 Collector --> Plugin : Prometheus text format
 deactivate Collector
+deactivate Server
 Plugin --> Prom : text/plain\ngocache_commands_total{command="SET"} 1\ngocache_command_duration_seconds_bucket{...}
 
 @enduml

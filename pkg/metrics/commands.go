@@ -1,0 +1,160 @@
+package metrics
+
+import (
+	"sort"
+	"sync"
+	"sync/atomic"
+)
+
+const (
+	// CommandsTopic is the server-query topic for command metrics snapshots.
+	CommandsTopic = "metrics.commands"
+
+	nsPerSec = 1e9
+)
+
+// DefaultCommandDurationBuckets are the command-latency histogram bucket
+// boundaries in seconds. They intentionally match the Prometheus plugin's
+// current exposition buckets so the server can aggregate before IPC without a
+// new GCPC schema.
+var DefaultCommandDurationBuckets = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0}
+
+type commandStats struct {
+	total  uint64
+	errors uint64
+	sumNs  uint64
+	counts []uint64
+}
+
+// CommandSnapshot is a copy of one command's accumulated metrics.
+type CommandSnapshot struct {
+	Command string
+	Total   uint64
+	Errors  uint64
+	SumNs   uint64
+	Counts  []uint64
+}
+
+// CommandCollector aggregates low-cardinality command metrics in-process.
+// Recording is gated by an active-consumer reference count so deployments that
+// do not grant a metrics query scope pay only a cheap atomic check.
+type CommandCollector struct {
+	active atomic.Int32
+
+	mu      sync.Mutex
+	stats   map[string]*commandStats
+	buckets []float64
+}
+
+// NewCommandCollector creates a command metrics collector.
+func NewCommandCollector() *CommandCollector {
+	buckets := append([]float64(nil), DefaultCommandDurationBuckets...)
+	return &CommandCollector{
+		stats:   make(map[string]*commandStats),
+		buckets: buckets,
+	}
+}
+
+// AddConsumer enables recording for one active metrics consumer.
+func (c *CommandCollector) AddConsumer() {
+	if c == nil {
+		return
+	}
+	c.active.Add(1)
+}
+
+// RemoveConsumer disables recording for one active metrics consumer.
+func (c *CommandCollector) RemoveConsumer() {
+	if c == nil {
+		return
+	}
+	for {
+		current := c.active.Load()
+		if current <= 0 {
+			return
+		}
+		if c.active.CompareAndSwap(current, current-1) {
+			return
+		}
+	}
+}
+
+// HasCommandMetricsSink reports whether command metrics have an active
+// consumer. The pipeline calls this on the command path, so it must remain a
+// lock-free check.
+func (c *CommandCollector) HasCommandMetricsSink() bool {
+	return c != nil && c.active.Load() > 0
+}
+
+// RecordCommand aggregates one command completion. It intentionally accepts the
+// compact metrics tuple Prometheus needs instead of a full event payload.
+func (c *CommandCollector) RecordCommand(command string, elapsedNs uint64, isError bool) {
+	if !c.HasCommandMetricsSink() {
+		return
+	}
+
+	durationSec := float64(elapsedNs) / nsPerSec
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	s := c.stats[command]
+	if s == nil {
+		s = &commandStats{counts: make([]uint64, len(c.buckets)+1)}
+		c.stats[command] = s
+	}
+
+	s.total++
+	s.sumNs += elapsedNs
+	if isError {
+		s.errors++
+	}
+
+	for i, bound := range c.buckets {
+		if durationSec <= bound {
+			s.counts[i]++
+			return
+		}
+	}
+	s.counts[len(c.buckets)]++
+}
+
+// Buckets returns a copy of the histogram bucket boundaries.
+func (c *CommandCollector) Buckets() []float64 {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]float64(nil), c.buckets...)
+}
+
+// Snapshot returns a deterministic copy of the accumulated command metrics.
+func (c *CommandCollector) Snapshot() []CommandSnapshot {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	commands := make([]string, 0, len(c.stats))
+	for command := range c.stats {
+		commands = append(commands, command)
+	}
+	sort.Strings(commands)
+
+	snapshots := make([]CommandSnapshot, len(commands))
+	for i, command := range commands {
+		s := c.stats[command]
+		counts := make([]uint64, len(s.counts))
+		copy(counts, s.counts)
+		snapshots[i] = CommandSnapshot{
+			Command: command,
+			Total:   s.total,
+			Errors:  s.errors,
+			SumNs:   s.sumNs,
+			Counts:  counts,
+		}
+	}
+	return snapshots
+}

@@ -35,12 +35,15 @@ Per plugin connection, the query reports:
 - `enqueue_latency_max_ns`
 - `write_attempts`
 - `write_errors`
+- `write_batches`
+- `write_batch_envelopes`
+- `write_batch_max_size`
 - `write_latency_total_ns`
 - `write_latency_max_ns`
 - `queue_lag_total_ns`
 - `queue_lag_max_ns`
 
-These hooks intentionally measure the current per-plugin FIFO queue and framed protobuf write path. They do not introduce traffic classes, priority scheduling, batching, or stream IDs.
+These hooks intentionally measure the per-plugin FIFO queue and framed protobuf write path. The original Phase 1A hook work did not introduce traffic classes, priority scheduling, batching, or stream IDs; the later 2026-05-30 continuation added normal-frame write batching while preserving this query surface for attribution.
 
 ## Yamux spike boundary
 
@@ -153,3 +156,15 @@ RSS captures:
 | Phase 1B `bridge-off` | 43,253,760 | 190,001,971 | 228,904,140 | 185,650,380 |
 
 As before, these are single-run attribution measurements, not final statistical proof. They are strong enough to order the next optimization work: producer-side masks/gates first, then batching/queue/transport isolation once event production cost is reduced.
+
+## 2026-05-30 normal-frame batching continuation
+
+The follow-up branch `perf/pipelined-ipc-observability` kept the GCPC schema unchanged and batched ordinary length-prefixed frames in the per-plugin writer. The raw captures and summary live under `bench/results/pipelined-ipc-observability-20260530/`.
+
+The continuation added these `plugin.ipc` attribution counters:
+
+- `write_batches`
+- `write_batch_envelopes`
+- `write_batch_max_size`
+
+Compared with the PR #89 IPC anchor, delayed batching improved IPC Prometheus pipelined geometric-mean RPS by `+13.89%` and p99 by `-6.07%`. It still left the pipelined IPC configuration materially behind Valkey (`-51.35%` RPS) and the current no-IPC GoCache core capture (`-42.19%` RPS), so the next performance lever remains reduced event volume and cheaper projection for metrics-only consumers rather than a public protocol-level batch message.

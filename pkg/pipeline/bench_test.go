@@ -9,6 +9,12 @@ import (
 	serverEvents "gocache/pkg/events"
 )
 
+type benchCommandMetricsRecorder struct{}
+
+func (benchCommandMetricsRecorder) HasCommandMetricsSink() bool { return true }
+
+func (benchCommandMetricsRecorder) RecordCommand(string, uint64, bool) {}
+
 func BenchmarkEvaluateSinks(b *testing.B) {
 	b.Run("no_sink", func(b *testing.B) {
 		eval, e, _ := newTestPipeline()
@@ -25,6 +31,16 @@ func BenchmarkEvaluateSinks(b *testing.B) {
 		bus := serverEvents.NewBusWithCapacity(0)
 		bus.Subscribe("logs", []apiEvents.Type{apiEvents.LogEntry}, func(apiEvents.Event) {})
 		eval.SetEmitter(bus)
+		ctx := clientctx.New()
+		b.ResetTimer()
+		for b.Loop() {
+			_ = eval.Evaluate(context.Background(), ctx, "PING", nil)
+		}
+	})
+	b.Run("command_metrics_only", func(b *testing.B) {
+		eval, e, _ := newTestPipeline()
+		defer e.Stop()
+		eval.SetCommandMetricsRecorder(benchCommandMetricsRecorder{})
 		ctx := clientctx.New()
 		b.ResetTimer()
 		for b.Loop() {

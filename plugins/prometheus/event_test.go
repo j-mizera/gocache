@@ -1,14 +1,17 @@
 package main
 
 import (
-	"context"
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 
-	apiEvents "gocache/api/events"
+	"gocache/api/scope"
 	"gocache/sdk/pluginsdk"
 )
 
-func TestPrometheusRuntimeTelemetryUsesEventsOnly(t *testing.T) {
+func TestPrometheusRuntimeTelemetryUsesMetricsQueryOnly(t *testing.T) {
 	plugin := &prometheusPlugin{}
 
 	if _, ok := any(plugin).(pluginsdk.HookPlugin); ok {
@@ -17,43 +20,77 @@ func TestPrometheusRuntimeTelemetryUsesEventsOnly(t *testing.T) {
 	if _, ok := any(plugin).(pluginsdk.OperationHookPlugin); ok {
 		t.Fatal("prometheus must not register operation hooks for runtime telemetry")
 	}
+	if _, ok := any(plugin).(pluginsdk.EventPlugin); ok {
+		t.Fatal("prometheus must not subscribe to per-command events for metrics")
+	}
 
-	got := plugin.EventTypes()
-	if len(got) != 1 || got[0] != string(apiEvents.CommandCompleted) {
-		t.Fatalf("event subscriptions = %v, want only %q", got, apiEvents.CommandCompleted)
+	scopes := map[string]bool{}
+	for _, s := range plugin.Scopes() {
+		scopes[s] = true
+	}
+	if scopes[string(scope.ScopeEvents)] {
+		t.Fatal("prometheus must not request events scope for metrics-only telemetry")
+	}
+	for _, want := range []string{
+		string(scope.ScopeServerQueryHealth),
+		string(scope.ScopeServerQueryPlugins),
+		string(scope.ScopeServerQueryMetricsCommands),
+	} {
+		if !scopes[want] {
+			t.Fatalf("prometheus scopes missing %q: %v", want, plugin.Scopes())
+		}
 	}
 }
 
-func TestPrometheusRecordsCommandMetricsFromCommandPostEvent(t *testing.T) {
-	plugin := &prometheusPlugin{collector: NewCollector()}
-	evt := apiEvents.NewCommandCompleted("SET", []string{"k", "v"}, 42_000, "OK", "", nil)
+func TestPrometheusReplacesCommandMetricsFromQuerySnapshot(t *testing.T) {
+	collector := NewCollector()
+	data := map[string]string{
+		"buckets.count":    "9",
+		"commands.count":   "1",
+		"command.0.name":   "SET",
+		"command.0.total":  "2",
+		"command.0.errors": "1",
+		"command.0.sum_ns": "3000000",
+	}
+	for i := 0; i < len(defaultBuckets)+1; i++ {
+		data["command.0.bucket."+strconv.Itoa(i)] = "0"
+	}
+	data["command.0.bucket.1"] = "1"
+	data["command.0.bucket.2"] = "1"
 
-	plugin.HandleEvent(context.Background(), evt.Proto)
+	if err := collector.ReplaceFromQuery(data); err != nil {
+		t.Fatalf("ReplaceFromQuery error: %v", err)
+	}
 
-	plugin.collector.mu.Lock()
-	defer plugin.collector.mu.Unlock()
-	stats := plugin.collector.stats["SET"]
+	collector.mu.Lock()
+	stats := collector.stats["SET"]
+	collector.mu.Unlock()
 	if stats == nil {
 		t.Fatal("expected SET metrics")
 	}
-	if stats.total != 1 {
-		t.Fatalf("total = %d, want 1", stats.total)
+	if stats.total != 2 {
+		t.Fatalf("total = %d, want 2", stats.total)
 	}
-	if stats.errors != 0 {
-		t.Fatalf("errors = %d, want 0", stats.errors)
+	if stats.errors != 1 {
+		t.Fatalf("errors = %d, want 1", stats.errors)
+	}
+	if stats.sum != 0.003 {
+		t.Fatalf("sum = %g, want 0.003", stats.sum)
 	}
 }
 
-func TestPrometheusIgnoresNonMetricEvents(t *testing.T) {
+func TestPrometheusMetricsHandlerRendersCollectorWithoutSession(t *testing.T) {
 	plugin := &prometheusPlugin{collector: NewCollector()}
+	plugin.collector.Record("PING", 42_000, false)
 
-	plugin.HandleEvent(context.Background(), apiEvents.NewOperationStarted("cmd_1", "command", "", nil).Proto)
-	plugin.HandleEvent(context.Background(), apiEvents.NewOperationCompleted("cmd_1", "command", 10_000, "failed", "disk full", nil).Proto)
-	plugin.HandleEvent(context.Background(), apiEvents.NewLogEntry("info", "hello", "test", nil).WithOperationID("cmd_1").Proto)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	metricsHandler(plugin, pluginName, "test").ServeHTTP(rec, req)
 
-	plugin.collector.mu.Lock()
-	defer plugin.collector.mu.Unlock()
-	if len(plugin.collector.stats) != 0 {
-		t.Fatalf("unexpected metrics from non-command.completed events: %#v", plugin.collector.stats)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body:\n%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("gocache_commands_total{command=\"PING\"} 1")) {
+		t.Fatalf("metrics output missing PING counter:\n%s", rec.Body.String())
 	}
 }

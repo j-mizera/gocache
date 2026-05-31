@@ -25,6 +25,7 @@ import (
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logcollector"
+	commandmetrics "gocache/pkg/metrics"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
 	"gocache/pkg/plugin/cmdhooks"
@@ -236,11 +237,14 @@ func main() {
 	var pluginManager *pluginmgr.Manager
 	var opHookExec *ophooks.Executor
 	if cfg.Plugins.Enabled {
+		commandMetrics := commandmetrics.NewCommandCollector()
+		srv.SetCommandMetrics(commandMetrics)
 		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
 		pluginManager.SetLogCollector(logCollector)
 		pluginManager.SetTracker(tracker)
 		pluginManager.SetClientPusher(srv.ConnRegistry())
 		pluginManager.SetEventBus(eventBus)
+		pluginManager.SetCommandMetrics(commandMetrics)
 		pluginmgr.RegisterOperationHandlers(pluginManager.QueryRegistry(), tracker)
 		if err := pluginManager.Start(ctx); err != nil {
 			logger.FatalNoCtx().Err(err).Msg("failed to start plugin manager")

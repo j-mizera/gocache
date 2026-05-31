@@ -11,9 +11,9 @@ related:
 
 # Prometheus Plugin
 
-Prometheus metrics exporter for GoCache. The current prototype subscribes to asynchronous command-completion events, records per-command counters and latency histograms, and serves a `/metrics` HTTP endpoint in Prometheus text exposition format. ADR-0028 targets cheap `operation.completed` summaries instead of hook-phase `command.post` taxonomy for the next event contract.
+Prometheus metrics exporter for GoCache. It serves `/metrics`, `/healthz`, and `/readyz` over HTTP; core command-dispatch counters and latency histograms are pulled from the generic `server:query:metrics.commands` aggregate snapshot instead of receiving one IPC event per command.
 
-It does **not** register command hooks or operation hooks. Hooks remain reserved for denial/enrichment plugins; runtime metrics stay off the blocking command path.
+It does **not** register command hooks, operation hooks, or event subscriptions for runtime metrics. Hooks remain reserved for denial/enrichment plugins; exact event streams remain available for plugins that need full records.
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ It does **not** register command hooks or operation hooks. Hooks remain reserved
          critical: false
          priority: 100
          scopes:
-           - "events"
+           - "server:query:metrics.commands"
            - "server:query:health"
            - "server:query:plugins"
    ```
@@ -53,13 +53,13 @@ It does **not** register command hooks or operation hooks. Hooks remain reserved
 |---------|--------|---------|-------------|
 | HTTP port | `PROMETHEUS_PORT` env var | `:9100` | Address for the metrics HTTP server |
 | Critical | `gocache.yaml` override | `false` | Plugin crash does not affect the server |
-| Scopes | `gocache.yaml` override | `events`, `server:query:health`, `server:query:plugins` | Event subscription plus health/readiness queries |
+| Scopes | `gocache.yaml` override | `server:query:metrics.commands`, `server:query:health`, `server:query:plugins` | Pull-based command metrics plus health/readiness queries |
 
 ## Metrics
 
 ### `gocache_commands_total` (counter)
 
-Total number of commands processed, labeled by command name.
+Total number of core commands processed, labeled by command name.
 
 ```text
 gocache_commands_total{command="SET"} 1234
@@ -68,7 +68,7 @@ gocache_commands_total{command="GET"} 5678
 
 ### `gocache_command_errors_total` (counter)
 
-Total number of commands that returned an error, labeled by command name.
+Total number of core commands that returned an error, labeled by command name.
 
 ```text
 gocache_command_errors_total{command="SET"} 2
@@ -76,7 +76,7 @@ gocache_command_errors_total{command="SET"} 2
 
 ### `gocache_command_duration_seconds` (histogram)
 
-Command execution latency in seconds, labeled by command name. The current prototype uses server-measured timing from `CommandPostEventV1.elapsed_ns`; the ADR-0028 target contract derives this from `operation.completed` summary fields.
+Command execution latency in seconds, labeled by command name. The server records elapsed nanoseconds into a compact command-metrics collector only while a `server:query:metrics.commands` consumer is registered; the plugin converts that aggregate snapshot to Prometheus seconds during scrape.
 
 Bucket boundaries: 1ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s.
 
@@ -99,21 +99,23 @@ gocache_plugin_info{name="prometheus",version="0.1.0"} 1
 
 ## How It Works
 
-The plugin implements `EventPlugin` and currently subscribes only to command-completion telemetry. Under ADR-0028, it should request the cheapest `operation.completed` detail level that contains metrics-safe command name, elapsed time, and error status. For every command completion record it captures:
+The plugin implements `QueryPlugin` and receives an SDK session after registration. For each `/metrics` request, it queries the server topic `metrics.commands`; the server checks the `server:query:metrics.commands` scope and returns aggregate rows containing:
 
 - command name
-- server-measured elapsed nanoseconds
-- whether the command returned an error
+- total command count
+- error count
+- sum of elapsed nanoseconds
+- histogram bucket counts
 
-The HTTP handler renders the accumulated metrics in Prometheus text format on demand. No external Prometheus client dependency is used; the text format is written directly.
+The HTTP handler replaces the local collector snapshot from that response and renders Prometheus text format on demand. No external Prometheus client dependency is used; the text format is written directly.
 
 OTLP traces/logs/events are intentionally out of scope for this plugin. A separate `instrumentation` plugin should own runtime OTLP export.
 
-Prometheus should not require full command args, key values, hook context maps, operation IDs as metric labels, or log records. Its subscription should contribute only the interest mask needed for low-cardinality completion summaries.
+Prometheus does not require full command args, key values, hook context maps, operation IDs as metric labels, or log records. Its query scope enables low-cardinality aggregate metrics without forcing command event protobufs or per-plugin event projection on every command.
 
 ## Design Diagrams
 
 | Category | Diagram | Description |
 |----------|---------|-------------|
 | Component | [Architecture](design/component/components_prometheus.puml) | Plugin internal structure |
-| Sequence | [Metrics Collection](design/sequence/sequence_metrics_collection.puml) | Data flow from `command.post` event to `/metrics` |
+| Sequence | [Metrics Collection](design/sequence/sequence_metrics_collection.puml) | Pull flow from `server:query:metrics.commands` to `/metrics` |

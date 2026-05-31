@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gocache/commons/transport"
+	commandmetrics "gocache/pkg/metrics"
 	"gocache/pkg/plugin/router"
 )
 
@@ -172,6 +173,44 @@ func TestRegisterBuiltinHandlers_NilStateProvider(t *testing.T) {
 	}
 }
 
+func TestRegisterCommandMetricsHandlers(t *testing.T) {
+	collector := commandmetrics.NewCommandCollector()
+	collector.AddConsumer()
+	collector.RecordCommand("GET", 1_000, false)
+	collector.RecordCommand("SET", 2_000_000, true)
+
+	qr := NewQueryRegistry()
+	RegisterCommandMetricsHandlers(qr, collector)
+
+	data, err := qr.Handle(commandmetrics.CommandsTopic, nil)
+	if err != nil {
+		t.Fatalf("metrics.commands handler error: %v", err)
+	}
+	checks := map[string]string{
+		"buckets.count":    "9",
+		"commands.count":   "2",
+		"command.0.name":   "GET",
+		"command.0.total":  "1",
+		"command.0.errors": "0",
+		"command.0.sum_ns": "1000",
+		"command.1.name":   "SET",
+		"command.1.total":  "1",
+		"command.1.errors": "1",
+		"command.1.sum_ns": "2000000",
+	}
+	for key, want := range checks {
+		if got := data[key]; got != want {
+			t.Errorf("data[%q]=%q, want %q", key, got, want)
+		}
+	}
+	if got := data["command.0.bucket.0"]; got != "1" {
+		t.Fatalf("GET bucket count=%q, want 1", got)
+	}
+	if got := data["command.1.bucket.1"]; got != "1" {
+		t.Fatalf("SET bucket count=%q, want 1", got)
+	}
+}
+
 func TestManagerPluginIPCStatsIncludesEventOnlyConnectionsSorted(t *testing.T) {
 	m := &Manager{}
 	zetaServer, zetaClient := net.Pipe()
@@ -216,6 +255,9 @@ func TestPluginIPCHandler(t *testing.T) {
 				EnqueueLatencyMaxNs:        45,
 				WriteAttempts:              9,
 				WriteErrors:                2,
+				WriteBatches:               4,
+				WriteBatchEnvelopes:        9,
+				WriteBatchMaxSize:          3,
 				WriteLatencyTotalNs:        456,
 				WriteLatencyMaxNs:          78,
 				QueueLagTotalNs:            789,
@@ -244,6 +286,9 @@ func TestPluginIPCHandler(t *testing.T) {
 		"prometheus.enqueue_latency_max_ns":         "45",
 		"prometheus.write_attempts":                 "9",
 		"prometheus.write_errors":                   "2",
+		"prometheus.write_batches":                  "4",
+		"prometheus.write_batch_envelopes":          "9",
+		"prometheus.write_batch_max_size":           "3",
 		"prometheus.write_latency_total_ns":         "456",
 		"prometheus.write_latency_max_ns":           "78",
 		"prometheus.queue_lag_total_ns":             "789",

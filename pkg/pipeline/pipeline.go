@@ -64,6 +64,13 @@ type OpHookExecutor interface {
 	RunCompleteHooks(op *ops.Operation)
 }
 
+// CommandMetricsRecorder records compact command-completion metrics without
+// requiring full event payload construction.
+type CommandMetricsRecorder interface {
+	HasCommandMetricsSink() bool
+	RecordCommand(command string, elapsedNs uint64, isError bool)
+}
+
 // Pipeline is the command dispatch pipeline. It owns no command-specific
 // knowledge — handlers and their argument specs are provided by external
 // packages (resp/handler, rex/handler) via command.Registration.
@@ -86,6 +93,7 @@ type Pipeline struct {
 	emitter            events.Emitter
 	tracker            *serverOps.Tracker
 	opHookExecutor     OpHookExecutor
+	commandMetrics     CommandMetricsRecorder
 	persistenceFeed    command.MutationEmitter
 }
 
@@ -148,6 +156,10 @@ func (b *Pipeline) SetPersistenceFeed(f command.MutationEmitter) {
 
 func (b *Pipeline) SetOpHookExecutor(e OpHookExecutor) {
 	b.opHookExecutor = e
+}
+
+func (b *Pipeline) SetCommandMetricsRecorder(r CommandMetricsRecorder) {
+	b.commandMetrics = r
 }
 
 // RegisterEmbeddedCommand registers a command provided by an embedded
@@ -267,6 +279,9 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// correlation works; the operation is simply never registered, enriched,
 	// emitted, or hook-fired.
 	if !b.hasAnySink(op) {
+		if b.hasCommandMetricsSink() {
+			return b.evaluateMetricsOnly(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
+		}
 		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
 	}
 
@@ -362,6 +377,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	if resultErr != "" {
 		cmdOp.Enrich(apicommand.ErrorKey, resultErr)
 	}
+	b.recordCommandMetric(op, elapsedNs, resultErr != "")
 
 	if b.hasCommandOperationHookSink() {
 		b.opHookExecutor.RunCompleteHooks(cmdOp)
@@ -399,6 +415,39 @@ func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.Client
 		b.tracker.IncrementSkipped()
 	}
 	return result
+}
+
+// evaluateMetricsOnly keeps Prometheus-style metrics off the full operation,
+// event, and hook path. It measures the handler directly, records the compact
+// tuple, and still skips tracker registration/enrichment just like evaluateFast.
+func (b *Pipeline) evaluateMetricsOnly(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec apicommand.Spec, shardLocked bool) apicommand.Result {
+	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
+	opCtx := ops.WithContext(parentCtx, cmdOp)
+
+	cmdCtx := cmdCtxPool.Get().(*command.Context)
+	defer putCmdCtx(cmdCtx)
+	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
+	cmdCtx.ShardLocked = shardLocked
+	cmdCtx.SetContext(opCtx)
+
+	result := handler(cmdCtx)
+	elapsedNs := uint64(time.Since(cmdOp.StartTime).Nanoseconds())
+	b.recordCommandMetric(op, elapsedNs, resultHasError(result))
+
+	if b.tracker != nil {
+		b.tracker.IncrementSkipped()
+	}
+	return result
+}
+
+func (b *Pipeline) recordCommandMetric(op string, elapsedNs uint64, isError bool) {
+	if b.commandMetrics != nil {
+		b.commandMetrics.RecordCommand(op, elapsedNs, isError)
+	}
+}
+
+func resultHasError(r apicommand.Result) bool {
+	return r.Err != nil
 }
 
 // fillCmdCtx populates a *command.Context for one command. Centralises the

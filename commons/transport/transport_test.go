@@ -147,6 +147,54 @@ func TestConcurrentSends(t *testing.T) {
 	}
 }
 
+func TestSendBatchRecv_Order(t *testing.T) {
+	server, client := connPair(t)
+	defer server.Close()
+	defer client.Close()
+
+	envs := []*gcpc.EnvelopeV1{
+		{Id: 1, Payload: &gcpc.EnvelopeV1_HealthCheck{HealthCheck: &gcpc.HealthCheckV1{Timestamp: 1}}},
+		{Id: 2, Payload: &gcpc.EnvelopeV1_HealthCheck{HealthCheck: &gcpc.HealthCheckV1{Timestamp: 2}}},
+		{Id: 3, Payload: &gcpc.EnvelopeV1_HealthCheck{HealthCheck: &gcpc.HealthCheckV1{Timestamp: 3}}},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.SendBatch(envs)
+	}()
+
+	for i, want := range envs {
+		got, err := server.Recv()
+		if err != nil {
+			t.Fatalf("recv[%d]: %v", i, err)
+		}
+		if got.Id != want.Id {
+			t.Fatalf("recv[%d] id=%d, want %d", i, got.Id, want.Id)
+		}
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("send batch: %v", err)
+	}
+}
+
+func TestSendBatch_FrameTooLarge(t *testing.T) {
+	server, client := connPair(t)
+	defer server.Close()
+	defer client.Close()
+
+	bigName := make([]byte, MaxFrameSize+1)
+	for i := range bigName {
+		bigName[i] = 'a'
+	}
+	err := client.SendBatch([]*gcpc.EnvelopeV1{
+		{Id: 1, Payload: &gcpc.EnvelopeV1_HealthCheck{HealthCheck: &gcpc.HealthCheckV1{Timestamp: 1}}},
+		{Id: 2, Payload: &gcpc.EnvelopeV1_Register{Register: &gcpc.RegisterV1{Name: string(bigName)}}},
+	})
+	if err != ErrFrameTooLarge {
+		t.Fatalf("SendBatch error=%v, want ErrFrameTooLarge", err)
+	}
+}
+
 func TestListener_AcceptAndCleanup(t *testing.T) {
 	sockPath := t.TempDir() + "/test.sock"
 

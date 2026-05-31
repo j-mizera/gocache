@@ -12,19 +12,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gocache/api/events"
-	"gocache/commons/logger"
-	ops "gocache/api/operations"
 	apicommand "gocache/api/command"
+	"gocache/api/events"
+	ops "gocache/api/operations"
+	"gocache/commons/logger"
+	"gocache/commons/resp"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
-	"gocache/pkg/pipeline"
 	serverOps "gocache/pkg/operations"
+	"gocache/pkg/pipeline"
 	"gocache/pkg/plugin/router"
-	"gocache/commons/resp"
 	"gocache/pkg/rex"
 	"gocache/pkg/watch"
 )
@@ -124,6 +124,11 @@ func (srv *Server) SetTracker(t *serverOps.Tracker) {
 func (srv *Server) SetOpHookExecutor(e pipeline.OpHookExecutor) {
 	srv.opHookExecutor = e
 	srv.pipeline.SetOpHookExecutor(e)
+}
+
+// SetCommandMetrics wires compact command metrics recording into the pipeline.
+func (srv *Server) SetCommandMetrics(r pipeline.CommandMetricsRecorder) {
+	srv.pipeline.SetCommandMetricsRecorder(r)
 }
 
 // SetPersistenceFeed wires the persistence coordinator's mutation-feed

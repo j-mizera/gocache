@@ -4,7 +4,7 @@
 frame "Prometheus Plugin" as F {
 
     rectangle "GCPC Interface" as ipc {
-        component [Event Handler] as handler <<EventPlugin\ncommand.post>>
+        component [Query Session] as query <<QueryPlugin\nmetrics.commands>>
         component [Plugin Lifecycle] as lifecycle <<health + shutdown>>
     }
 
@@ -23,24 +23,27 @@ frame "Prometheus Plugin" as F {
     cloud "Prometheus" as prom
 
     ' -- Data flow --
-    server --> handler : EventV1 command.post\nelapsed_ns + error
-    handler --> collector : Record(cmd, elapsed, isError)
-    collector --> counters : increment
-    collector --> histo : place in bucket
-
     prom --> http_server : GET /metrics
     http_server --> http_handler : route
+    http_handler --> query : QueryServer("metrics.commands")
+    query --> server : ServerQueryV1 metrics.commands
+    server --> query : aggregate snapshot\ncounts + buckets + errors
+    query --> collector : ReplaceFromQuery(snapshot)
+    collector --> counters : replace counters
+    collector --> histo : replace buckets
     http_handler --> collector : WritePrometheus()
 
     note bottom of collector
       **Thread-safe**: single mutex.
-      Lock on Record() and WritePrometheus().
-      Not on cache hot path (separate process).
+      Lock on ReplaceFromQuery() and WritePrometheus().
+      Server-side command aggregation is gated by
+      an active metrics-query consumer.
     end note
 
     note bottom of handler
-      **Async event delivery**.
-      No command or operation hooks.
+      **Pull-based metrics**.
+      No command hooks, operation hooks,
+      or event subscription for metrics.
       Plugin crash = auto-restart,
       no command denial/enrichment.
     end note

@@ -22,10 +22,11 @@ const (
 	ScopeHookPost Scope = "hook:post"
 
 	// Server query scopes — server:query is a wildcard for all subtopics.
-	ScopeServerQuery        Scope = "server:query"
-	ScopeServerQueryHealth  Scope = "server:query:health"
-	ScopeServerQueryPlugins Scope = "server:query:plugins"
-	ScopeServerQueryStats   Scope = "server:query:stats"
+	ScopeServerQuery                Scope = "server:query"
+	ScopeServerQueryHealth          Scope = "server:query:health"
+	ScopeServerQueryPlugins         Scope = "server:query:plugins"
+	ScopeServerQueryStats           Scope = "server:query:stats"
+	ScopeServerQueryMetricsCommands Scope = "server:query:metrics.commands"
 
 	// Event subscription scope.
 	ScopeEvents Scope = "events"
@@ -78,7 +79,7 @@ func ParseScope(s string) (Scope, error) {
 
 	switch Scope(s) {
 	case ScopeRead, ScopeWrite, ScopeAdmin, ScopeHookPre, ScopeHookPost,
-		ScopeServerQuery, ScopeServerQueryHealth, ScopeServerQueryPlugins, ScopeServerQueryStats,
+		ScopeServerQuery, ScopeServerQueryHealth, ScopeServerQueryPlugins, ScopeServerQueryStats, ScopeServerQueryMetricsCommands,
 		ScopeEvents, ScopeOperationHook:
 		return Scope(s), nil
 	}

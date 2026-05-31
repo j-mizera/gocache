@@ -22,6 +22,7 @@ import (
 	"gocache/commons/transport"
 	pkgconfig "gocache/pkg/config"
 	serverEvents "gocache/pkg/events"
+	commandmetrics "gocache/pkg/metrics"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/cmdhooks"
@@ -81,13 +82,15 @@ type Manager struct {
 	logCollector   LogCollector
 	tracker        *serverOps.Tracker
 	clientPusher   ClientPusher
+	commandMetrics *commandmetrics.CommandCollector
 
 	// cancel terminates the lifecycle context derived inside Start.
 	// nil before Start; reset to nil by Shutdown.
 	cancel context.CancelFunc
 
-	pluginConns sync.Map // map[pluginName]*router.PluginConn
-	wg          sync.WaitGroup
+	pluginConns             sync.Map // map[pluginName]*router.PluginConn
+	commandMetricsConsumers sync.Map // map[pluginName]struct{}
+	wg                      sync.WaitGroup
 }
 
 // NewManager creates a plugin manager with the given configuration.
@@ -156,6 +159,13 @@ func (m *Manager) SetTracker(t *serverOps.Tracker) {
 // unsolicited data to client connections (e.g. Pub/Sub messages).
 func (m *Manager) SetClientPusher(p ClientPusher) {
 	m.clientPusher = p
+}
+
+// SetCommandMetrics wires the server-side command metrics collector into the
+// manager's server-query registry and plugin-scope interest tracking.
+func (m *Manager) SetCommandMetrics(c *commandmetrics.CommandCollector) {
+	m.commandMetrics = c
+	RegisterCommandMetricsHandlers(m.queryRegistry, c)
 }
 
 // startPluginLifecycleOp creates the lifecycle operation for a plugin instance
@@ -471,6 +481,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		return
 	}
 	m.scopeRegistry.Register(reg.Name, grantedScopes)
+	m.enableCommandMetricsForPlugin(reg.Name)
 
 	// Plugin self-describes critical, but YAML override takes precedence (already
 	// seeded during Discover). Honor the plugin's value only if no YAML override.
@@ -481,6 +492,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	if len(reg.Commands) > 0 {
 		if err := m.router.RegisterPlugin(reg.Name, conn, reg.Commands); err != nil {
 			logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("command registration failed")
+			m.disableCommandMetricsForPlugin(reg.Name)
 			m.scopeRegistry.Unregister(reg.Name)
 			_ = conn.Send(gcpcv1.NewRegisterAck(false, "command registration failed: "+err.Error(), nil, nil))
 			_ = conn.Close()
@@ -717,12 +729,14 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 				if bridgeMode == eventBridgeModeBridgeOff {
 					return
 				}
-				projected := projectEventForPlugin(evt.Proto, pluginName)
-				gcpcEnv := &gcpcv1.EnvelopeV1{
-					Version: gcpcv1.ProtocolVersion,
-					Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
-				}
-				pluginConn.SendFireAndForget(gcpcEnv)
+				evtProto := evt.Proto
+				pluginConn.SendFireAndForgetLazy(func() *gcpcv1.EnvelopeV1 {
+					projected := projectEventForPlugin(evtProto, pluginName)
+					return &gcpcv1.EnvelopeV1{
+						Version: gcpcv1.ProtocolVersion,
+						Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
+					}
+				})
 			})
 		case *gcpcv1.EnvelopeV1_ServerQuery:
 			query := env.GetServerQuery()
@@ -774,6 +788,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 // name that never registered. Callers must still manage instance state
 // (SetState, emit events) separately.
 func (m *Manager) deregisterPlugin(name string) {
+	m.disableCommandMetricsForPlugin(name)
 	m.router.UnregisterPlugin(name)
 	m.hookRegistry.Unregister(name)
 	m.opHookRegistry.Unregister(name)
@@ -783,6 +798,24 @@ func (m *Manager) deregisterPlugin(name string) {
 	}
 	if m.eventBus != nil {
 		m.eventBus.Unsubscribe("plugin:" + name)
+	}
+}
+
+func (m *Manager) enableCommandMetricsForPlugin(name string) {
+	if m.commandMetrics == nil || !m.scopeRegistry.HasScope(name, scope.ScopeForTopic(commandmetrics.CommandsTopic)) {
+		return
+	}
+	if _, loaded := m.commandMetricsConsumers.LoadOrStore(name, struct{}{}); !loaded {
+		m.commandMetrics.AddConsumer()
+	}
+}
+
+func (m *Manager) disableCommandMetricsForPlugin(name string) {
+	if m.commandMetrics == nil {
+		return
+	}
+	if _, loaded := m.commandMetricsConsumers.LoadAndDelete(name); loaded {
+		m.commandMetrics.RemoveConsumer()
 	}
 }
 
@@ -829,66 +862,91 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 	if evt == nil {
 		return nil
 	}
-	projected := &gcpcv1.EventV1{
-		Type:        evt.Type,
-		Timestamp:   evt.Timestamp,
-		OperationId: evt.OperationId,
-		Data:        evt.Data,
-	}
 	switch d := evt.Data.(type) {
 	case *gcpcv1.EventV1_OperationStart:
-		if d.OperationStart != nil {
-			payload := d.OperationStart
-			projected.Data = &gcpcv1.EventV1_OperationStart{OperationStart: &gcpcv1.OperationStartEventV1{
+		if d.OperationStart == nil || len(d.OperationStart.Context) == 0 {
+			return evt
+		}
+		payload := d.OperationStart
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_OperationStart{OperationStart: &gcpcv1.OperationStartEventV1{
 				Id:       payload.Id,
 				Type:     payload.Type,
 				ParentId: payload.ParentId,
 				Context:  opctx.FilterForPlugin(payload.Context, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_OperationComplete:
-		if d.OperationComplete != nil {
-			payload := d.OperationComplete
-			projected.Data = &gcpcv1.EventV1_OperationComplete{OperationComplete: &gcpcv1.OperationCompleteEventV1{
+		if d.OperationComplete == nil || len(d.OperationComplete.Context) == 0 {
+			return evt
+		}
+		payload := d.OperationComplete
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_OperationComplete{OperationComplete: &gcpcv1.OperationCompleteEventV1{
 				Id:         payload.Id,
 				Type:       payload.Type,
 				ElapsedNs:  payload.ElapsedNs,
 				Status:     payload.Status,
 				FailReason: payload.FailReason,
 				Context:    opctx.FilterForPlugin(payload.Context, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_CommandPost:
-		if d.CommandPost != nil {
-			payload := d.CommandPost
-			projected.Data = &gcpcv1.EventV1_CommandPost{CommandPost: &gcpcv1.CommandPostEventV1{
+		if d.CommandPost == nil || len(d.CommandPost.Metadata) == 0 {
+			return evt
+		}
+		payload := d.CommandPost
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_CommandPost{CommandPost: &gcpcv1.CommandPostEventV1{
 				Command:   payload.Command,
 				Args:      payload.Args,
 				ElapsedNs: payload.ElapsedNs,
 				Result:    payload.Result,
 				Error:     payload.Error,
 				Metadata:  opctx.FilterForPlugin(payload.Metadata, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_CommandPre:
-		if d.CommandPre != nil {
-			payload := d.CommandPre
-			projected.Data = &gcpcv1.EventV1_CommandPre{CommandPre: &gcpcv1.CommandPreEventV1{
+		if d.CommandPre == nil || len(d.CommandPre.Metadata) == 0 {
+			return evt
+		}
+		payload := d.CommandPre
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_CommandPre{CommandPre: &gcpcv1.CommandPreEventV1{
 				Command:  payload.Command,
 				Args:     payload.Args,
 				Metadata: opctx.FilterForPlugin(payload.Metadata, pluginName),
-			}}
+			}},
 		}
 	case *gcpcv1.EventV1_LogEntry:
-		if d.LogEntry != nil {
-			payload := d.LogEntry
-			projected.Data = &gcpcv1.EventV1_LogEntry{LogEntry: &gcpcv1.LogEntryEventV1{
+		if d.LogEntry == nil || len(d.LogEntry.Fields) == 0 {
+			return evt
+		}
+		payload := d.LogEntry
+		return &gcpcv1.EventV1{
+			Type:        evt.Type,
+			Timestamp:   evt.Timestamp,
+			OperationId: evt.OperationId,
+			Data: &gcpcv1.EventV1_LogEntry{LogEntry: &gcpcv1.LogEntryEventV1{
 				Level:   payload.Level,
 				Message: payload.Message,
 				Caller:  payload.Caller,
 				Fields:  opctx.FilterForPlugin(payload.Fields, pluginName),
-			}}
+			}},
 		}
+	default:
+		return evt
 	}
-	return projected
 }

@@ -10,6 +10,14 @@ Evidence anchor: `bench/results/heavy-event-hotpath-20260530/summary.md`.
 
 The current PR should be treated as a successful checkpoint for producer-side observability gating and measurement coverage. Further pipelined IPC improvements should be a continuation PR, not folded into this checkpoint.
 
+## Continuation implementation result
+
+The first continuation branch implemented normal-frame GCPC batching, lazy fire-and-forget envelope construction, per-plugin outbound writer statistics, and a bounded 200 µs telemetry-only batch collection window. Evidence is stored in `bench/results/pipelined-ipc-observability-20260530/summary.md`.
+
+Result: delayed batching improved the IPC Prometheus path versus the PR #89 IPC anchor (`+13.89%` pipelined geometric-mean RPS, `-6.07%` p99) and versus the first no-delay continuation capture (`+20.66%` pipelined RPS, `-10.48%` p99). It does **not** close the thesis-visible pipelined IPC gap: delayed IPC full remains `-51.35%` geometric-mean RPS versus Valkey and `-42.19%` versus the current GoCache core capture in pipelined mode.
+
+Updated conclusion: lower-level frame batching is useful but insufficient. The next optimization focuses on reducing per-command event volume for metrics-only consumers with pull-based Prometheus aggregation (`server:query:metrics.commands`) and cheaper event projection before considering protocol-level batch messages or stream-topology work.
+
 ## Planned continuation PR scope
 
 ### 1. Batch GCPC event delivery
@@ -38,8 +46,8 @@ Problem:
 
 Planned direction:
 
-- Introduce compact metric delta messages or server-side aggregation snapshots.
-- Let Prometheus consume aggregated counters/histograms instead of full per-command events when possible.
+- Use server-side aggregation snapshots exposed through the generic `server:query:metrics.commands` topic.
+- Let Prometheus consume aggregated counters/histograms on scrape instead of full per-command events.
 - Keep full event stream available for plugins that require exact event records.
 
 Expected benefit:
@@ -104,7 +112,7 @@ Expected benefit:
 
 ## Suggested verification for next PR
 
-1. Package benchmarks with `-benchmem` for event bridge, manager, transport, and Prometheus plugin.
+1. Package benchmarks with `-benchmem` for event bridge, manager, transport, pipeline sink modes, and Prometheus plugin.
 2. Heavy Docker benchmark in `bench/redis-benchmark`:
    - core GoCache standard + pipelined;
    - IPC GoCache standard + pipelined;

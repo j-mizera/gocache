@@ -42,3 +42,7 @@ func (b *Pipeline) hasCommandHookSink(op string) bool {
 func (b *Pipeline) hasCommandOperationHookSink() bool {
 	return b.opHookExecutor != nil && b.opHookExecutor.HasOperationType(ops.TypeCommand)
 }
+
+func (b *Pipeline) hasCommandMetricsSink() bool {
+	return b.commandMetrics != nil && b.commandMetrics.HasCommandMetricsSink()
+}

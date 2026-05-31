@@ -2,10 +2,8 @@ package main
 
 import (
 	"bytes"
-	"context"
+	"strconv"
 	"testing"
-
-	apiEvents "gocache/api/events"
 )
 
 func BenchmarkCollectorRecord(b *testing.B) {
@@ -29,10 +27,22 @@ func BenchmarkCollectorWritePrometheus(b *testing.B) {
 	}
 }
 
-func BenchmarkPrometheusHandleCommandCompletedEvent(b *testing.B) {
-	plugin := &prometheusPlugin{collector: NewCollector()}
-	evt := apiEvents.NewCommandCompleted("SET", []string{"k", "v"}, 42_000, "OK", "", nil).Proto
+func BenchmarkCollectorReplaceFromQuery(b *testing.B) {
+	collector := NewCollector()
+	data := map[string]string{
+		"buckets.count":    strconv.Itoa(len(defaultBuckets)),
+		"commands.count":   "1",
+		"command.0.name":   "SET",
+		"command.0.total":  "1000",
+		"command.0.errors": "17",
+		"command.0.sum_ns": "42000000",
+	}
+	for i := 0; i < len(defaultBuckets)+1; i++ {
+		data["command.0.bucket."+strconv.Itoa(i)] = "100"
+	}
 	for b.Loop() {
-		plugin.HandleEvent(context.Background(), evt)
+		if err := collector.ReplaceFromQuery(data); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

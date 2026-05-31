@@ -10,7 +10,7 @@ import (
 	"time"
 
 	apiconfig "gocache/api/config"
-	gcpc "gocache/api/gcpc/v1"
+	"gocache/api/scope"
 	"gocache/api/version"
 	apilogger "gocache/commons/logger"
 	"gocache/sdk/pluginsdk"
@@ -48,18 +48,6 @@ func (p *prometheusPlugin) OnShutdown(ctx context.Context) error {
 	return p.server.Shutdown(ctx)
 }
 
-func (p *prometheusPlugin) EventTypes() []string {
-	return []string{"command.completed"}
-}
-
-func (p *prometheusPlugin) HandleEvent(_ context.Context, evt *gcpc.EventV1) {
-	cmdPost := evt.GetCommandPost()
-	if cmdPost == nil || p.collector == nil {
-		return
-	}
-	p.collector.Record(cmdPost.Command, cmdPost.ElapsedNs, cmdPost.Error != "")
-}
-
 func (p *prometheusPlugin) SetSession(s *pluginsdk.Session) {
 	p.session = s
 }
@@ -70,9 +58,9 @@ func (p *prometheusPlugin) OnConfigReload(cfg apiconfig.PluginConfig) {
 
 func (p *prometheusPlugin) Scopes() []string {
 	return []string{
-		"events",
-		"server:query:health",
-		"server:query:plugins",
+		string(scope.ScopeServerQueryHealth),
+		string(scope.ScopeServerQueryPlugins),
+		string(scope.ScopeServerQueryMetricsCommands),
 	}
 }
 
@@ -95,7 +83,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", metricsHandler(collector, pluginName, version.Version))
+	mux.Handle("/metrics", metricsHandler(plugin, pluginName, version.Version))
 	mux.Handle("/healthz", healthzHandler(plugin))
 	mux.Handle("/readyz", readyzHandler(plugin))
 
