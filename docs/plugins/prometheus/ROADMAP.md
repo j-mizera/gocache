@@ -13,7 +13,7 @@ related:
 
 ## v0.1 — Complete
 
-- Async `command.post` event subscription for all commands
+- Pull-based `server:query:metrics.commands` aggregate snapshots for core command dispatch
 - Per-command counters (`gocache_commands_total`, `gocache_command_errors_total`)
 - Per-command latency histograms (`gocache_command_duration_seconds`, 9 buckets)
 - Plugin info gauge
@@ -23,9 +23,7 @@ related:
 
 ## v0.2 — Planned
 
-- Move metrics input from hook-phase `command.post` naming to ADR-0028 `operation.completed` summaries.
-- Request only the interest-mask detail needed for low-cardinality counters and histograms.
-- Connection gauge (`gocache_connections_active`) via connection events
+- Connection gauge (`gocache_connections_active`) via connection events or a dedicated server query
 - Memory usage gauge (`gocache_memory_used_bytes`) via periodic cache stats query
 - Key count gauge (`gocache_keys_total`)
 - Hit/miss ratio counters for GET commands if the event schema exposes cache hit/miss state

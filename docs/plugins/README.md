@@ -92,7 +92,7 @@ The plugin author SDK (`sdk/pluginsdk/`) wraps the GCPC handshake and message lo
 | `HookPlugin` | Pre/Post command hooks |
 | `OperationHookPlugin` | Operation lifecycle hooks (start/complete) |
 | `EventPlugin` | Subscription to server events |
-| `QueryPlugin` | Server introspection (`server:query:health`, `server:query:plugins`, `server:query:stats`) |
+| `QueryPlugin` | Server introspection (`server:query:health`, `server:query:plugins`, `server:query:stats`, `server:query:metrics.commands`) |
 | `ScopePlugin` | Declares requested scopes |
 
 Bundled IPC plugins:
@@ -100,13 +100,13 @@ Bundled IPC plugins:
 | Plugin | What it does |
 |---|---|
 | `plugins/dummy` | Lifecycle-only test plugin |
-| `plugins/prometheus` | Prometheus `/metrics`, `/healthz`, and `/readyz`; current metrics use async command-completion events, with ADR-0028 targeting cheap `operation.completed` summaries instead of hook-phase `command.post` taxonomy |
+| `plugins/prometheus` | Prometheus `/metrics`, `/healthz`, and `/readyz`; core command counters and histograms are pulled from the generic `server:query:metrics.commands` aggregate snapshot so metrics do not require one IPC event per command |
 
 ## Observability contract direction
 
 ADR-0028 defines the next operation-first observability contract. Plugins should treat `operation.started` and `operation.completed` as the canonical lifecycle events once that contract lands. Other event records are opt-in child facts attached to operations, and high-volume logs use a separate correlated `LogRecord`/diagnostic signal rather than default `log.entry` event-bus delivery.
 
-Event and log subscriptions contribute to server-side interest masks. Those masks let hot-path producers skip optional payload construction entirely when no plugin/exporter requested a signal or detail level. This means a metrics plugin can request cheap completion summaries without forcing command args, key values, hook context maps, or structured log records to be built for every command.
+Event and log subscriptions contribute to server-side interest masks. Those masks let hot-path producers skip optional payload construction entirely when no plugin/exporter requested a signal or detail level. The Prometheus plugin now goes further for its low-cardinality metrics: it requests `server:query:metrics.commands` and pulls aggregate counters/histograms on scrape, while exact command event streams remain available for plugins that need full records.
 
 ## Permissions and scopes
 
