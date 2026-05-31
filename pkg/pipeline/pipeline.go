@@ -15,6 +15,7 @@ import (
 	ops "gocache/api/operations"
 	"gocache/commons/logger"
 	"gocache/commons/resp"
+	"gocache/pkg/benchstats"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -236,6 +237,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		logger.DebugNoCtx().Str("command", op).Msg("unknown command")
 		return apicommand.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
+	benchstats.RecordPipelineEvaluation()
 
 	spec, hasSpec := b.specs[op]
 	if hasSpec {
@@ -280,10 +282,13 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// emitted, or hook-fired.
 	if !b.hasAnySink(op) {
 		if b.hasCommandMetricsSink() {
+			benchstats.RecordPipelineMetricsOnlyPath()
 			return b.evaluateMetricsOnly(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
 		}
+		benchstats.RecordPipelineFastPath()
 		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
 	}
+	benchstats.RecordPipelineFullPath()
 
 	// --- Create command operation ---
 	cmdOp := b.tracker.Start(ops.TypeCommand, ctx.OperationID)
@@ -319,10 +324,19 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// Emit operation.started + command.started events only for interested subscribers.
 	if b.emitter != nil {
 		if b.emitter.HasSubscribersFor(events.OperationStarted) {
-			b.emitter.Emit(events.NewOperationStarted(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, cmdOp.ContextSnapshot(false)))
+			buildStart := benchstats.StartTimer()
+			snapshotStart := benchstats.StartTimer()
+			snapshot := cmdOp.ContextSnapshot(false)
+			benchstats.RecordPipelineContextSnapshot(snapshotStart)
+			evt := events.NewOperationStarted(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, snapshot)
+			benchstats.RecordPipelineOperationStartedBuilt(buildStart)
+			b.emitter.Emit(evt)
 		}
 		if b.emitter.HasSubscribersFor(events.CommandStarted) {
-			b.emitter.Emit(events.NewCommandStarted(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+			buildStart := benchstats.StartTimer()
+			evt := events.NewCommandStarted(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID)
+			benchstats.RecordPipelineCommandStartedBuilt(buildStart)
+			b.emitter.Emit(evt)
 		}
 	}
 
@@ -338,7 +352,9 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	connInfo := &gcpc.ConnectionInfoV1{Id: ctx.ConnectionID, RemoteAddr: ctx.RemoteAddr}
 	cmdInfo := &gcpc.CommandInfoV1{Name: op, Args: args}
 	if hasHooks {
+		snapshotStart := benchstats.StartTimer()
 		hookCtx = cmdOp.ContextSnapshot(false)
+		benchstats.RecordPipelineContextSnapshot(snapshotStart)
 
 		if pre := b.hookExecutor.RunPreHooks(opCtx, cmdInfo, connInfo, hookCtx); pre != nil {
 			if pre.Denied {
@@ -385,10 +401,19 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 
 	if b.emitter != nil {
 		if b.emitter.HasSubscribersFor(events.CommandCompleted) {
-			b.emitter.Emit(events.NewCommandCompleted(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID))
+			buildStart := benchstats.StartTimer()
+			evt := events.NewCommandCompleted(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID)
+			benchstats.RecordPipelineCommandCompletedBuilt(buildStart)
+			b.emitter.Emit(evt)
 		}
 		if b.emitter.HasSubscribersFor(events.OperationCompleted) {
-			b.emitter.Emit(events.NewOperationCompleted(cmdOp.ID, string(cmdOp.Type), elapsedNs, "completed", "", cmdOp.ContextSnapshot(false)))
+			buildStart := benchstats.StartTimer()
+			snapshotStart := benchstats.StartTimer()
+			snapshot := cmdOp.ContextSnapshot(false)
+			benchstats.RecordPipelineContextSnapshot(snapshotStart)
+			evt := events.NewOperationCompleted(cmdOp.ID, string(cmdOp.Type), elapsedNs, "completed", "", snapshot)
+			benchstats.RecordPipelineOperationCompletedBuilt(buildStart)
+			b.emitter.Emit(evt)
 		}
 	}
 

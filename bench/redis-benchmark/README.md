@@ -31,6 +31,10 @@ image unchanged while adding selected plugin binaries to the benchmark image.
 # IPC-plugin overhead run with the Prometheus metrics plugin.
 ./bench/redis-benchmark/run-ipc.sh resp-pool --target gocache-ipc
 
+# Runtime attribution run: adds benchprobe snapshots around startup,
+# standard, and pipelined windows.
+BENCH_STATS=1 ./bench/redis-benchmark/run-ipc.sh resp-pool --target gocache-ipc-otel
+
 # Pub/Sub fanout runs. These use real SUBSCRIBE connections and verify every
 # published message reaches every subscriber.
 ./bench/redis-benchmark/run-pubsub.sh resp-pool --target valkey
@@ -55,6 +59,7 @@ Output per run lands under `bench/results/<branch>/` (the script derives `<branc
 - `<label>-<target>-pipelined.csv` — same suite with `-P 10`
 - `<label>-<target>-memory.txt` — container RSS before/after + run metadata
 - `<label>-<target>-config.yaml` — generated only for IPC targets, preserving the exact plugin config used for the capture
+- `<label>-<target>-benchstats-{baseline,standard,pipelined}.json` — generated only when `BENCH_STATS=1`; contains `bench.stats` counters plus `plugin.ipc` queue/write snapshots for the startup, standard, and pipelined windows
 
 Targets now form the benchmark matrix:
 
@@ -63,6 +68,7 @@ Targets now form the benchmark matrix:
 | `valkey` | `run.sh` | Reference Valkey server with persistence disabled |
 | `gocache` | `run.sh` | Core GoCache with no IPC plugins |
 | `gocache-ipc` | `run-ipc.sh` | GoCache with the `prometheus` IPC plugin registered, Prometheus metrics scraped from `server:query:metrics.commands` aggregate snapshots |
+| `gocache-ipc-otel` | `run-ipc.sh` | GoCache with `prometheus` plus runtime `instrumentation` traces/logs exporting to a local OpenTelemetry Collector `nop` pipeline |
 | `gocache-pubsub` | `run-pubsub.sh` | GoCache with the `pubsub` IPC plugin, measured with real subscribers and `ClientPushV1` fanout |
 
 Pub/Sub output is separate from the generic matrix:
@@ -94,6 +100,7 @@ Fixed parameters (env-overridable):
 | `BENCH_SUITE`     | (see above) | `-t` suite passed to valkey-benchmark    |
 | `GOCACHE_IPC_IMAGE` | `gocache-bench:local-ipc` | IPC benchmark image tag |
 | `IPC_PLUGINS` | `prometheus` | Space-separated IPC plugin list compiled into the IPC benchmark image |
+| `BENCH_STATS` | `0` | Truthy values (`1`, `true`, `yes`, `on`) add the benchmark-only `benchprobe` IPC plugin, set `GOCACHE_BENCH_STATS=true`, and write baseline/standard/pipelined JSON attribution snapshots |
 | `BENCH_IPC_EVENT_MODE` | `full` | IPC event attribution mode for `run-ipc.sh`: `full`, `events-off`, or `bridge-off`; Prometheus command metrics use `server:query:metrics.commands`, while the event switch remains for attribution and other event consumers |
 | `BENCH_PUBSUB_N` | `10000` | PUBLISH requests per Pub/Sub fanout scenario |
 | `BENCH_PUBSUB_FANOUTS` | `0,1,10` | Comma-separated subscriber counts to verify |

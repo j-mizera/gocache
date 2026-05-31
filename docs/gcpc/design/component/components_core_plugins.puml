@@ -4,7 +4,8 @@
 frame "GoCache - Core + Plugin System Architecture" as F {
 
     actor "Client" as client <<Redis CLI / App>>
-    cloud "Kafka" as kafka <<Message Queue>>
+    cloud "Prometheus" as prom
+    cloud "Jaeger / OTLP backend" as jaeger
 
     rectangle "GoCache Server" as server {
 
@@ -14,28 +15,61 @@ frame "GoCache - Core + Plugin System Architecture" as F {
             component [In-Memory\nCache] as cache <<Storage>>
             component [Command\nDispatcher] as cmd <<Engine>>
             component [Background\nWorkers] as workers <<TTL / Snapshots>>
+            component [Command Metrics\nAggregate] as metrics <<query snapshot>>
+            component [Log Collector] as logs <<runtime.logs batches>>
         }
 
         rectangle "Plugin System" as plugin_sys {
-            component [IPC Transport] as ipc <<Unix Socket / Proto>>
-            component [Permission\nLayer] as perm <<Scope & Hooks>>
-            component [Lifecycle Mgr] as lifecycle <<Registry & Health>>
+            component [IPC Transport] as ipc <<Unix Socket / Protobuf>>
+            component [Permission\nLayer] as perm <<Scopes + Hooks>>
+            component [Lifecycle Mgr] as lifecycle <<Registry + Health>>
+            component [Event Bus] as eventbus <<operation.* + runtime.logs>>
+        }
+
+        rectangle "Embedded Plugins" as embedded {
+            component [lifecycleotlp] as lifecycleotlp <<pre-IPC traces>>
+            component [crashdump] as crashdump <<panic files>>
         }
     }
 
-    rectangle "Plugin Process (Separate)" as plugin_proc {
-        component [Plugin SDK] as plugin_sdk <<Client Library>>
-        component [Hook Handler] as hooks <<Pre/Post Handlers>>
+    rectangle "IPC Plugin: instrumentation" as instr_proc {
+        component [Plugin SDK] as instr_sdk
+        component [OTLP Trace Exporter] as traces
+        component [OTLP Log Exporter] as otlplogs
     }
 
-    ' -- Relations --
-    client --> resp : RESP commands\n//TCP//
+    rectangle "IPC Plugin: prometheus" as prom_proc {
+        component [Plugin SDK] as prom_sdk
+        component [/metrics HTTP] as http
+    }
+
+    client --> resp : RESP commands
     resp --> cmd : Dispatch
     cmd --> cache : Read/Write
-    cmd --> ipc : Plugin commands/hooks
-    ipc --> plugin_sdk : Unix socket + Protobuf
-    plugin_sdk --> hooks : Deliver hooks
-    plugin_sdk ..> kafka : Optional events\n//Async//
+    cmd --> metrics : cheap aggregate when queried
+    cmd --> eventbus : operation.started/completed
+    logs --> eventbus : runtime.logs batch
+
+    eventbus --> ipc : EventV1 delivery
+    ipc --> instr_sdk : GCPC events
+    instr_sdk --> traces : spans
+    instr_sdk --> otlplogs : log records
+    traces --> jaeger : OTLP HTTP
+    otlplogs --> jaeger : OTLP HTTP
+
+    http --> prom : Prometheus scrape
+    prom_sdk --> ipc : ServerQueryV1\nmetrics.commands
+    ipc --> metrics : snapshot response
+
+    lifecycleotlp --> jaeger : startup/config/shutdown OTLP
+    crashdump --> logs : crash diagnostics
 }
+
+note bottom
+  Observability split:
+  - Prometheus metrics are query/pull only.
+  - Runtime instrumentation consumes event/log batches.
+  - lifecycleotlp remains embedded for pre-IPC lifecycle visibility.
+end note
 
 @enduml

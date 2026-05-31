@@ -2,7 +2,7 @@
 title: Server Architecture
 description: Microkernel solution architecture — design principles, per-shard locking, dispatch model, plugin tiers
 status: living
-last_updated: 2026-05-03
+last_updated: 2026-05-31
 related:
   - Server
   - Server-Components-Diagrams
@@ -100,6 +100,10 @@ Each entry tracks: value, value type, expiration timestamp (nanosecond precision
 
 ### Plugin System
 
+#### Runtime Observability
+
+Runtime traces and logs are exported by the IPC `instrumentation` plugin. It subscribes to `operation.started`, `operation.completed`, `runtime.logs`, and `replay.gap` over the event stream and exports OTLP traces/logs to a backend such as Jaeger. Metrics remain separate: the `prometheus` plugin uses `server:query:metrics.commands` and serves `/metrics` without command hooks or event subscriptions. Embedded `lifecycleotlp` covers only pre-IPC startup/config/shutdown visibility.
+
 #### Transport Layer
 
 Length-prefixed framing over Unix domain sockets. Each message is a 4-byte big-endian length header followed by a serialized Protobuf message. A write mutex ensures concurrent senders don't interleave frames.
@@ -120,6 +124,12 @@ GoCache Plugin Communication protocol, versioned from day one (currently v1). Al
 | CommandResponse | Plugin -> Server | Command result (recursive RESP-like value tree) |
 | HookRequest | Server -> Plugin | Pre/post hook invocation |
 | HookResponse | Plugin -> Server | Allow/deny decision (pre-hooks only) |
+| OperationHookRequest | Server -> Plugin | Operation lifecycle notification |
+| OperationHookResponse | Plugin -> Server | Operation context enrichment / acknowledgement |
+| EventSubscribe | Plugin -> Server | Declare event types consumed by the plugin |
+| Event | Server -> Plugin | Async event/log/replay-gap delivery |
+| ServerQuery | Plugin -> Server | Query server health/plugins/stats/metrics/operation topics |
+| ServerQueryResponse | Server -> Plugin | Query result payload |
 
 #### Lifecycle Manager
 
@@ -166,6 +176,9 @@ Scope-based access control for plugins. Plugins declare requested scopes at regi
 | `admin` | Server-level operations | Implies `write` |
 | `hook:pre` | Pre-hook registration | Independent |
 | `hook:post` | Post-hook registration | Independent |
+| `operation:hook` | Operation hook registration | Independent |
+| `events` | Event subscription delivery | Independent |
+| `server:query` / `server:query:<topic>` | Server introspection queries | `server:query` grants all subtopics |
 | `keys:<pattern>` | Key namespace restriction (glob) | Independent |
 
 Enforcement points:
@@ -252,7 +265,8 @@ Signal (SIGTERM/SIGINT)
 | Component | [Core Subsystems](design/component/components_core.puml) | Pipeline, engine, storage, workers |
 | Component | [Configuration](design/component/components_config.puml) | Config loading, layering, hot reload |
 | Component | [Memory & Eviction](design/component/components_memory_eviction.puml) | LRU eviction internals |
-| Component | [Event Bus + Replay Ring](design/component/components_event_bus_ring.puml) | Bounded ring for late subscriber catch-up |
+| Component | [Event Bus + Replay Ring](design/component/components_event_bus_ring.puml) | Bounded event/log replay for late subscribers |
+| Component | [Async Event Delivery](design/component/components_async_event_delivery.puml) | Event bridge, runtime log batches, and best-effort telemetry queues |
 | Sequence | [Command Flow](design/sequence/sequence_command_flow.puml) | Core hot path with hooks and plugin fallback |
 | Sequence | [Transactions](design/sequence/sequence_transaction.puml) | MULTI/EXEC/DISCARD flow |
 | Sequence | [TTL Expiry](design/sequence/sequence_ttl_expiry.puml) | Dual strategy: passive + active sweep |
@@ -262,7 +276,8 @@ Signal (SIGTERM/SIGINT)
 | Sequence | [Boot + Crash Survivability](design/sequence/sequence_boot_crash_survivability.puml) | Embedded plugins, bootstate marker, crashdump defer |
 | State | [Connection Lifecycle](design/state/state_connection.puml) | Client connection FSM (auth, hooks) |
 | State | [Server Lifecycle](design/state/state_server.puml) | Server startup and shutdown FSM |
-| State | [Embedded Plugin Lifecycle](design/state/state_embedded_plugin_lifecycle.puml) | Compile-time-linked observability plugin FSM |
+| State | [Embedded Plugin Lifecycle](design/state/state_embedded_plugin_lifecycle.puml) | Compile-time-linked lifecycle/crashdump plugin FSM |
+| State | [Event Replay Cursors](design/state/state_event_replay_cursors.puml) | Replay, cursor, drop, and replay.gap states |
 
 ### GCPC Protocol
 
@@ -273,6 +288,8 @@ See [GCPC documentation](../gcpc/README.md) for protocol details and the followi
 | Component | [IPC Architecture](../gcpc/design/component/components_ipc.puml) | Server-plugin transport and framing |
 | Component | [Plugin Internals](../gcpc/design/component/components_plugin.puml) | Plugin process internal structure |
 | Component | [Core + Plugin Overview](../gcpc/design/component/components_core_plugins.puml) | Core-plugin relationship |
+| Component | [Operations](../gcpc/design/component/components_operations.puml) | Operation lifecycle, context, event/log materialization |
+| Component | [Runtime Observability](../gcpc/design/component/components_runtime_observability.puml) | Instrumentation plugin, log collector, Prometheus split, lifecycle OTLP split |
 | Component | [Command Routing](../gcpc/design/component/components_command_routing.puml) | Main + REX namespace routing |
 | Component | [Hook & Priority](../gcpc/design/component/components_hooks_priority.puml) | Hook registry and priority dispatch |
 | Component | [Permission Scopes](../gcpc/design/component/components_permission_scopes.puml) | Scope model and enforcement |
@@ -281,10 +298,14 @@ See [GCPC documentation](../gcpc/README.md) for protocol details and the followi
 | Sequence | [Command Dispatch](../gcpc/design/sequence/sequence_plugin_command_routing.puml) | Plugin command routing over IPC |
 | Sequence | [Hook Flow](../gcpc/design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution with context |
 | Sequence | [Hook Context Flow](../gcpc/design/sequence/sequence_hook_context.puml) | Context namespacing across multiple plugins |
+| Sequence | [Synchronous Reaction Points](../gcpc/design/sequence/sequence_sync_reaction_points.puml) | Hooks/evaluators versus async events |
+| Sequence | [Pipelined Event Batching](../gcpc/design/sequence/sequence_pipelined_event_batching.puml) | Pipelined command replies with batched event delivery |
+| Sequence | [Runtime OTLP Export](../gcpc/design/sequence/sequence_runtime_observability_export.puml) | Operation/log/replay-gap flow into OTLP traces and logs |
 | Sequence | [Scope Registration](../gcpc/design/sequence/sequence_scope_registration.puml) | Scope negotiation |
 | Sequence | [Scope Enforcement](../gcpc/design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
 | Sequence | [OpHook Replay on Subscribe](../gcpc/design/sequence/sequence_ophook_replay_on_subscribe.puml) | Synthetic PhaseStart delivery for late subscribers |
 | State | [Plugin Lifecycle](../gcpc/design/state/state_plugin_lifecycle.puml) | Plugin FSM |
+| State | [Operation Lifecycle](../gcpc/design/state/state_operation_lifecycle.puml) | Operation state and public lifecycle event names |
 | State | [Hook Execution](../gcpc/design/state/state_hook_execution.puml) | Hook dispatch FSM |
 | State | [Scope Resolution](../gcpc/design/state/state_scope_resolution.puml) | Scope validation FSM |
 | State | [OpHook Replay Suppression](../gcpc/design/state/state_ophook_replay_suppression.puml) | Per-plugin replay vs restart-storm suppression |

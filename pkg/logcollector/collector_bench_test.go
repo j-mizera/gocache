@@ -16,6 +16,7 @@ func BenchmarkCollectorParseLine(b *testing.B) {
 		for b.Loop() {
 			c.parseLine("server", jsonLine)
 		}
+		c.Wait()
 	})
 	b.Run("plain", func(b *testing.B) {
 		em := &mockEmitter{}
@@ -24,6 +25,7 @@ func BenchmarkCollectorParseLine(b *testing.B) {
 		for b.Loop() {
 			c.parseLine("plugin", plainLine)
 		}
+		c.Wait()
 	})
 	b.Run("source_reader", func(b *testing.B) {
 		line := string(jsonLine) + "\n"

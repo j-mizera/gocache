@@ -195,7 +195,7 @@ message ServerQueryResponseV1 {
 // EventSubscribeV1 is sent by a plugin to subscribe to server events.
 // Can be sent multiple times to update the subscription.
 message EventSubscribeV1 {
-  repeated string types = 1; // event types to subscribe to (e.g. "command.post", "log.entry")
+  repeated string types = 1; // event types to subscribe to (e.g. "operation.completed", "replay.gap")
 }
 
 // EventV1 is sent by the server to subscribed plugins (fire-and-forget).
@@ -217,9 +217,10 @@ message EventV1 {
     ConfigReloadedEventV1    config_reloaded    = 19;
     AuthFailedEventV1        auth_failed        = 20;
     CacheEvictionEventV1     cache_eviction     = 21;
-    LogEntryEventV1          log_entry          = 22;
     OperationStartEventV1    operation_start    = 23;
     OperationCompleteEventV1 operation_complete = 24;
+    ReplayGapEventV1         replay_gap         = 25;
+    RuntimeLogBatchEventV1   runtime_log_batch  = 26;
   }
 }
 
@@ -290,11 +291,26 @@ message CacheEvictionEventV1 {
   string reason = 2; // "lru", "memory"
 }
 
-message LogEntryEventV1 {
-  string              level   = 1; // "debug", "info", "warn", "error", "fatal"
-  string              message = 2;
-  string              caller  = 3; // source file:line
-  map<string, string> fields  = 4; // structured log fields
+message ReplayGapEventV1 {
+  string subscriber    = 1;
+  uint64 dropped_count = 2;
+}
+
+// RuntimeLogBatchEventV1 carries diagnostic runtime logs through the normal
+// event subscription stream. Batches are emitted periodically by the server log
+// collector, not on every operation completion.
+message RuntimeLogBatchEventV1 {
+  repeated RuntimeLogRecordV1 records = 1;
+}
+
+message RuntimeLogRecordV1 {
+  uint64              timestamp    = 1;
+  string              operation_id = 2;
+  string              level        = 3; // "debug", "info", "warn", "error", "fatal"
+  string              source       = 4; // server or plugin/component source
+  string              message      = 5;
+  string              caller       = 6; // source file:line when available
+  map<string, string> fields       = 7;
 }
 
 // --- Client Push ---

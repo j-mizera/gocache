@@ -2,7 +2,7 @@
 title: Plugin SDK Guide
 description: How to write GoCache plugins — IPC and embedded, interfaces, configuration, operations, logging, scopes
 status: living
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 related:
   - Plugins
   - GCPC
@@ -279,26 +279,25 @@ type EventPlugin interface {
 }
 ```
 
-Events are fire-and-forget notifications. The current implementation exposes these event type strings:
+Events are fire-and-forget notifications. The current public observability event names are operation-first:
 
 | Type | Fires when |
 |------|------------|
-| `command.pre` | Before command execution |
-| `command.post` | After command execution |
-| `connection.open` | Client connects |
-| `connection.close` | Client disconnects |
-| `server.start` | Server starts accepting traffic |
-| `server.shutdown` | Server begins shutdown |
-| `plugin.registered` | Plugin completes registration |
-| `plugin.crashed` | Plugin process crashes |
-| `plugin.restarted` | Plugin restarted after crash |
-| `config.reloaded` | Config file hot-reloaded |
-| `cache.eviction` | Key evicted by LRU |
-| `log.entry` | Structured log line emitted |
-| `operation.start` | Operation begins |
-| `operation.complete` | Operation ends |
+| `operation.started` | A server-tracked operation begins. |
+| `operation.completed` | A server-tracked operation completes or fails. |
+| `runtime.logs` | The server log collector flushes a batch of runtime log records. |
+| `replay.gap` | Event replay history was incomplete because retained history overflowed. |
+| `connection.open` | Client connects. |
+| `connection.close` | Client disconnects. |
+| `server.start` | Server starts accepting traffic. |
+| `server.shutdown` | Server begins shutdown. |
+| `plugin.registered` | Plugin completes registration. |
+| `plugin.crashed` | Plugin process crashes. |
+| `plugin.restarted` | Plugin restarted after crash. |
+| `config.reloaded` | Config file hot-reloaded. |
+| `cache.eviction` | Key evicted by LRU. |
 
-ADR-0028 defines the target operation-first contract for the next schema update: lifecycle events become `operation.started` and `operation.completed`; hook-phase names such as `command.post` stop being the public event taxonomy; logs move to a separate correlated `LogRecord`/diagnostic subscription path. Event/log subscriptions should contribute to server-side interest masks so producers skip optional payload construction unless a plugin requested the exact signal and detail level.
+Hook-phase names such as `command.pre` and `command.post` describe synchronous reaction points, not the public event taxonomy. Runtime logs are delivered as batched `runtime.logs` diagnostics from `pkg/logcollector`; the old per-line `log.entry` event is removed. Event/log subscriptions should contribute to server-side interest masks so producers skip optional payload construction unless a plugin requested the exact signal and detail level.
 
 ```go
 func (p *myPlugin) EventTypes() []string {
@@ -338,9 +337,9 @@ Available query topics:
 | `health` | `server:query:health` | Server health status |
 | `plugins` | `server:query:plugins` | Registered plugin list |
 | `stats` | `server:query:stats` | Server statistics |
-| `operation.start` | (internal) | Start a server-tracked operation |
-| `operation.complete` | (internal) | Complete an operation |
-| `operation.fail` | (internal) | Fail an operation |
+| `operation.start` | (internal query topic, not an event) | Start a server-tracked operation |
+| `operation.complete` | (internal query topic, not an event) | Complete an operation |
+| `operation.fail` | (internal query topic, not an event) | Fail an operation |
 
 #### ConfigPlugin — react to config reloads
 
@@ -406,7 +405,7 @@ op.Fail("disk full")
 op.Enrich("records_processed", "42")
 ```
 
-`StartOperation` sends a query to the server (topic `operation.start`), which creates a tracked operation. `Complete()` and `Fail()` notify the server so the operation appears in stats and traces.
+`StartOperation` sends an internal server query (topic `operation.start`), which creates a tracked operation. `Complete()` and `Fail()` use internal query topics too; these are distinct from the public `operation.started` and `operation.completed` observability events consumed by instrumentation plugins.
 
 ---
 

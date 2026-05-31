@@ -1,0 +1,59 @@
+@startuml sequence_runtime_observability_export
+!include ../../../design/theme.iuml
+
+title Runtime OTLP Trace and Log Export
+
+actor Client
+participant "Pipeline" as Pipeline
+participant "Operation Tracker" as Tracker
+participant "pkg/logcollector" as LogCollector
+participant "Event Bus" as EventBus
+participant "Plugin Manager\nEvent Bridge" as Bridge
+participant "Instrumentation Plugin" as Instr
+participant "OTLP Trace Exporter" as TraceExporter
+participant "OTLP Log Exporter" as LogExporter
+participant "Jaeger / OTLP Backend" as Jaeger
+participant "Prometheus Plugin" as PromPlugin
+
+== Operation lifecycle ==
+Client -> Pipeline : RESP command with optional META traceparent
+Pipeline -> Tracker : Start(TypeCommand)
+Tracker -> EventBus : operation.started\noperation_id + context
+EventBus -> Bridge : subscriber callback
+Bridge -> Instr : GCPC EventV1 operation.started
+Instr -> Instr : start span\nextract traceparent from context/metadata
+
+Pipeline -> Pipeline : execute command
+Pipeline -> Tracker : Complete(status, duration)
+Tracker -> EventBus : operation.completed
+EventBus -> Bridge : subscriber callback
+Bridge -> Instr : GCPC EventV1 operation.completed
+Instr -> Instr : end span
+Instr -> TraceExporter : batch span
+TraceExporter -> Jaeger : OTLP HTTP
+
+== Runtime logs ==
+Pipeline -> LogCollector : structured JSON/plain text log\ncontains _operation_id when available
+LogCollector -> LogCollector : parse + buffer records
+... flush interval or max batch ...
+LogCollector -> EventBus : RuntimeLogBatchEventV1\ntype runtime.logs
+EventBus -> Bridge : subscriber callback
+Bridge -> Instr : GCPC EventV1 runtime.logs
+Instr -> Instr : redact fields\njoin to active span by operation_id
+Instr -> LogExporter : batch log records
+LogExporter -> Jaeger : OTLP HTTP logs
+
+== Replay gaps ==
+EventBus -> Bridge : replay.gap when ring overflowed
+Bridge -> Instr : GCPC EventV1 replay.gap
+Instr -> LogExporter : warning log record\npartial-history marker
+
+== Metrics are separate ==
+PromPlugin -> Pipeline : ServerQueryV1 metrics.commands
+Pipeline --> PromPlugin : aggregate counters/histograms
+note right of PromPlugin
+  Metrics are pull/query only and do not
+  flow through the instrumentation plugin.
+end note
+
+@enduml

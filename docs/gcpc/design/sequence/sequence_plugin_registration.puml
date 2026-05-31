@@ -4,97 +4,77 @@
 mainframe **sd** Plugin Registration Handshake
 
 participant "Plugin Manager" as Mgr
-    participant "OS" as OS
-    participant "Plugin Process\n(fork/exec)" as Proc
-    participant "Plugin SDK\n(pluginsdk.Run)" as SDK
-    participant "UDS Listener" as Listener
-    participant "Transport\nConn" as Conn
-    participant "Command Router" as Router
-    participant "Hook Registry" as HookReg
-    participant "Plugin Registry" as PluginReg
+participant "OS" as OS
+participant "Plugin Process\n(fork/exec)" as Proc
+participant "Plugin SDK\n(pluginsdk.Run)" as SDK
+participant "UDS Listener" as Listener
+participant "Transport\nConn" as Conn
+participant "Command Router" as Router
+participant "Hook Registry" as HookReg
+participant "Event Bridge" as Events
+participant "Plugin Registry" as PluginReg
 
-    == Discovery ==
+== Discovery ==
 
-    Mgr -> Mgr : Discover(cfg)\nScan plugin dir for executables\nApply YAML overrides
-    Mgr -> PluginReg : Add(PluginInstance)\nState = Loaded
+Mgr -> Mgr : Discover(cfg)\nScan plugin dir for executables\nApply YAML overrides
+Mgr -> PluginReg : Add(PluginInstance)\nState = Loaded
 
-    == Launch ==
+== Launch ==
 
-    Mgr -> OS : exec.CommandContext(binPath)\nenv: GOCACHE_PLUGIN_SOCK=<path>
-    OS -> Proc : Fork/Exec
-    Mgr -> PluginReg : SetState(Starting)
+Mgr -> OS : exec.CommandContext(binPath)\nenv: GOCACHE_PLUGIN_SOCK=<path>
+OS -> Proc : Fork/Exec
+Mgr -> PluginReg : SetState(Starting)
 
-    == Connect ==
+== Connect ==
 
-    Proc -> SDK : pluginsdk.Run(ctx, plugin)
-    SDK -> SDK : os.Getenv("GOCACHE_PLUGIN_SOCK")
-    SDK -> Listener : net.Dial("unix", sockPath)
-    Listener -> Conn : Accept -> transport.NewConn()
+Proc -> SDK : pluginsdk.Run(ctx, plugin)
+SDK -> SDK : os.Getenv("GOCACHE_PLUGIN_SOCK")
+SDK -> Listener : net.Dial("unix", sockPath)
+Listener -> Conn : Accept -> transport.NewConn()
 
-    == Registration ==
+== Registration ==
 
-    SDK -> SDK : Detect interfaces:\nCommandPlugin? HookPlugin?
+SDK -> SDK : Detect interfaces:\nCommandPlugin? HookPlugin?\nOperationHookPlugin? EventPlugin?\nQueryPlugin? ScopePlugin?
+SDK -> Conn : Send RegisterV1\ncommands, hooks, requested_scopes
+Conn -> Mgr : Recv RegisterV1
 
-    SDK -> Conn : Send RegisterV1
-    note right
-      RegisterV1 {
-        name: "pubsub"
-        version: "1.0.0"
-        critical: false
-        commands: [
-          {name: "PUBLISH", namespaced: false, min_args: 2, max_args: 2},
-          {name: "SUBSCRIBE", namespaced: false, min_args: 1, max_args: -1}
-        ]
-        hooks: [
-          {pattern: "*", phase: POST}
-        ]
-        priority: 5
-      }
-    end note
+alt Plugin name not in registry
+    Mgr -> Conn : RegisterAckV1{accepted: false, reason: "unknown plugin"}
+    Conn -> SDK : Rejected
+    SDK -> Proc : Exit(1)
+else Known plugin
+    Mgr -> Mgr : Apply YAML overrides\nconfig + failure policy + scopes
 
-    Conn -> Mgr : Recv RegisterV1
-
-    alt Plugin name not in registry
-        Mgr -> Conn : RegisterAckV1{accepted: false, reason: "unknown plugin"}
-        Conn -> SDK : Rejected
-        SDK -> Proc : Exit(1)
-    else Known plugin
-        Mgr -> Mgr : Apply YAML overrides\n(critical, priority)
-
-        alt Has commands
-            Mgr -> Router : RegisterPlugin(name, conn, commands)
-
-            alt Shadows core command
-                Router --> Mgr : Error: "cannot shadow core command: GET"
-                Mgr -> Conn : RegisterAckV1{accepted: false}
-                Conn -> SDK : Rejected
-            else
-                Router --> Mgr : OK
-                Router -> Router : Create PluginConn\n(start readLoop)
-            end
-        end
-
-        alt Has hooks
-            Mgr -> HookReg : Register(name, priority, critical, conn, hooks)
-            HookReg -> HookReg : Sort pre/post slices\nby priority
-        end
-
-        Mgr -> PluginReg : SetState(Registered)
-        Mgr -> Conn : RegisterAckV1{\n  accepted: true,\n  granted_scopes: [...],\n  config: {key: "val", ...}\n}
-        note right
-          Config map delivers scoped
-          plugin config from YAML
-          (plugins.overrides.<name>.config).
-          SDK builds RemoteConfig from it.
-        end note
-        Mgr -> PluginReg : SetState(Running)
-
-        Conn -> SDK : Accepted
-
-        == Message Loop ==
-
-        hnote over SDK : Enter message loop:\nHealthCheck, Shutdown,\nCommandRequest, HookRequest
-        hnote over Mgr : Start healthLoop()\nStart readLoop()
+    alt Has commands
+        Mgr -> Router : RegisterPlugin(name, conn, commands)
+        Router --> Mgr : OK or shadow error
     end
+
+    alt Has hooks
+        Mgr -> HookReg : Register(name, priority, conn, hooks)
+        HookReg -> HookReg : Sort pre/post slices
+    end
+
+    alt Has EventPlugin
+        SDK -> Conn : EventSubscribeV1\noperation.started, operation.completed,\nruntime.logs, replay.gap
+        Conn -> Events : Register subscription\n(snapshot + live delivery)
+    end
+
+    Mgr -> PluginReg : SetState(Registered)
+    Mgr -> Conn : RegisterAckV1{accepted: true,\n  granted_scopes: [...],\n  config: {key: "val", ...}}
+    note right
+      SDK applies initial config immediately.
+      Later ConfigReloadV1 updates call
+      ConfigPlugin.OnConfigReload.
+    end note
+    Mgr -> PluginReg : SetState(Running)
+
+    Conn -> SDK : Accepted
+
+    == Message Loop ==
+
+    hnote over SDK : Enter message loop:\nHealthCheck, Shutdown,\nCommandRequest, HookRequest,\nOperationHookRequest, EventV1
+    hnote over Mgr : Start healthLoop()\nStart readLoop()
+end
 
 @enduml

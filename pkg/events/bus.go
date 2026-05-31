@@ -16,6 +16,7 @@ import (
 	apiconfig "gocache/api/config"
 	apiEvents "gocache/api/events"
 	"gocache/commons/logger"
+	"gocache/pkg/benchstats"
 )
 
 // Handler is a function that processes an event. Must be non-blocking.
@@ -147,12 +148,14 @@ func (b *Bus) Unsubscribe(name string) {
 // Emit sends an event to all interested subscribers and records it in the
 // replay ring. Non-blocking. Implements api/events.Emitter.
 func (b *Bus) Emit(evt apiEvents.Event) {
+	emitStart := benchstats.StartTimer()
 	b.mu.Lock()
 	b.ring.push(evt)
 	evtType := apiEvents.Type(evt.Proto.Type)
 	typeSubs := b.typeSubs[evtType]
 	if len(typeSubs) == 0 {
 		b.mu.Unlock()
+		benchstats.RecordEventBusNoSubscriberEmit(emitStart)
 		return
 	}
 
@@ -165,12 +168,15 @@ func (b *Bus) Emit(evt apiEvents.Event) {
 	for _, sub := range targets {
 		deliverOne(sub.Name, sub.Handler, evt)
 	}
+	benchstats.RecordEventBusEmit(len(targets), emitStart)
 }
 
 // deliverOne invokes handler with panic isolation so a single bad
 // subscriber cannot take down the emitter.
 func deliverOne(name string, handler Handler, evt apiEvents.Event) {
+	deliveryStart := benchstats.StartTimer()
 	defer func() {
+		benchstats.RecordEventBusDelivery(deliveryStart)
 		if r := recover(); r != nil {
 			// Surface the originating operation_id so the panic can be
 			// correlated with the producer via Grafana/logs. No ctx is
@@ -210,17 +216,22 @@ func (b *Bus) HasSubscribers() bool {
 func (b *Bus) HasSubscribersFor(types ...apiEvents.Type) bool {
 	mask := b.interestMask.Load()
 	if mask == 0 {
+		benchstats.RecordEventBusInterestCheck(false)
 		return false
 	}
 	for _, eventType := range types {
 		bit := eventTypeBit(eventType)
 		if bit == 0 {
-			return b.HasSubscribers()
+			hit := b.HasSubscribers()
+			benchstats.RecordEventBusInterestCheck(hit)
+			return hit
 		}
 		if mask&bit != 0 {
+			benchstats.RecordEventBusInterestCheck(true)
 			return true
 		}
 	}
+	benchstats.RecordEventBusInterestCheck(false)
 	return false
 }
 
@@ -290,7 +301,7 @@ func eventTypeBit(eventType apiEvents.Type) uint64 {
 		return 1 << 10
 	case apiEvents.CacheEviction:
 		return 1 << 11
-	case apiEvents.LogEntry:
+	case apiEvents.RuntimeLogBatch:
 		return 1 << 12
 	case apiEvents.OperationStarted:
 		return 1 << 13

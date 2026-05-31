@@ -9,21 +9,22 @@ participant "embedded.Registry" as ER
 participant "bootstate" as BS
 participant "config.Load" as C
 participant "crashdump" as CD
+participant "lifecycleotlp\n(embedded)" as LOTLP
 participant "runtime" as R
 
-M -> L : InitStderr — JSON from line 1
+M -> L : InitStderr - JSON from line 1
 M -> BS : Write(stage=embedded_boot)
-M -> M : defer { recover → crashdump.WriteFromPanic }
+M -> M : defer { recover -> crashdump.WriteFromPanic }
 note right of M
-  Registered FIRST — survives
-  every later defer, including
-  embedded.ShutdownAll.
+  Registered FIRST - survives every later defer,
+  including embedded.ShutdownAll.
 end note
 
 M -> M : embBootOp = ops.New(TypeStartup)\nenrich("_boot_stage", "embedded_boot")
 M -> ER : BootAll(ctx + embBootOp)
 activate ER
-ER -> ER : for each registered:\n  invoke() creates per-plugin child op\n  (plugin name + phase in op context)\n  Strict panic → Fatal\n  Default panic → log + continue
+ER -> LOTLP : BootInit(child op)
+ER -> ER : invoke all registered embedded plugins\nStrict panic -> Fatal\nDefault panic -> log + continue
 ER --> M
 deactivate ER
 M -> M : embBootOp.Complete()
@@ -33,13 +34,13 @@ M -> BS : Write(stage=config_load)
 M -> C : Load(flags)
 alt Config parse OK
   C --> M : cfg
-  M -> M : cfgOp = ops.New(TypeConfigReload)\n  enrich("_boot_stage", "config_loaded")
+  M -> M : cfgOp = ops.New(TypeConfigReload)\nenrich("_boot_stage", "config_loaded")
   M -> ER : ConfigLoadedAll(ctx + cfgOp, cfg)
-  note right of ER
-    Each plugin gets a child operation
-    with _plugin and _phase enrichment.
-    Crashdump scans <dir>/crashes/ here.
-    OTLP upgrades endpoint from env to YAML.
+  ER -> LOTLP : ConfigLoaded(child op)\nupgrade endpoint from env/YAML
+  note right of LOTLP
+    lifecycleotlp covers startup/config/shutdown
+    before IPC plugins can connect.
+    Runtime instrumentation is IPC-only.
   end note
   M -> M : cfgOp.Complete()
 else Panic during Load
@@ -51,13 +52,13 @@ else Panic during Load
     If mkdir/write fails, JSON
     goes to stderr as fallback.
   end note
-  M -> R : re-panic → stack trace + exit 2
+  M -> R : re-panic -> stack trace + exit 2
 end
 
 M -> BS : Write(stage=core_init)
 M -> M : cache / engine / watch / tracker init
 M -> BS : Write(stage=plugin_load)
-M -> M : pluginManager.Start(ctx)
+M -> M : pluginManager.Start(ctx)\nIPC plugins may now connect
 M -> BS : Write(stage=snapshot_load)
 M -> BS : Write(stage=workers_start)
 M -> BS : Write(stage=listener_start)

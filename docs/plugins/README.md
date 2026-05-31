@@ -1,12 +1,13 @@
 ---
 title: Plugins
-description: Embedded vs IPC plugin tiers, build-tag matrix, the api/-only contract surface, available plugins
+description: Embedded vs IPC plugin tiers, build-tag matrix, plugin-safe import surface, available plugins
 status: living
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 related:
   - Server
   - GCPC
   - Plugin-Prometheus
+  - Plugin-Instrumentation
   - ADR-0028
 ---
 
@@ -29,11 +30,11 @@ GoCache extends a microkernel core with two kinds of plugin: **embedded** (compi
 
 Both modes use the **same `api/*` interfaces**. The difference is registration and transport — embedded plugins call `embedded.Register(p)` from `init()`, IPC plugins run `pluginsdk.Run(p)` and the manager handshakes them over Unix socket.
 
-## The api/-only import rule
+## The plugin import rule
 
-Plugins under `plugins/` may import only `gocache/api/*`. They may **not** import `gocache/pkg/*` (server internals) or `gocache/cmd/*` (entry points). This is enforced by `scripts/check-plugin-isolation.sh`, which runs in CI as part of the lint job.
+Plugins under `plugins/` may import only `gocache/api/*`, `gocache/sdk/*`, `gocache/commons/*`, the Go standard library, and external dependencies. They may **not** import `gocache/pkg/*` (server internals) or `gocache/cmd/*` (entry points). This is enforced by `scripts/check-plugin-isolation.sh`, which runs in CI as part of the lint job.
 
-The contract surface (what plugins are allowed to depend on) lives entirely under `gocache/api/`:
+The stable contract surface starts in `gocache/api/`; shared helpers that are intentionally plugin-safe live in `gocache/sdk/` and `gocache/commons/`:
 
 ```
 api/
@@ -101,16 +102,17 @@ Bundled IPC plugins:
 |---|---|
 | `plugins/dummy` | Lifecycle-only test plugin |
 | `plugins/prometheus` | Prometheus `/metrics`, `/healthz`, and `/readyz`; core command counters and histograms are pulled from the generic `server:query:metrics.commands` aggregate snapshot so metrics do not require one IPC event per command |
+| [`plugins/instrumentation`](instrumentation/README.md) | Runtime OTLP traces and logs over IPC; subscribes to `operation.started`, `operation.completed`, `runtime.logs`, and `replay.gap`; metrics remain out of scope |
 
 ## Observability contract direction
 
-ADR-0028 defines the next operation-first observability contract. Plugins should treat `operation.started` and `operation.completed` as the canonical lifecycle events once that contract lands. Other event records are opt-in child facts attached to operations, and high-volume logs use a separate correlated `LogRecord`/diagnostic signal rather than default `log.entry` event-bus delivery.
+ADR-0028 defines the operation-first observability contract. Plugins should treat `operation.started` and `operation.completed` as the canonical lifecycle events. Other event records are opt-in child facts attached to operations, and runtime logs use the batched `runtime.logs` event (`RuntimeLogBatchEventV1`) instead of the removed per-line `log.entry` event.
 
-Event and log subscriptions contribute to server-side interest masks. Those masks let hot-path producers skip optional payload construction entirely when no plugin/exporter requested a signal or detail level. The Prometheus plugin now goes further for its low-cardinality metrics: it requests `server:query:metrics.commands` and pulls aggregate counters/histograms on scrape, while exact command event streams remain available for plugins that need full records.
+Event subscriptions contribute to server-side interest masks. Those masks let hot-path producers skip optional payload construction entirely when no plugin/exporter requested a signal or detail level. The Prometheus plugin uses the low-cardinality `server:query:metrics.commands` pull path for metrics, while the `instrumentation` plugin owns runtime OTLP traces/logs and consumes periodically flushed `runtime.logs` batches from the existing log collector. The runtime slice intentionally does not introduce a Unix-socket/yamux log transport; that remains a separate performance spike only if benchmark scope is approved later.
 
 ## Permissions and scopes
 
-IPC plugins declare `requested_scopes` in `RegisterV1`. The server validates them against config-allowed scopes (or the default `["read"]`) and grants a subset back in `RegisterAckV1`. Scopes are hierarchical: `admin > write > read`; `hook:pre`/`hook:post` are independent; `keys:<pattern>` restricts access to a key namespace.
+IPC plugins declare `requested_scopes` in `RegisterV1`. The server validates them against config-allowed scopes (or the default `["read"]`) and grants a subset back in `RegisterAckV1`. Scopes are hierarchical: `admin > write > read`; `hook:pre`/`hook:post`, `operation:hook`, and `events` are independent; `server:query` grants server-query topics; `keys:<pattern>` restricts access to a key namespace.
 
 Hooks are silently dropped if the plugin lacks the matching `hook:pre`/`hook:post` scope. Operation hooks need `operation:hook`. Server queries follow the `server:query:*` hierarchy (e.g., `server:query` grants all topics).
 
@@ -123,4 +125,5 @@ Embedded plugins are not scope-checked — they run with full server privilege. 
 - [docs/server/design/component/](../server/design/component/) — Component diagrams (core, memory eviction, event bus ring).
 - [docs/server/design/sequence/](../server/design/sequence/) — Sequence diagrams (command flow, persistence, transactions, graceful shutdown).
 - [docs/gcpc/README.md](../gcpc/README.md) — GCPC v1 protocol specification.
-- [docs/plugins/prometheus/README.md](prometheus/README.md) — Reference IPC plugin.
+- [docs/plugins/prometheus/README.md](prometheus/README.md) — Pull-based metrics IPC plugin.
+- [docs/plugins/instrumentation/README.md](instrumentation/README.md) — Runtime OTLP traces/logs IPC plugin.

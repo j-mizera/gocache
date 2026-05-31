@@ -2,7 +2,7 @@
 title: Modular Overhead Optimization Plan
 description: Benchmark-gated plan for reducing IPC, runtime instrumentation, lifecycle OTLP, and Pub/Sub overhead while preserving plugin isolation
 status: active
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 related:
   - ADR-0006-builtin-vs-third-party-transport
   - ADR-0020-client-push-via-gcpc
@@ -92,7 +92,7 @@ Fanout10 is close to the acceptance gate; fanout0/fanout1 are not. That shape su
 - Attribute operation creation/enrichment/context snapshots, event constructor allocation, no-sink versus full-sink pipeline cost, event bus fanout, bridge clone/filter/envelope cost, plugin queue enqueue/write cost, protobuf marshal/framing cost, log JSON parse/log-entry injection cost, and Prometheus aggregation cost.
 - Move toward ADR-0028's producer model only after attribution exists: compact operation/command summaries first, then subscriber-specific event/log/protobuf projection.
 - Validate the context representation explicitly: immutable request snapshot, fixed typed field array, bitset/flag interest checks, lazy extension map/overlay, and per-sink projection cache.
-- Treat `log.entry` as a prototype artifact for benchmark purposes. The target log path is a bounded async `LogRecord` diagnostics lane with level/component interest masks, sampling, batching, and drop counters.
+- Treat the removed per-line `log.entry` path as historical prototype context. The current runtime slice keeps `pkg/logcollector` and emits periodically flushed `runtime.logs` batches; any separate `LogRecord` lane or Unix-socket/yamux transport needs a new benchmark-scope decision before implementation.
 
 **Suggested package benchmark coverage**:
 
@@ -105,7 +105,7 @@ Fanout10 is close to the acceptance gate; fanout0/fanout1 are not. That shape su
 | `pkg/plugin/manager` | subscriber-specific projection or current clone/filter/envelope path |
 | `pkg/plugin/router` | enqueue, fire-and-forget send, writer-loop latency and drops |
 | `commons/transport` | protobuf marshal/unmarshal and frame send/receive allocations |
-| `pkg/logcollector` | current JSON parse/plain-text parse/log-entry injection baseline before removal |
+| `pkg/logcollector` | current JSON/plain-text parse, RuntimeLogRecord construction, periodic runtime.logs batching, and flush allocation cost |
 | `plugins/prometheus` | metric record/update and exposition write costs |
 
 **Tests/gates**:
@@ -117,6 +117,14 @@ Fanout10 is close to the acceptance gate; fanout0/fanout1 are not. That shape su
 - Capture CPU/heap/mutex/block profiles only after benchmark modes identify the stage under test.
 - Track `plugin.ipc` queue-full drops, accepted/drop totals, enqueue latency, write latency, and lag for every docker capture.
 - Do not move yamux or stream topology ahead of this phase unless measurements show producer construction is no longer the dominant remaining deficit.
+
+**Current internal harness (2026-05-31)**:
+
+- `pkg/benchstats` provides disabled-by-default attribution counters gated by `GOCACHE_BENCH_STATS`; normal runs avoid counter increments and runtime snapshots, while disabled probe sites retain only the cheap enabled-check branch.
+- `pkg/pipeline`, `pkg/events`, and `pkg/plugin/manager` record path selection, context snapshot latency, per-event construction latency, event-bus emit/delivery latency, bridge-handler latency, bridge drops, enqueue latency, and per-plugin projection latency when the gate is enabled.
+- `bench.stats` is exposed as a server-query topic, and the benchmark-only IPC plugin `plugins/benchprobe` exposes `/snapshot` so Docker runs can collect counters without mixing them into Prometheus metrics.
+- `BENCH_STATS=1 ./bench/redis-benchmark/run-ipc.sh <label> --target gocache-ipc[-otel]` compiles/runs `benchprobe`, enables `GOCACHE_BENCH_STATS`, waits for `/readyz`, and writes `benchstats-baseline.json`, `benchstats-standard.json`, and `benchstats-pipelined.json` beside the CSV/RSS files.
+- The baseline snapshot resets startup noise before the standard suite; the standard snapshot resets before the pipelined suite; the pipelined snapshot preserves the final interval. Treat these files as attribution windows, not direct throughput evidence.
 
 ### Phase 3: GCPC stream topology evaluation
 

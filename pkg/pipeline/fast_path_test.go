@@ -146,7 +146,7 @@ func TestFastPath_LogOnlySubscriberKeepsCommandFastPath(t *testing.T) {
 
 	bus := events.NewBus()
 	eval.SetEmitter(bus)
-	bus.Subscribe("logs", []apiEvents.Type{apiEvents.LogEntry}, func(apiEvents.Event) {})
+	bus.Subscribe("logs", []apiEvents.Type{apiEvents.RuntimeLogBatch}, func(apiEvents.Event) {})
 
 	ctx := clientctx.New()
 	res := eval.Evaluate(context.Background(), ctx, "PING", nil)

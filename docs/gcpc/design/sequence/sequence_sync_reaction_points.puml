@@ -8,8 +8,9 @@ participant "Server Connection" as Conn
 participant "Pipeline" as Pipeline
 participant "Command Hook Executor" as CmdHooks
 participant "Connection Evaluator" as ConnEval
-participant "IPC Plugin" as Plugin
+participant "Reaction Plugin" as Plugin
 participant "Event Bus" as EventBus
+participant "Instrumentation Plugin" as Instrumentation
 
 == Connection admission ==
 Client -> Conn : open TCP connection
@@ -18,33 +19,37 @@ ConnEval -> Plugin : GCPC evaluator request
 Plugin --> ConnEval : allow/deny/enrich/close
 alt denied
   ConnEval --> Conn : deny/close
-  Conn -> EventBus : emit connection.close/drop event (async)
+  Conn -> EventBus : connection.close/drop fact (async)
 else allowed
   ConnEval --> Conn : install session/context
-  Conn -> EventBus : emit connection.open event (async)
+  Conn -> EventBus : connection.open fact (async)
 end
 
 == Command reaction ==
 Client -> Conn : RESP command
 Conn -> Pipeline : Evaluate(command)
-Pipeline -> CmdHooks : command.pre
+Pipeline -> EventBus : operation.started (async observation)
+EventBus ->> Instrumentation : EventV1 operation.started
+Pipeline -> CmdHooks : command.pre reaction point
 CmdHooks -> Plugin : blocking hook request
 Plugin --> CmdHooks : allow/deny/enrich
 alt denied
   Pipeline --> Conn : error reply
-  Pipeline -> EventBus : command.post event (async observation)
+  Pipeline -> EventBus : operation.completed status=failed
 else allowed
   Pipeline -> Pipeline : execute command
-  Pipeline -> CmdHooks : command.post if response/order semantics require sync reaction
+  Pipeline -> CmdHooks : command.post only if sync reaction needed
   CmdHooks -> Plugin : optional blocking post hook
   Plugin --> CmdHooks : reaction result
   Pipeline --> Conn : ordered RESP reply
-  Pipeline -> EventBus : command.post event (async observation)
+  Pipeline -> EventBus : operation.completed status=ok
 end
+EventBus ->> Instrumentation : EventV1 operation.completed
 
 note over EventBus
 Events report what happened.
 They do not affect admission, command result, or reply ordering.
+Hook phase names are not public event taxonomy.
 end note
 
 @enduml

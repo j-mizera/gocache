@@ -1,29 +1,31 @@
 @startuml components_ipc
 !include ../../../design/theme.iuml
 
-skinparam nodesep 200
+skinparam nodesep 160
 
 frame "GoCache Server-Plugin IPC" as F {
 
     rectangle "Server Process" as server {
 
-        rectangle "Pipeline" as eval {
+        rectangle "Pipeline" as pipeline {
             component [Command Router] as CmdRouter <<Main + REX>>
             component [Hook Executor] as HookExec <<Pre/Post>>
+            component [Event Producers] as Events <<operation.* + runtime.logs>>
         }
 
         rectangle "Plugin Management" as mgmt {
             component [Hook Registry] as HookReg <<Pattern + Priority>>
-            component [Plugin Manager] as PluginMgr <<Lifecycle>>
+            component [Plugin Manager] as PluginMgr <<Lifecycle + Events>>
+            component [Server Queries] as Queries <<metrics.commands>>
         }
 
         rectangle "Shared Connection" as shared {
-            component [PluginConn] as PluginConn <<Multiplexed>>
+            component [PluginConn] as PluginConn <<Multiplexed by id>>
             note right of PluginConn
-              Single connection per plugin.
-              Multiplexed by request_id.
-              Shared by Router, Hooks, and Manager.
-              Async write + readLoop dispatch.
+              Single GCPC connection per plugin.
+              Multiplexed by request_id / envelope id.
+              Shared by Router, Hooks, Manager,
+              server queries, and event delivery.
             end note
         }
     }
@@ -38,22 +40,26 @@ frame "GoCache Server-Plugin IPC" as F {
         component [Plugin Impl] as PluginImpl <<User Code>>
     }
 
-    ' -- Server side --
     CmdRouter --> PluginConn : CommandRequestV1\n(+ metadata + op context)
     HookExec --> PluginConn : HookRequestV1\n(+ context + metadata)
-    PluginMgr --> PluginConn : Health/Shutdown/\nOperationHookRequestV1
+    PluginMgr --> PluginConn : Health / Shutdown /\nOperationHookRequestV1 / EventV1
+    Queries --> PluginConn : ServerQueryResponseV1
+    Events --> PluginMgr : EventSubscribe interests\nfilter + enqueue
     HookExec --> HookReg : MatchPre / MatchPost
 
-    ' -- Wire --
     PluginConn --> Framing : Send/Recv EnvelopeV1
     Framing --> UDS
 
-    ' -- Plugin side --
     PluginSDK --> Framing : Send/Recv EnvelopeV1
-    PluginSDK --> PluginImpl : HandleCommand()\nHandleHook()\nHandleOperationHook()
+    PluginSDK --> PluginImpl : HandleCommand()\nHandleHook()\nHandleOperationHook()\nHandleEvent()\nQueryServer()
 
-    ' -- Response flow --
-    PluginSDK ..> PluginConn : CommandResponseV1\nHookResponseV1\nOperationHookResponseV1\nServerQueryV1 (params)
+    PluginSDK ..> PluginConn : CommandResponseV1\nHookResponseV1\nOperationHookResponseV1\nEventSubscribeV1\nServerQueryV1
 }
+
+note bottom
+  Runtime instrumentation is an IPC EventPlugin.
+  It consumes events/log batches over GCPC; it does not
+  use a separate Unix-socket/yamux log transport.
+end note
 
 @enduml

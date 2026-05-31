@@ -3,13 +3,13 @@
 
 mainframe **state** Operation Lifecycle
 
-[*] --> Running : New(type, parentID)\nID generated, StartTime set
+[*] --> Running : New(type, parentID)\nID generated, StartTime set\nemit operation.started
 
 state Running {
     Running : Context bag enrichable
-    Running : Enrich() / EnrichMany()
-    Running : Operation hooks fire (Phase 2)
+    Running : Operation hooks may fire
     Running : Work executes
+    Running : Runtime logs may carry _operation_id
 }
 
 Running --> Completed : Complete()\nEndTime set
@@ -18,14 +18,14 @@ Running --> Failed : Fail(reason)\nEndTime set, FailReason set
 state Completed {
     Completed : Duration = EndTime - StartTime
     Completed : Removed from Tracker
-    Completed : operation.complete event emitted
+    Completed : operation.completed emitted
 }
 
 state Failed {
     Failed : Duration = EndTime - StartTime
     Failed : FailReason available
     Failed : Removed from Tracker
-    Failed : operation.complete event (status=failed)
+    Failed : operation.completed emitted\nstatus=failed
 }
 
 Completed --> [*]
@@ -35,11 +35,12 @@ note right of Running
   **Context enrichment sources:**
   1. Server: _start_ns, _operation_id
   2. REX metadata: shared.rex.*
-  3. Operation hooks: plugins enrich synchronously
+  3. Operation hooks: synchronous enrichment
   4. Command hooks: pre-hook context_values
 
-  All enrichment happens during Running state.
-  Context is frozen after Complete/Fail.
+  The instrumentation plugin consumes lifecycle
+  events and runtime.logs batches; it does not
+  change command admission or results.
 end note
 
 @enduml

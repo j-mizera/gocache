@@ -3,13 +3,13 @@
 
 frame "Embedded Plugin Lifecycle (compile-time-linked, in-process)" as F {
 
-    state "Registered" as Registered : init() called\nviaPLUGINS build-arg\n(e.g. crashdump, otlp)
+    state "Registered" as Registered : init() called\nvia PLUGINS build arg\n(e.g. crashdump, lifecycleotlp)
 
     state "BootInit" as BootInit : Before config.Load\nOnly env vars available\nzerolog stderr wired\nReceives child operation\n(parent: embBootOp)
 
     state "ConfigLoaded" as ConfigLoaded : After config parses\nmay upgrade settings\n(YAML > env)\nReceives child operation\n(parent: cfgOp)
 
-    state "Running" as Running : Alongside IPC plugins\nSees every event from t=0
+    state "Running" as Running : Alongside IPC plugins\nEmbedded listeners can see\nprocess lifecycle from t=0
 
     state "ProcessShutdown" as ProcessShutdown : Deferred in main\nRuns even on panic\n(after crashdump write)\nReceives child operation\n(parent: embShutOp)
 
@@ -33,19 +33,17 @@ note right of BootInit
   Panic-unwind order (LIFO):
   1. log pipe close + collector.Wait
   2. embedded.ShutdownAll
-     — OTLP ForceFlush runs HERE
+     - lifecycleotlp ForceFlush runs HERE
   3. ctx cancel
   4. crashdump.WriteFromPanic
   5. re-raise for runtime stack
 end note
 
 note right of Registered
-  Registry: two tiers
-  - Register (default)    — recover, continue
-  - RegisterStrict        — halt on failure
-  Use strict only when you
-  truly need halt-on-fail
-  visibility from t=0.
+  lifecycleotlp is embedded/pre-IPC only.
+  Runtime traces/logs are exported by the
+  separate IPC instrumentation plugin after
+  plugin manager startup.
 end note
 
 @enduml

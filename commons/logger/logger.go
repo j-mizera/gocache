@@ -2,7 +2,7 @@
 //
 // Both server and plugin code import this package. Every log line is JSON
 // written to a configurable io.Writer (stdout by default). The log collector
-// worker reads from the pipe and emits LogEntry events to the event bus.
+// worker reads from the pipe and emits periodic runtime log batches to the event bus.
 //
 // The default log methods (Trace, Debug, Info, Warn, Error) take a
 // context.Context and extract the current *ops.Operation via

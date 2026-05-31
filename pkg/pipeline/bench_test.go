@@ -29,7 +29,7 @@ func BenchmarkEvaluateSinks(b *testing.B) {
 		eval, e, _ := newTestPipeline()
 		defer e.Stop()
 		bus := serverEvents.NewBusWithCapacity(0)
-		bus.Subscribe("logs", []apiEvents.Type{apiEvents.LogEntry}, func(apiEvents.Event) {})
+		bus.Subscribe("logs", []apiEvents.Type{apiEvents.RuntimeLogBatch}, func(apiEvents.Event) {})
 		eval.SetEmitter(bus)
 		ctx := clientctx.New()
 		b.ResetTimer()

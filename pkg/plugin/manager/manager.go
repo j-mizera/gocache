@@ -20,6 +20,7 @@ import (
 	"gocache/api/scope"
 	"gocache/commons/logger"
 	"gocache/commons/transport"
+	"gocache/pkg/benchstats"
 	pkgconfig "gocache/pkg/config"
 	serverEvents "gocache/pkg/events"
 	commandmetrics "gocache/pkg/metrics"
@@ -501,14 +502,14 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	}
 
 	// Resolve or create the PluginConn once — reused for hooks, op-hooks,
-	// event forwarding, and any future server-to-plugin async traffic.
+	// event forwarding, query visibility, and any future server-to-plugin async traffic.
+	// Even query-only plugins need a tracked connection so benchmark snapshots can
+	// report queue capacity/depth instead of omitting them from plugin.ipc.
 	pc := m.router.GetPluginConn(reg.Name)
-	if pc == nil && (len(reg.Hooks) > 0 || len(reg.OperationHooks) > 0) {
+	if pc == nil {
 		pc = router.NewPluginConn(reg.Name, conn)
 	}
-	if pc != nil {
-		m.pluginConns.Store(reg.Name, pc)
-	}
+	m.pluginConns.Store(reg.Name, pc)
 
 	if len(reg.Hooks) > 0 {
 		filteredHooks := m.filterHooksByScope(reg.Name, reg.Hooks)
@@ -726,17 +727,25 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("benchmark event bridge mode active: dropping events before IPC enqueue")
 			}
 			m.eventBus.Subscribe("plugin:"+inst.Name, types, func(evt events.Event) {
+				bridgeStart := benchstats.StartTimer()
+				defer benchstats.RecordManagerBridgeHandler(bridgeStart)
+				benchstats.RecordManagerEventReceived()
 				if bridgeMode == eventBridgeModeBridgeOff {
+					benchstats.RecordManagerBridgeOffDrop()
 					return
 				}
 				evtProto := evt.Proto
+				enqueueStart := benchstats.StartTimer()
 				pluginConn.SendFireAndForgetLazy(func() *gcpcv1.EnvelopeV1 {
+					projectionStart := benchstats.StartTimer()
 					projected := projectEventForPlugin(evtProto, pluginName)
+					benchstats.RecordManagerProjection(projectionStart)
 					return &gcpcv1.EnvelopeV1{
 						Version: gcpcv1.ProtocolVersion,
 						Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
 					}
 				})
+				benchstats.RecordManagerEventEnqueue(enqueueStart)
 			})
 		case *gcpcv1.EnvelopeV1_ServerQuery:
 			query := env.GetServerQuery()
@@ -930,20 +939,32 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 				Metadata: opctx.FilterForPlugin(payload.Metadata, pluginName),
 			}},
 		}
-	case *gcpcv1.EventV1_LogEntry:
-		if d.LogEntry == nil || len(d.LogEntry.Fields) == 0 {
+	case *gcpcv1.EventV1_RuntimeLogBatch:
+		if d.RuntimeLogBatch == nil || len(d.RuntimeLogBatch.Records) == 0 {
 			return evt
 		}
-		payload := d.LogEntry
+		payload := d.RuntimeLogBatch
+		records := make([]*gcpcv1.RuntimeLogRecordV1, 0, len(payload.Records))
+		for _, record := range payload.Records {
+			if record == nil {
+				continue
+			}
+			records = append(records, &gcpcv1.RuntimeLogRecordV1{
+				Timestamp:   record.Timestamp,
+				OperationId: record.OperationId,
+				Level:       record.Level,
+				Source:      record.Source,
+				Message:     record.Message,
+				Caller:      record.Caller,
+				Fields:      opctx.FilterForPlugin(record.Fields, pluginName),
+			})
+		}
 		return &gcpcv1.EventV1{
 			Type:        evt.Type,
 			Timestamp:   evt.Timestamp,
 			OperationId: evt.OperationId,
-			Data: &gcpcv1.EventV1_LogEntry{LogEntry: &gcpcv1.LogEntryEventV1{
-				Level:   payload.Level,
-				Message: payload.Message,
-				Caller:  payload.Caller,
-				Fields:  opctx.FilterForPlugin(payload.Fields, pluginName),
+			Data: &gcpcv1.EventV1_RuntimeLogBatch{RuntimeLogBatch: &gcpcv1.RuntimeLogBatchEventV1{
+				Records: records,
 			}},
 		}
 	default:
