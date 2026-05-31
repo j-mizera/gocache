@@ -1,0 +1,17 @@
+label=runtime-otlp
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=2c69deb263c49da405db150ce8a56137d94c1b78
+gocache_branch=feat/runtime-otlp-traces-logs
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=9215934
+post_standard_rss_bytes=23163043
+final_rss_bytes=28531752
+delta_rss_bytes=19315818
