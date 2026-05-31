@@ -33,6 +33,7 @@ type Bus struct {
 	mu          sync.RWMutex
 	subscribers map[string]*Subscription
 	typeCounts  map[apiEvents.Type]int
+	typeSubs    map[apiEvents.Type]map[string]*Subscription
 	ring        *ring
 
 	// subCount mirrors len(subscribers) for the lock-free HasSubscribers
@@ -60,6 +61,7 @@ func NewBusWithCapacity(capacity int) *Bus {
 	return &Bus{
 		subscribers: make(map[string]*Subscription),
 		typeCounts:  make(map[apiEvents.Type]int),
+		typeSubs:    make(map[apiEvents.Type]map[string]*Subscription),
 		ring:        newRing(capacity),
 	}
 }
@@ -82,13 +84,16 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 	b.mu.Lock()
 	previous, existed := b.subscribers[name]
 	if existed {
+		b.removeTypeSubscribersLocked(previous)
 		b.applyTypeDeltaLocked(previous.Types, -1)
 	}
-	b.subscribers[name] = &Subscription{
+	sub := &Subscription{
 		Name:    name,
 		Types:   typeSet,
 		Handler: handler,
 	}
+	b.subscribers[name] = sub
+	b.addTypeSubscribersLocked(sub)
 	b.applyTypeDeltaLocked(typeSet, 1)
 	if !existed {
 		b.subCount.Add(1)
@@ -131,6 +136,7 @@ func (b *Bus) Subscribe(name string, types []apiEvents.Type, handler Handler) {
 func (b *Bus) Unsubscribe(name string) {
 	b.mu.Lock()
 	if sub, ok := b.subscribers[name]; ok {
+		b.removeTypeSubscribersLocked(sub)
 		b.applyTypeDeltaLocked(sub.Types, -1)
 		delete(b.subscribers, name)
 		b.subCount.Add(-1)
@@ -143,18 +149,16 @@ func (b *Bus) Unsubscribe(name string) {
 func (b *Bus) Emit(evt apiEvents.Event) {
 	b.mu.Lock()
 	b.ring.push(evt)
-	if len(b.subscribers) == 0 {
+	evtType := apiEvents.Type(evt.Proto.Type)
+	typeSubs := b.typeSubs[evtType]
+	if len(typeSubs) == 0 {
 		b.mu.Unlock()
 		return
 	}
 
-	evtType := apiEvents.Type(evt.Proto.Type)
-
-	var targets []*Subscription
-	for _, sub := range b.subscribers {
-		if sub.Types[evtType] {
-			targets = append(targets, sub)
-		}
+	targets := make([]*Subscription, 0, len(typeSubs))
+	for _, sub := range typeSubs {
+		targets = append(targets, sub)
 	}
 	b.mu.Unlock()
 
@@ -218,6 +222,28 @@ func (b *Bus) HasSubscribersFor(types ...apiEvents.Type) bool {
 		}
 	}
 	return false
+}
+
+func (b *Bus) addTypeSubscribersLocked(sub *Subscription) {
+	for eventType := range sub.Types {
+		if b.typeSubs[eventType] == nil {
+			b.typeSubs[eventType] = make(map[string]*Subscription)
+		}
+		b.typeSubs[eventType][sub.Name] = sub
+	}
+}
+
+func (b *Bus) removeTypeSubscribersLocked(sub *Subscription) {
+	for eventType := range sub.Types {
+		typeSubs := b.typeSubs[eventType]
+		if len(typeSubs) == 0 {
+			continue
+		}
+		delete(typeSubs, sub.Name)
+		if len(typeSubs) == 0 {
+			delete(b.typeSubs, eventType)
+		}
+	}
 }
 
 func (b *Bus) applyTypeDeltaLocked(types map[apiEvents.Type]bool, delta int) {
