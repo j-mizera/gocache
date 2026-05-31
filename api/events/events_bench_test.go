@@ -1,6 +1,10 @@
 package events
 
-import "testing"
+import (
+	"testing"
+
+	gcpc "gocache/api/gcpc/v1"
+)
 
 var benchmarkMetadata = map[string]string{
 	"shared.rex.traceparent": "00-abc-def-01",
@@ -36,9 +40,15 @@ func BenchmarkEventConstructors(b *testing.B) {
 			_ = NewOperationCompleted("cmd_1", "command", 42_000, "completed", "", ctx)
 		}
 	})
-	b.Run("log_entry", func(b *testing.B) {
+	records := []*gcpc.RuntimeLogRecordV1{{
+		OperationId: "cmd_1",
+		Level:       "info",
+		Message:     "command completed",
+		Fields:      ctx,
+	}}
+	b.Run("runtime_log_batch", func(b *testing.B) {
 		for b.Loop() {
-			_ = NewLogEntry("info", "command completed", "", ctx).WithOperationID("cmd_1")
+			_ = NewRuntimeLogBatch(records)
 		}
 	})
 }

@@ -12,9 +12,9 @@ import (
 	"gocache/api/command"
 	apiconfig "gocache/api/config"
 	gcpc "gocache/api/gcpc/v1"
-	apilogger "gocache/commons/logger"
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
+	apilogger "gocache/commons/logger"
 	"gocache/commons/transport"
 )
 
@@ -356,6 +356,9 @@ func Run(ctx context.Context, p Plugin) error {
 	session := newSession(tc)
 	if isQueryPlugin {
 		qp.SetSession(session)
+	}
+	if isConfigPlugin {
+		cfgp.OnConfigReload(remoteCfg)
 	}
 
 	// Subscribe to events if the plugin implements EventPlugin.

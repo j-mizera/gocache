@@ -8,7 +8,6 @@
 package events
 
 import (
-	"strconv"
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
@@ -37,15 +36,17 @@ const (
 
 	CacheEviction Type = "cache.eviction"
 
-	LogEntry Type = "log.entry"
+	// RuntimeLogBatch carries diagnostic runtime logs through the normal event
+	// subscription stream. Producers batch and flush it periodically; it is not
+	// emitted from operation completion paths.
+	RuntimeLogBatch Type = "runtime.logs"
 
 	OperationStarted   Type = "operation.started"
 	OperationCompleted Type = "operation.completed"
 
 	// ReplayGap marks that the event bus's replay ring dropped events before
-	// a subscriber connected. The payload is a LogEntryEventV1 whose fields
-	// carry the dropped count so Phase B subscribers route by Type without
-	// requiring protobuf regen; Phase C will introduce a dedicated oneof.
+	// a subscriber connected. The payload is a dedicated ReplayGapEventV1 so
+	// subscribers do not need to interpret diagnostic logs as control signals.
 	ReplayGap Type = "replay.gap"
 )
 
@@ -163,28 +164,21 @@ func NewCacheEviction(key, reason string) Event {
 	return Event{Proto: e}
 }
 
-// NewLogEntry creates a log.entry event.
-func NewLogEntry(level, message, caller string, fields map[string]string) Event {
-	e := newEventProto(LogEntry)
-	e.Data = &gcpc.EventV1_LogEntry{LogEntry: &gcpc.LogEntryEventV1{
-		Level: level, Message: message, Caller: caller, Fields: fields,
+// NewRuntimeLogBatch creates a runtime.logs event carrying periodically flushed
+// diagnostic log records.
+func NewRuntimeLogBatch(records []*gcpc.RuntimeLogRecordV1) Event {
+	e := newEventProto(RuntimeLogBatch)
+	e.Data = &gcpc.EventV1_RuntimeLogBatch{RuntimeLogBatch: &gcpc.RuntimeLogBatchEventV1{
+		Records: records,
 	}}
 	return Event{Proto: e}
 }
 
-// NewReplayGap creates a replay.gap event. Carries the dropped count and
-// subscriber name as LogEntryEventV1 fields — see the ReplayGap type comment.
+// NewReplayGap creates a replay.gap event with a dedicated control payload.
 func NewReplayGap(subscriber string, dropped uint64) Event {
 	e := newEventProto(ReplayGap)
-	fields := map[string]string{
-		"_kind":          "replay_gap",
-		"_dropped_count": strconv.FormatUint(dropped, 10),
-		"_subscriber":    subscriber,
-	}
-	e.Data = &gcpc.EventV1_LogEntry{LogEntry: &gcpc.LogEntryEventV1{
-		Level:   "warn",
-		Message: "event replay gap",
-		Fields:  fields,
+	e.Data = &gcpc.EventV1_ReplayGap{ReplayGap: &gcpc.ReplayGapEventV1{
+		Subscriber: subscriber, DroppedCount: dropped,
 	}}
 	return Event{Proto: e}
 }
