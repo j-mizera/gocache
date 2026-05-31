@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -69,6 +70,88 @@ func (c *Collector) Record(command string, elapsedNs uint64, isError bool) {
 	if !placed {
 		s.counts[len(c.buckets)]++ // +Inf bucket
 	}
+}
+
+// ReplaceFromQuery replaces collector state with a server-side command metrics
+// snapshot returned by the metrics.commands server-query topic.
+func (c *Collector) ReplaceFromQuery(data map[string]string) error {
+	commandCount, err := parseIntField(data, "commands.count")
+	if err != nil {
+		return err
+	}
+	if raw := data["buckets.count"]; raw != "" {
+		bucketCount, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("parse buckets.count: %w", err)
+		}
+		if bucketCount != len(c.buckets) {
+			return fmt.Errorf("bucket count %d does not match collector buckets %d", bucketCount, len(c.buckets))
+		}
+	}
+
+	next := make(map[string]*commandStats, commandCount)
+	for i := 0; i < commandCount; i++ {
+		prefix := "command." + strconv.Itoa(i) + "."
+		command := data[prefix+"name"]
+		if command == "" {
+			return fmt.Errorf("missing %sname", prefix)
+		}
+		total, err := parseUintField(data, prefix+"total")
+		if err != nil {
+			return err
+		}
+		errors, err := parseUintField(data, prefix+"errors")
+		if err != nil {
+			return err
+		}
+		sumNs, err := parseUintField(data, prefix+"sum_ns")
+		if err != nil {
+			return err
+		}
+		counts := make([]uint64, len(c.buckets)+1)
+		for j := range counts {
+			count, err := parseUintField(data, prefix+"bucket."+strconv.Itoa(j))
+			if err != nil {
+				return err
+			}
+			counts[j] = count
+		}
+		next[command] = &commandStats{
+			total:  total,
+			errors: errors,
+			sum:    float64(sumNs) / nsPerSec,
+			counts: counts,
+		}
+	}
+
+	c.mu.Lock()
+	c.stats = next
+	c.mu.Unlock()
+	return nil
+}
+
+func parseIntField(data map[string]string, key string) (int, error) {
+	raw := data[key]
+	if raw == "" {
+		return 0, fmt.Errorf("missing %s", key)
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", key, err)
+	}
+	return value, nil
+}
+
+func parseUintField(data map[string]string, key string) (uint64, error) {
+	raw := data[key]
+	if raw == "" {
+		return 0, fmt.Errorf("missing %s", key)
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", key, err)
+	}
+	return value, nil
 }
 
 // WritePrometheus writes all metrics in Prometheus text exposition format.
