@@ -4,60 +4,59 @@
 mainframe **sd** Command Flow with Plugin Hooks & Context
 
 actor Client
-    participant "Pipeline" as Evaluator
-    participant "Hook Executor" as HookExec
-    participant "Hook Registry" as HookReg
-    participant "PluginConn\n(multiplexed)" as PluginConn
-    participant "Auth Plugin\n(critical, priority=1)" as PluginA
-    participant "Metrics Plugin\n(non-critical, priority=100)" as PluginM
-    participant "Cache" as Cache
+participant "Pipeline" as Pipeline
+participant "Hook Executor" as HookExec
+participant "Hook Registry" as HookReg
+participant "PluginConn\n(multiplexed)" as PluginConn
+participant "Auth Plugin\n(critical, priority=1)" as AuthPlugin
+participant "Cache" as Cache
+participant "Event Bus" as EventBus
+participant "Instrumentation Plugin\n(EventPlugin)" as InstrPlugin
 
-    Client -> Evaluator : SET user:1 {name: John}
+Client -> Pipeline : SET user:1 {name: John}
 
-    == Initialize Context ==
+== Initialize Context ==
 
-    Evaluator -> Evaluator : hookCtx = command.NewHookCtx()\nhookCtx["_start_ns"] = now()
+Pipeline -> Pipeline : hookCtx = command.NewHookCtx()\nhookCtx["_start_ns"] = now()\nhookCtx["_operation_id"] = op.ID
+Pipeline -> EventBus : operation.started(op)
+EventBus ->> InstrPlugin : EventV1 operation.started
 
-    == Pre-Hooks ==
+== Pre-Hooks ==
 
-    Evaluator -> HookExec : RunPreHooks("SET", args, hookCtx)
-    HookExec -> HookReg : MatchPre("SET")
-    HookReg --> HookExec : [Auth(crit, pri=1)]\nsorted by priority
+Pipeline -> HookExec : RunPreHooks("SET", args, hookCtx)
+HookExec -> HookReg : MatchPre("SET")
+HookReg --> HookExec : [Auth(crit, pri=1)]\nsorted by priority
+HookExec -> HookExec : metadata = extractRexMetadata(hookCtx)\n{traceparent: "...", tenant: "..."}
+HookExec -> PluginConn : Send HookRequestV1 (PRE)\ncontext: {_start_ns, _operation_id, shared.rex.*}\nmetadata: {traceparent, tenant}
+PluginConn -> AuthPlugin : HookRequestV1\n(request_id=req-1)
+activate AuthPlugin
+AuthPlugin --> PluginConn : HookResponseV1\n(deny=false, context_values: {tenant_id: "acme"})
+deactivate AuthPlugin
+PluginConn --> HookExec : Allow
+HookExec -> HookExec : command.MergeHookCtx(hookCtx, "auth", values)
+HookExec --> Pipeline : PreHookResult{Denied=false, Context=hookCtx}
 
-    HookExec -> HookExec : metadata = extractRexMetadata(hookCtx)\n{traceparent: "...", tenant: "..."}
+== Command Execution ==
 
-    HookExec -> PluginConn : Send HookRequestV1 (PRE)\ncontext: {_start_ns, shared.rex.*}\nmetadata: {traceparent, tenant}
-    PluginConn -> PluginA : HookRequestV1\n(request_id=req-1)
-    activate PluginA
-    PluginA --> PluginConn : HookResponseV1\n(deny=false,\ncontext_values: {tenant_id: "acme"})
-    deactivate PluginA
-    PluginConn --> HookExec : Allow
+Pipeline -> Cache : Engine.DispatchWithResult(fn)
+activate Cache
+Cache --> Pipeline : Result{Value: "OK"}
+deactivate Cache
+Pipeline -> Pipeline : hookCtx["_elapsed_ns"] = elapsed()
 
-    hnote over HookExec : command.MergeHookCtx(hookCtx, "auth", values)\nhookCtx now has auth.tenant_id
+== Optional Post-Hooks ==
 
-    HookExec --> Evaluator : PreHookResult{Denied=false, Context=hookCtx}
+Pipeline -> HookExec : RunPostHooks(...)\nonly for reaction plugins that requested hooks
+note right of HookExec
+  Metrics are not command hooks.
+  Prometheus reads aggregate metrics through
+  server:query:metrics.commands.
+end note
 
-    == Command Execution ==
+== Async Observability ==
 
-    Evaluator -> Cache : Engine.DispatchWithResult(fn)
-    activate Cache
-    Cache --> Evaluator : Result{Value: "OK"}
-    deactivate Cache
-
-    Evaluator -> Evaluator : hookCtx["_elapsed_ns"] = elapsed()
-
-    == Post-Hooks ==
-
-    Evaluator -> HookExec : RunPostHooks("SET", args, "OK", "", hookCtx)
-    HookExec -> HookReg : MatchPost("SET")
-
-    hnote over HookExec : command.FilterHookCtx(hookCtx, "prometheus")\nreturns: {_start_ns, _elapsed_ns, shared.*}
-
-    HookExec ->> PluginM : HookRequestV1 POST\n(fire-and-forget)\ncontext: {_start_ns, _elapsed_ns, shared.rex.*}\nmetadata: {traceparent, tenant}
-    note right : Non-critical: no wait.\nReads _elapsed_ns for latency histogram.\nmetadata has bare keys for easy access.
-
-    == Response ==
-
-    Evaluator --> Client : +OK
+Pipeline -> EventBus : operation.completed(op)
+EventBus ->> InstrPlugin : EventV1 operation.completed
+Pipeline --> Client : +OK
 
 @enduml

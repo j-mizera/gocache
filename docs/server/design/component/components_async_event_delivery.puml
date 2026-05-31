@@ -4,39 +4,47 @@
 title Async Event Delivery Components
 
 package "Core command path" {
-  component "Pipeline / Server\n(event producers)" as Producer
-  component "Event interest checks\n(type/class masks)" as Masks
+  component "Pipeline / server\n(event producers)" as Producer
+  component "Interest checks\n(type/class masks)" as Masks
 }
 
 package "Server event layer" {
   component "Event Bus" as Bus
-  database "Replay Ring\n(lifecycle/control)" as Ring
-  component "Plugin Event Bridge\n(filter + enqueue)" as Bridge
+  database "Replay Ring\nbounded FIFO + replay.gap" as Ring
+  component "Plugin Event Bridge\nfilter + enqueue" as Bridge
+}
+
+package "Runtime log layer" {
+  component "pkg/logcollector" as LogCollector
+  component "RuntimeLogBatchEventV1\nruntime.logs" as LogBatch
 }
 
 package "Plugin routing" {
   queue "Critical traffic\nRPC/hooks/evaluators" as CriticalQ
-  queue "Best-effort event traffic\nruntime telemetry" as EventQ
+  queue "Best-effort telemetry\nevents + runtime.logs" as EventQ
   component "PluginConn writer" as Writer
   component "GCPC transport\nUDS + protobuf" as Transport
 }
 
 package "IPC plugin process" {
   component "Plugin SDK\nevent dispatcher" as SDK
-  component "Prometheus / other plugin\nsubscriber" as Plugin
+  component "instrumentation\nOTLP traces/logs" as Instrumentation
+  component "Prometheus\nquery-only metrics" as Prometheus
 }
 
-Producer --> Masks : ask before building event
-Masks --> Bus : emit requested event only
+Producer --> Masks : ask before building optional data
+Masks --> Bus : emit requested operation event
+LogCollector --> LogBatch : parse + buffer + periodic flush
+LogBatch --> Bus : emit batched diagnostics
 Bus --> Ring : retain replayable classes
 Bus --> Bridge : live subscriber callback
-Bridge --> CriticalQ : reaction/control traffic
-Bridge --> EventQ : async runtime events
+Bridge --> EventQ : operation.started\noperation.completed\nruntime.logs\nreplay.gap
 CriticalQ --> Writer
 EventQ --> Writer
-Writer --> Transport : serialized frames
+Writer --> Transport : serialized GCPC frames
 Transport --> SDK
-SDK --> Plugin : HandleEvent / batch dispatch
+SDK --> Instrumentation : HandleEvent(batch records)
+Prometheus ..> Producer : server:query:metrics.commands\n(no event subscription)
 
 note right of Producer
 Events are observational.
@@ -44,8 +52,13 @@ They cannot deny or mutate command results.
 end note
 
 note right of EventQ
-Overflow is allowed only for async event traffic
-and must increment visible drop/lag counters.
+Overflow is allowed only for async telemetry
+and must increment visible drop/lag/gap counters.
+end note
+
+note bottom of LogCollector
+Current slice keeps the existing collector path.
+Do not show Unix-socket/yamux log transport here.
 end note
 
 @enduml

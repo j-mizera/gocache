@@ -5,51 +5,53 @@ frame "Event Bus with Replay Ring" as F {
 
     package "pkg/events" as EV {
         component "Bus" as BUS
-        component "ring\n(bounded FIFO)" as RING
-        component "subscribers map" as SUBS
+        database "Replay ring\n(bounded FIFO)" as RING
+        component "Subscribers map\n(type -> handlers)" as SUBS
     }
 
     rectangle "Emitters" as EMIT {
-        component "Server boot logs" as BL
-        component "Command post-hooks" as CH
-        component "Connection open/close" as CL
-        component "Plugin lifecycle" as PL
+        component "Operation tracker\noperation.started/completed" as OPS
+        component "pkg/logcollector\nperiodic runtime.logs batches" as LC_SRC
+        component "Connection / plugin\nlifecycle facts" as LIFE
+        component "Replay overflow\nreplay.gap" as GAP
     }
 
     rectangle "Subscribers" as SUB {
-        component "LogCollector\n(pkg/logcollector)" as LC
-        component "IPC plugins via GCPC\n(prometheus, custom)" as IPC
-        component "Embedded plugins\n(otlp, crashdump)" as EMB
+        component "IPC instrumentation plugin\nOTLP traces + logs" as INSTR
+        component "Other IPC event plugins\n(custom diagnostics)" as IPC
+        component "Embedded plugins\n(crashdump, lifecycle listeners)" as EMB
     }
 
-    BL --> BUS : Emit
-    CH --> BUS : Emit
-    CL --> BUS : Emit
-    PL --> BUS : Emit
+    OPS --> BUS : Emit operation.started\noperation.completed
+    LC_SRC --> BUS : Emit RuntimeLogBatchEventV1\n(type runtime.logs)
+    LIFE --> BUS : Emit low-volume facts
+    GAP --> BUS : Emit replay.gap marker
 
-    BUS --> RING : push under write lock
-    BUS --> SUBS : dispatch live
+    BUS --> RING : retain replayable classes
+    BUS --> SUBS : dispatch live by type
 
-    BUS -> LC : Subscribe\n(snapshot + live)
-    BUS -> IPC : Subscribe\n(snapshot + live)
-    BUS -> EMB : Subscribe\n(usually early, gets few replays)
+    BUS -> INSTR : Subscribe snapshot + live\noperation.*, runtime.logs, replay.gap
+    BUS -> IPC : Subscribe snapshot + live
+    BUS -> EMB : Subscribe if registered in-process
 }
 
 note bottom of RING
-  Capacity: events.replay_capacity
-  Default 10 000 (~5 MB @ 500B avg).
-  0 disables replay entirely.
-  Overflow drops oldest and emits a
-  synthetic ReplayGap event so late
-  subscribers can alert on misses.
+  Capacity: events.replay_capacity.
+  Overflow drops oldest and emits replay.gap.
+  Runtime logs are retained as batches, not
+  one event per raw log line.
 end note
 
 note top of BUS
-  Subscribe captures the ring snapshot
-  under the same write lock that gates
-  Emit, then delivers synchronously
-  before returning. No dup, no gap
-  across the replay/live boundary.
+  Subscribe captures the ring snapshot under
+  the same write lock that gates Emit, then
+  delivers replay before live events.
+end note
+
+note right of LC_SRC
+  Current runtime OTLP slice keeps the existing
+  stdout/JSON/plain-text log collector.
+  Unix-socket/yamux log transport is deferred.
 end note
 
 @enduml

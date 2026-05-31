@@ -1,0 +1,54 @@
+@startuml components_runtime_observability
+!include ../../../design/theme.iuml
+
+title Runtime Observability Components
+
+frame "GoCache Runtime Observability" as F {
+
+  rectangle "Server core" as server {
+    component "Operation Tracker" as Tracker <<operation lifecycle>>
+    component "Event Bus" as EventBus <<bounded replay + live>>
+    component "pkg/logcollector" as LogCollector <<JSON/plain-text\nperiodic flush>>
+    component "Command Metrics\nAggregate" as Metrics <<low-cardinality>>
+  }
+
+  rectangle "IPC instrumentation plugin" as instr {
+    component "EventPlugin" as EventPlugin <<operation.*\nruntime.logs\nreplay.gap>>
+    component "Span Correlator" as Correlator <<operation_id map>>
+    component "OTLP Trace Exporter" as TraceExporter
+    component "OTLP Log Exporter" as LogExporter
+  }
+
+  rectangle "IPC prometheus plugin" as prom {
+    component "QueryPlugin" as QueryPlugin <<server:query:metrics.commands>>
+    component "/metrics HTTP" as MetricsHTTP
+  }
+
+  rectangle "Embedded lifecycle plugin" as lifecycle {
+    component "lifecycleotlp" as LifecycleOTLP <<BootInit\nConfigLoaded\nProcessShutdown>>
+  }
+
+  cloud "Jaeger / OTLP backend" as Jaeger
+  cloud "Prometheus" as Prometheus
+
+  Tracker --> EventBus : operation.started\noperation.completed
+  LogCollector --> EventBus : RuntimeLogBatchEventV1\nruntime.logs
+  EventBus --> EventPlugin : GCPC EventV1\nsnapshot + live
+  EventPlugin --> Correlator : start/end spans\nattach logs by operation_id
+  Correlator --> TraceExporter
+  Correlator --> LogExporter
+  TraceExporter --> Jaeger : OTLP HTTP traces
+  LogExporter --> Jaeger : OTLP HTTP logs
+
+  QueryPlugin --> Metrics : ServerQueryV1\nmetrics.commands
+  MetricsHTTP --> Prometheus : scrape /metrics
+
+  LifecycleOTLP --> Jaeger : startup/config/shutdown OTLP
+}
+
+note bottom
+  Metrics stay Prometheus-owned. Runtime instrumentation exports traces + logs only.
+  Runtime logs use the existing logcollector path; no Unix-socket/yamux log transport in this slice.
+end note
+
+@enduml

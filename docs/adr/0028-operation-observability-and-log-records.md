@@ -30,9 +30,9 @@ The repository currently uses `operation.start` and `operation.complete` in some
 
 GoCache uses server-owned operations as the canonical public observability model. Every recorded action starts with `operation.started` and ends with `operation.completed`; other records are child facts or diagnostics correlated to that operation, not replacement lifecycle names.
 
-High-volume logs are not default event-bus events. Logs use a separate correlated `LogRecord`/diagnostic signal that carries `operation_id`, parent operation context when available, level, component, message template or message, and bounded attributes. Log delivery is best-effort and non-blocking by default: level/component filters, producer-side interest masks, lazy field construction, batching, sampling, bounded queues, drop counters, and shutdown flush are part of the contract.
+Runtime logs are correlated diagnostic signals. In the 2026-05-31 runtime OTLP slice they are carried as periodically flushed `runtime.logs` batches, with `pkg/logcollector` remaining the JSON/plain-text normalizer and `RuntimeLogBatchEventV1` carrying `operation_id`, parent operation context when available, level, component/source, message, caller, and bounded attributes. A separate `LogRecord` pipeline or non-stdout transport remains a future optimization, not part of this slice. Log delivery is best-effort and non-blocking by default: level/component filters, producer-side interest masks, lazy field construction, batching, sampling, bounded queues, drop counters, and shutdown flush are part of the contract.
 
-The event bus remains for operation lifecycle and opt-in child facts that plugins explicitly subscribe to. Subscriptions contribute to an aggregate interest mask that producers can check before doing optional work. Access-log-style records should be derived from `operation.completed` by an exporter when requested. Diagnostic logs should be exported through the log-record pipeline, not by first stringifying/parsing JSON and then re-emitting every log line as an event.
+The event bus remains for operation lifecycle, opt-in child facts, and the current batched `runtime.logs` diagnostic materialization that plugins explicitly subscribe to. Subscriptions contribute to an aggregate interest mask that producers can check before doing optional work. Access-log-style records should be derived from `operation.completed` by an exporter when requested. Diagnostic logs must not be re-emitted as one event per raw line; the accepted runtime slice batches collector output periodically before exporting it to OTLP logs.
 
 The public event, log, and GCPC payloads are materialization targets, not the default in-memory carrier on the command path. The command path should update compact internal summaries first, then project those summaries into public events, log records, metrics updates, or protobuf messages only after the relevant interest mask has been checked.
 
@@ -104,7 +104,7 @@ The contract assumes these implementation optimizations before any event/log pat
 
 ### Log records
 
-`LogRecord` is a separate diagnostic signal, correlated with operations but delivered through log-specific controls:
+`runtime.logs` batches, and any future `LogRecord` pipeline, are diagnostic signals correlated with operations and delivered through log-specific controls:
 
 - level and component filtering before record construction when possible;
 - lazy attribute construction so disabled logs do not allocate command args, key snapshots, context maps, or stringified payloads;
@@ -115,7 +115,7 @@ The contract assumes these implementation optimizations before any event/log pat
 - drop counters and last-drop metadata exposed outside the saturated log stream;
 - best-effort shutdown flush with tight deadlines.
 
-The end state removes the logger-to-JSON-pipe-to-logcollector-to-`log.entry` path from the hot observability model. Human stderr/stdout output may remain as a local mirror or fallback, and raw plugin stdout may remain a best-effort diagnostic fallback, but neither should be the authoritative structured log transport for high-rate observability.
+The 2026-05-31 runtime OTLP slice removes the per-line `log.entry` event but intentionally keeps the existing logger-to-JSON/stdout-pipe-to-logcollector path. Human stderr/stdout output may remain as a local mirror or fallback, and raw plugin stdout remains a best-effort diagnostic fallback. Replacing the collector with Unix-socket/yamux transport is explicitly deferred until a benchmark plan proves transport, rather than producer construction or exporter cost, is the limiting factor.
 
 By default, log records do not include command arguments, key values, hook context maps, or high-cardinality labels. Exporters may request additional detail explicitly, subject to redaction and the performance budget.
 
@@ -128,7 +128,7 @@ The taxonomy maps onto the ADR-0026 delivery model:
 | `operation.started` | async event, opt-in, bounded | live plus explicit cursor/gap policy | tracing, operation tree reconstruction |
 | `operation.completed` | async event, opt-in, bounded | live plus explicit cursor/gap policy | metrics, access-log exporters, tracing completion |
 | child fact events | async event, exact opt-in, bounded | per-class policy | metrics, diagnostics, feature-specific plugins |
-| `LogRecord` diagnostics | separate bounded log pipeline | live or exporter-managed retention | logging backends, OTLP logs, local diagnostics |
+| `runtime.logs` / future `LogRecord` diagnostics | batched diagnostic event today; separate bounded log pipeline only after benchmarked follow-up | live or exporter-managed retention | logging backends, OTLP logs, local diagnostics |
 | drop/gap counters | server query / metrics surface plus optional event summary | latest aggregate | operators, health checks, exporters |
 
 ### Measurement obligations
@@ -185,7 +185,7 @@ The implementation that accepts this ADR must prove the cost model with attribut
 
 ### Negative
 
-- Requires API, GCPC, SDK, and plugin docs to distinguish event subscriptions from log-record subscriptions.
+- Requires API, GCPC, SDK, and plugin docs to distinguish operation events, batched runtime log diagnostics, and any future dedicated log-record pipeline.
 - Existing prototype code that emits or consumes `log.entry`, `command.pre`, `command.post`, `operation.start`, or `operation.complete` as public observability events must be renamed or reshaped before implementation is accepted.
 - Exporters that want rich diagnostic context must negotiate/request detail instead of assuming every log or operation carries it.
 

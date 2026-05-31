@@ -2,7 +2,7 @@
 title: Server
 description: Server overview — RESP, command set, configuration, env vars, embedded plugin tier
 status: living
-last_updated: 2026-05-03
+last_updated: 2026-05-31
 related:
   - Server-Architecture
   - Server-Roadmap
@@ -217,8 +217,8 @@ task test
 
 ## Design Documentation
 
-- Server diagrams: `docs/server/design/` — components, sequences, state machines (including `components_core.puml` for the multi-shard architecture, `state_embedded_plugin_lifecycle.puml`, `components_event_bus_ring.puml`, `sequence_boot_crash_survivability.puml`)
-- GCPC protocol diagrams: `docs/gcpc/design/` (including `sequence_ophook_replay_on_subscribe.puml`, `state_ophook_replay_suppression.puml`)
+- Server diagrams: `docs/server/design/` — components, sequences, state machines (including `components_core.puml` for the multi-shard architecture, `state_embedded_plugin_lifecycle.puml`, `components_event_bus_ring.puml`, `components_async_event_delivery.puml`, `state_event_replay_cursors.puml`, `sequence_boot_crash_survivability.puml`)
+- GCPC protocol diagrams: `docs/gcpc/design/` (including `components_runtime_observability.puml`, `sequence_runtime_observability_export.puml`, `sequence_ophook_replay_on_subscribe.puml`, `state_operation_lifecycle.puml`, `state_ophook_replay_suppression.puml`)
 - Full diagram index with links: [SOLUTION_ARCHITECTURE.md](SOLUTION_ARCHITECTURE.md#design-diagrams)
 - GCPC protocol specification: [docs/gcpc/README.md](../gcpc/README.md)
 - Plugin overview (embedded vs IPC, build tags, layering rule): [docs/plugins/README.md](../plugins/README.md)

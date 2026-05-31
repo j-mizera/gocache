@@ -1,7 +1,6 @@
 @startuml components_plugin
 !include ../../../design/theme.iuml
 
-
 frame "GoCache Plugin Process Internals" as F {
 
     rectangle "Plugin Process" as plugin {
@@ -9,16 +8,23 @@ frame "GoCache Plugin Process Internals" as F {
         rectangle "SDK Layer (pluginsdk.Run)" as sdk {
             component [Transport\nConn] as TransConn <<Unix Socket>>
             component [Message Loop] as MsgLoop <<Recv + Dispatch>>
+            component [Session] as Session <<QueryServer + Config>>
         }
 
         rectangle "Concurrent Dispatch" as dispatch {
             component [Command\nGoroutines] as CmdGo <<HandleCommand()>>
             component [Hook\nGoroutines] as HookGo <<HandleHook()>>
+            component [Event\nGoroutines] as EventGo <<HandleEvent()>>
+            component [Config Reload] as ConfigReload <<OnConfigReload()>>
         }
 
         rectangle "Plugin Interfaces" as ifaces {
-            component [CommandPlugin] as CmdPlugin <<Commands() + HandleCommand()>>
-            component [HookPlugin] as HkPlugin <<Hooks() + HandleHook()>>
+            component [CommandPlugin] as CmdPlugin
+            component [HookPlugin] as HkPlugin
+            component [OperationHookPlugin] as OpHookPlugin
+            component [EventPlugin] as EventPlugin
+            component [QueryPlugin] as QueryPlugin
+            component [ConfigPlugin] as ConfigPlugin
         }
 
         rectangle "User Implementation" as impl {
@@ -26,27 +32,34 @@ frame "GoCache Plugin Process Internals" as F {
         }
     }
 
-    ' -- Relations --
     TransConn --> MsgLoop : EnvelopeV1 stream
 
-    MsgLoop --> CmdGo : CommandRequestV1\n(+ metadata, goroutine per request)
-    MsgLoop --> HookGo : HookRequestV1\n(+ context + metadata, goroutine per hook)
+    MsgLoop --> CmdGo : CommandRequestV1\n(+ metadata)
+    MsgLoop --> HookGo : HookRequestV1\n(+ context + metadata)
+    MsgLoop --> EventGo : EventV1\noperation.* / runtime.logs / replay.gap
+    MsgLoop --> ConfigReload : RegisterAck config\nConfigReloadV1
     MsgLoop --> TransConn : HealthResponseV1\nShutdownAckV1
 
     CmdGo --> CmdPlugin : Dispatch
     HookGo --> HkPlugin : Dispatch
+    EventGo --> EventPlugin : Dispatch
+    ConfigReload --> ConfigPlugin : Apply config
+    QueryPlugin --> Session : QueryServer(topic)
 
     CmdPlugin --> UserCode : HandleCommand(ctx, cmd, args, metadata)
-    HkPlugin --> UserCode : HandleHook(ctx, req)\nreq.Metadata has bare keys
+    HkPlugin --> UserCode : HandleHook(ctx, req)
+    OpHookPlugin --> UserCode : HandleOperationHook(ctx, req)
+    EventPlugin --> UserCode : HandleEvent(ctx, evt)
+    ConfigPlugin --> UserCode : OnConfigReload(cfg)
 
     CmdGo --> TransConn : CommandResponseV1
     HookGo --> TransConn : HookResponseV1
+    OpHookPlugin --> TransConn : OperationHookResponseV1
 
     note bottom of dispatch
-      All command and hook handlers
-      execute in separate goroutines.
-      HandleCommand / HandleHook
-      must be goroutine-safe.
+      Command, hook, and event handlers execute concurrently.
+      Implementations such as instrumentation must protect
+      span/log exporter state with their own synchronization.
     end note
 }
 

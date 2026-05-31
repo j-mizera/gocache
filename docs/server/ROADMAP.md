@@ -2,7 +2,7 @@
 title: Server Roadmap
 description: Phase tracker for the server — core cache, plugin framework, REX metadata, production hardening, advanced plugins
 status: living
-last_updated: 2026-05-03
+last_updated: 2026-05-31
 related:
   - Server
   - Server-Architecture
@@ -14,7 +14,7 @@ related:
 ## Phase 1: Core Cache -- COMPLETE
 
 - 5 data types: string, list, hash, set, sorted set
-- 74 commands with Redis-compatible response formats
+- 75 commands with Redis-compatible response formats
 - RESP2/RESP3 protocol with per-connection negotiation
 - Inline command support (telnet/netcat compatible)
 - Pipelining with buffered writer
@@ -41,7 +41,7 @@ related:
 - Multiplexed IPC: correlation ID dispatch, concurrent command handling
 - Hook system: pre/post command interception, priority-based execution, critical hooks can deny
 - Permission/scope system: hierarchical scopes (admin > write > read), key namespace isolation, hook filtering
-- Plugin SDK: Plugin, CommandPlugin, HookPlugin, ScopePlugin interfaces
+- Plugin SDK: Plugin, CommandPlugin, HookPlugin, OperationHookPlugin, EventPlugin, QueryPlugin, ConfigPlugin, and ScopePlugin interfaces
 - Prometheus metrics plugin: `/metrics`, `/healthz`, `/readyz`, command counters, latency histograms
 - Hook context system: three-layer namespacing (server `_`, plugin-private, `shared.`)
 
@@ -95,20 +95,19 @@ Plugin-to-server introspection via `ServerQueryV1` / `ServerQueryResponseV1` mes
 - `/readyz` — readiness: queries health + plugins, checks critical plugin states
 - Nil-session guard during plugin startup
 
-### OpenTelemetry Runtime Instrumentation -- PLANNED
+### OpenTelemetry Runtime Instrumentation -- DONE
 
 ADR-0023 splits runtime metrics from OTLP instrumentation:
-- Core should own W3C `traceparent` / `tracestate` extraction or generation.
-- Runtime telemetry should flow through async event subscriptions, not command hooks or operation hooks.
-- A future `instrumentation` plugin owns OTLP traces/logs/events export.
+- Runtime telemetry flows through async event subscriptions, not command hooks.
+- The `instrumentation` IPC plugin owns OTLP traces and logs export.
 - The `prometheus` plugin owns pull-based metrics and health/readiness endpoints only.
+- Runtime logs are carried as periodically flushed `runtime.logs` batches from the existing `pkg/logcollector` path.
 - Embedded `lifecycleotlp` covers only pre-IPC startup/failure/shutdown visibility.
 
 ### Observability — Remaining
 
-- Event system (Linux kernel notifier chains pattern) for connection/lifecycle/config/auth/eviction/log events
-- OTEL log bridge via event subscription (correlate logs with traces)
-- Custom metrics aggregation
+- Broader log-pipeline and traffic-class optimization from ADR-0026/ADR-0028, after explicit benchmark-scope approval.
+- Additional custom diagnostics/audit plugins that consume the operation-first event contract.
 
 ## Phase 4: Production Hardening
 

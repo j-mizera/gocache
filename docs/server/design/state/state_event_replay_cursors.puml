@@ -7,12 +7,12 @@ title Event Replay, Cursor, and Gap States
 
 NoSubscriber --> LiveSubscriber : subscribe(live-only)
 NoSubscriber --> ReplaySubscriber : subscribe(replayable class)
-NoSubscriber --> CursorSubscriber : subscribe(cursor runtime class)
+NoSubscriber --> CursorSubscriber : subscribe(high-rate runtime class)
 
 ReplaySubscriber --> ReplayingHistory : snapshot bounded ring
 ReplayingHistory --> LiveSubscriber : replay complete
 ReplayingHistory --> GapReported : ring overflow detected
-GapReported --> LiveSubscriber : deliver gap marker + continue live
+GapReported --> LiveSubscriber : deliver replay.gap + continue live
 
 CursorSubscriber --> CursorActive : assign cursor/sequence
 CursorActive --> CursorLagging : consumer falls behind
@@ -27,13 +27,20 @@ CursorActive --> [*] : unsubscribe/disconnect
 ReplaySubscriber --> [*] : unsubscribe/disconnect
 
 note right of ReplaySubscriber
-Lifecycle/control events are candidates
-for eager bounded replay.
+Lifecycle/control events and operation
+lifecycle events are bounded replay candidates.
 end note
 
 note right of CursorSubscriber
-High-rate runtime telemetry uses
-cursors/gaps, not guaranteed full replay.
+High-rate runtime telemetry includes
+runtime.logs batches. It uses gaps/drop
+accounting, not guaranteed full history.
+end note
+
+note bottom of GapReported
+The instrumentation plugin subscribes to
+replay.gap so exported traces/logs can mark
+partial history explicitly.
 end note
 
 @enduml

@@ -2,7 +2,7 @@
 title: GCPC
 description: GoCache Plugin Communication Protocol v1 — Protobuf over Unix domain sockets, the contract IPC plugins implement
 status: stable
-last_updated: 2026-05-30
+last_updated: 2026-05-31
 related:
   - Plugins
   - GCPC-Components-Diagrams
@@ -98,7 +98,7 @@ ADR-0028 defines the target operation-first event contract for the next event-sc
 
 Subscriptions are also the source of producer-side interest masks. The server should aggregate current `EventSubscribe`/future detail subscriptions into a cheap mask that emitters can check before building optional payloads. Filtering after command args, key snapshots, context maps, or protobuf payloads are already constructed is not sufficient for the performance budget.
 
-Logs follow a separate diagnostic signal in the ADR-0028 target contract. A future `LogRecord`-style GCPC payload/subscription should carry operation correlation and log metadata through a bounded, batched, sampled log pipeline instead of routing every structured log line through `Event` as `log.entry`.
+Runtime logs now travel through the same event subscription stream as a batched diagnostic event: subscribers request `runtime.logs`, and the server sends `RuntimeLogBatchEventV1` records with `operation_id`, level, source, message, caller, and filtered fields. The existing log collector remains the source normalizer for this slice: it reads structured JSON/plain-text log lines, buffers records, and flushes batches periodically (plus a size safety flush), not at every operation completion. OTLP/log exporters consume operation-correlated logs without adding a per-command synchronous path; Unix-socket/yamux log transport work is deferred until a separate benchmark decision justifies it.
 
 ## Registration Handshake
 
@@ -281,7 +281,7 @@ The server retains every emitted event in a bounded FIFO ring (`events.replay_ca
 
 This lets an IPC plugin that connects at t=500 ms still observe events emitted at t=0. When overflow occurs (ring saturated), the oldest entry is dropped and a synthetic `replay.gap` event is delivered ahead of the retained events so subscribers can alert on misses. Setting `events.replay_capacity: 0` disables the ring entirely.
 
-Under the ADR-0028 target contract, this replay ring applies to event classes that explicitly choose replay/cursor behavior. High-volume log records use log-pipeline retention/exporter policy instead of the generic event replay ring.
+Under the ADR-0028 target contract, this replay ring applies to event classes that explicitly choose replay/cursor behavior. Runtime logs are retained as `runtime.logs` batches, not as individual log lines; long-term retention and sampling remain the responsibility of the subscribing exporter/backend.
 
 ## Operation Hook Replay
 
@@ -298,7 +298,7 @@ Replay is "active ops only" by design — ops that started and completed before 
 
 Plugins declare requested scopes in the `Register` message. The server validates against the configuration-defined allowlist and returns the granted set in `RegisterAck`.
 
-Available scopes: `read`, `write`, `admin` (hierarchical), `hook:pre`, `hook:post` (independent), `keys:<glob>` (key namespace restriction).
+Available scopes: `read`, `write`, `admin` (hierarchical), `hook:pre`, `hook:post` (independent), `operation:hook`, `events`, `server:query` / `server:query:<topic>`, and `keys:<glob>` (key namespace restriction).
 
 If a plugin requests scopes beyond what the configuration allows, registration is rejected. If a plugin does not request scopes, it receives the default set (`["read"]`).
 
@@ -306,7 +306,7 @@ Hooks declared by a plugin are silently filtered based on granted scopes -- a pl
 
 ## Schema Definition
 
-The full Protobuf schema is at `proto/gcpc/v1/gcpc.proto`.
+The full Protobuf schema is at `api/gcpc/v1/gcpc.proto`.
 
 ## Design Diagrams
 
@@ -315,6 +315,8 @@ The full Protobuf schema is at `proto/gcpc/v1/gcpc.proto`.
 | Component | [IPC Architecture](design/component/components_ipc.puml) | Server-plugin IPC transport and framing |
 | Component | [Plugin Internals](design/component/components_plugin.puml) | Plugin process internal structure |
 | Component | [Core + Plugin Overview](design/component/components_core_plugins.puml) | How core server and plugins relate |
+| Component | [Operations](design/component/components_operations.puml) | Operation lifecycle, context, event/log materialization |
+| Component | [Runtime Observability](design/component/components_runtime_observability.puml) | Instrumentation plugin, log collector, Prometheus split, lifecycle OTLP split |
 | Component | [Command Routing](design/component/components_command_routing.puml) | Main + REX namespace routing |
 | Component | [Hook & Priority System](design/component/components_hooks_priority.puml) | Hook registry, executor, priority dispatch |
 | Component | [Permission Scopes](design/component/components_permission_scopes.puml) | Scope model, validation, enforcement |
@@ -323,11 +325,15 @@ The full Protobuf schema is at `proto/gcpc/v1/gcpc.proto`.
 | Sequence | [Command Routing](design/sequence/sequence_plugin_command_routing.puml) | Plugin command dispatch over IPC |
 | Sequence | [Hook Flow](design/sequence/sequence_plugin_commands.puml) | Pre/post hook execution with context propagation |
 | Sequence | [Hook Context Flow](design/sequence/sequence_hook_context.puml) | Context namespacing and filtering across multiple plugins |
+| Sequence | [Synchronous Reaction Points](design/sequence/sequence_sync_reaction_points.puml) | Difference between hooks/evaluators and async events |
+| Sequence | [Pipelined Event Batching](design/sequence/sequence_pipelined_event_batching.puml) | Pipelined command replies with batched event delivery |
+| Sequence | [Runtime OTLP Export](design/sequence/sequence_runtime_observability_export.puml) | Operation/log/replay-gap flow into OTLP traces and logs |
 | Sequence | [REX Metadata](design/sequence/sequence_rex_metadata.puml) | HELLO REXV negotiation, META accumulation, hook context injection |
 | Sequence | [Scope Registration](design/sequence/sequence_scope_registration.puml) | Scope negotiation during registration |
 | Sequence | [Scope Enforcement](design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
 | Sequence | [OpHook Replay on Subscribe](design/sequence/sequence_ophook_replay_on_subscribe.puml) | Synthetic PhaseStart delivery for late subscribers |
 | State | [Plugin Lifecycle](design/state/state_plugin_lifecycle.puml) | Plugin FSM: Loaded -> Running -> Shutdown |
+| State | [Operation Lifecycle](design/state/state_operation_lifecycle.puml) | Operation state and public lifecycle event names |
 | State | [Hook Execution](design/state/state_hook_execution.puml) | Hook dispatch state machine |
 | State | [Scope Resolution](design/state/state_scope_resolution.puml) | Scope validation and granting FSM |
 | State | [OpHook Replay Suppression](design/state/state_ophook_replay_suppression.puml) | Replay vs restart-storm suppression per plugin |
