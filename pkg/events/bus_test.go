@@ -89,7 +89,7 @@ func TestBus_HasSubscribers(t *testing.T) {
 		t.Error("expected no subscribers")
 	}
 
-	bus.Subscribe("test", []apiEvents.Type{apiEvents.LogEntry}, func(evt apiEvents.Event) {})
+	bus.Subscribe("test", []apiEvents.Type{apiEvents.RuntimeLogBatch}, func(evt apiEvents.Event) {})
 	if !bus.HasSubscribers() {
 		t.Error("expected subscribers")
 	}
@@ -112,12 +112,12 @@ func TestBus_HasSubscribersForTracksEventTypes(t *testing.T) {
 		t.Fatal("expected no command.completed interest before subscribe")
 	}
 
-	bus.Subscribe("logs", []apiEvents.Type{apiEvents.LogEntry}, noop)
+	bus.Subscribe("logs", []apiEvents.Type{apiEvents.RuntimeLogBatch}, noop)
 	if bus.HasSubscribersFor(apiEvents.CommandCompleted) {
 		t.Fatal("log-only subscriber must not create command.completed interest")
 	}
-	if !bus.HasSubscribersFor(apiEvents.LogEntry) {
-		t.Fatal("expected log.entry interest")
+	if !bus.HasSubscribersFor(apiEvents.RuntimeLogBatch) {
+		t.Fatal("expected runtime.logs interest")
 	}
 
 	bus.Subscribe("metrics", []apiEvents.Type{apiEvents.CommandCompleted}, noop)
@@ -137,8 +137,8 @@ func TestBus_HasSubscribersForTracksEventTypes(t *testing.T) {
 	if bus.HasSubscribersFor(apiEvents.OperationCompleted) {
 		t.Fatal("unsubscribe must remove operation.completed interest")
 	}
-	if !bus.HasSubscribersFor(apiEvents.LogEntry) {
-		t.Fatal("unrelated log.entry interest should remain")
+	if !bus.HasSubscribersFor(apiEvents.RuntimeLogBatch) {
+		t.Fatal("unrelated runtime.logs interest should remain")
 	}
 }
 
@@ -146,13 +146,13 @@ func TestBus_HasSubscribers_AtomicCounterInvariants(t *testing.T) {
 	bus := NewBus()
 	noop := func(apiEvents.Event) {}
 
-	bus.Subscribe("a", []apiEvents.Type{apiEvents.LogEntry}, noop)
-	bus.Subscribe("a", []apiEvents.Type{apiEvents.LogEntry}, noop) // re-subscribe same name
+	bus.Subscribe("a", []apiEvents.Type{apiEvents.RuntimeLogBatch}, noop)
+	bus.Subscribe("a", []apiEvents.Type{apiEvents.RuntimeLogBatch}, noop) // re-subscribe same name
 	if got := bus.subCount.Load(); got != 1 {
 		t.Errorf("after re-subscribe: want 1, got %d", got)
 	}
 
-	bus.Subscribe("b", []apiEvents.Type{apiEvents.LogEntry}, noop)
+	bus.Subscribe("b", []apiEvents.Type{apiEvents.RuntimeLogBatch}, noop)
 	if got := bus.subCount.Load(); got != 2 {
 		t.Errorf("after second subscribe: want 2, got %d", got)
 	}
@@ -327,14 +327,9 @@ func TestBus_OverflowDropsOldestAndEmitsReplayGap(t *testing.T) {
 		func(evt apiEvents.Event) {
 			switch apiEvents.Type(evt.Proto.Type) {
 			case apiEvents.ReplayGap:
-				// Dropped count is smuggled in LogEntry fields in Phase B.
-				fields := evt.Proto.GetLogEntry().GetFields()
-				if v, ok := fields["_dropped_count"]; ok {
-					var n uint64
-					for _, ch := range v {
-						n = n*10 + uint64(ch-'0')
-					}
-					gapCount = n
+				gap := evt.Proto.GetReplayGap()
+				if gap != nil {
+					gapCount = gap.DroppedCount
 				}
 			case apiEvents.ConnectionOpen:
 				addrs = append(addrs, evt.Proto.GetConnectionOpen().RemoteAddr)

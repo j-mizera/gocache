@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ops "gocache/api/operations"
+	"gocache/pkg/benchstats"
 	commandmetrics "gocache/pkg/metrics"
 	"gocache/pkg/plugin/router"
 )
@@ -88,6 +89,7 @@ func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, ipcStats Plu
 		qr.Register("stats", statsHandler(sp))
 	}
 	qr.Register("plugins", pluginsHandler(registry))
+	qr.Register("bench.stats", benchStatsHandler())
 	if ipcStats != nil {
 		qr.Register("plugin.ipc", pluginIPCHandler(ipcStats))
 	}
@@ -158,6 +160,25 @@ func commandMetricsHandler(provider CommandMetricsProvider) QueryHandlerFunc {
 			}
 		}
 		return data, nil
+	}
+}
+
+func benchStatsHandler() QueryHandlerFunc {
+	return func(params map[string]string) (map[string]string, error) {
+		reset := false
+		if params != nil {
+			reset = parseQueryBool(params["reset"])
+		}
+		return benchstats.Snapshot(reset), nil
+	}
+}
+
+func parseQueryBool(value string) bool {
+	switch value {
+	case "1", "true", "TRUE", "True", "yes", "YES", "on", "ON":
+		return true
+	default:
+		return false
 	}
 }
 

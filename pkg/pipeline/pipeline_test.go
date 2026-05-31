@@ -444,7 +444,7 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 	ctx := clientctx.New()
 	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
-	// Find the operation.complete event and check elapsed_ns > 0.
+	// Find the operation.completed event and check elapsed_ns > 0.
 	for _, evt := range emitter.events {
 		if evt.Proto.Type == string(apiEvents.OperationCompleted) {
 			data := evt.Proto.GetOperationComplete()
@@ -460,7 +460,7 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 			return
 		}
 	}
-	t.Error("operation.complete event not found")
+	t.Error("operation.completed event not found")
 }
 
 func TestEvaluate_OperationContextHasElapsed(t *testing.T) {

@@ -182,6 +182,27 @@ func TestGCPC_Registration_Accepted(t *testing.T) {
 	}
 }
 
+func TestGCPC_Registration_AddsQueryOnlyPluginToIPCStats(t *testing.T) {
+	mgr, _, _, sockPath := setupManager(t)
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("expected accepted, got rejected: %s", ack.Reason)
+	}
+
+	stats := mgr.pluginIPCStats()
+	if len(stats) != 1 {
+		t.Fatalf("len(stats)=%d, want 1", len(stats))
+	}
+	if stats[0].PluginName != "test-plugin" {
+		t.Fatalf("plugin name=%q, want test-plugin", stats[0].PluginName)
+	}
+	if stats[0].QueueCapacity == 0 {
+		t.Fatal("expected queue capacity to be reported")
+	}
+}
+
 func TestGCPC_Registration_UnknownPlugin(t *testing.T) {
 	_, _, _, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
@@ -424,6 +445,58 @@ func TestGCPC_EventSubscription_ContextFiltered(t *testing.T) {
 	}
 	if _, ok := opComplete.Context["other-plugin.private"]; ok {
 		t.Error("should NOT see other-plugin.private")
+	}
+}
+
+func TestGCPC_EventSubscription_RuntimeLogBatchFiltered(t *testing.T) {
+	mgr, eventBus, _, sockPath := setupManager(t)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "events"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	p.register("test-plugin", []string{"read", "events"}, nil, nil)
+	p.send(gcpc.NewEventSubscribe([]string{string(apiEvents.RuntimeLogBatch)}))
+	waitForSubscription(t, eventBus, "plugin:test-plugin")
+
+	eventBus.Emit(apiEvents.NewRuntimeLogBatch([]*gcpc.RuntimeLogRecordV1{{
+		Timestamp:   uint64(time.Now().UnixNano()),
+		OperationId: "cmd_1",
+		Level:       "info",
+		Source:      "server",
+		Message:     "runtime log",
+		Fields: map[string]string{
+			"_command":             "SET",
+			"shared.traceparent":   "00-abc-def-01",
+			"test-plugin.own":      "visible",
+			"other-plugin.private": "hidden",
+		},
+	}}))
+
+	env := p.recv()
+	evt := env.GetEvent()
+	if evt == nil {
+		t.Fatal("expected EventV1")
+	}
+	if evt.Type != string(apiEvents.RuntimeLogBatch) {
+		t.Fatalf("event type = %q, want %q", evt.Type, apiEvents.RuntimeLogBatch)
+	}
+	batch := evt.GetRuntimeLogBatch()
+	if batch == nil || len(batch.Records) != 1 {
+		t.Fatalf("expected one runtime log record, got %#v", batch)
+	}
+	fields := batch.Records[0].Fields
+	if fields["_command"] != "SET" {
+		t.Error("expected server _command field")
+	}
+	if fields["shared.traceparent"] != "00-abc-def-01" {
+		t.Error("expected shared traceparent")
+	}
+	if fields["test-plugin.own"] != "visible" {
+		t.Error("expected own plugin field")
+	}
+	if _, ok := fields["other-plugin.private"]; ok {
+		t.Error("should NOT see other plugin private field")
 	}
 }
 

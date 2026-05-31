@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gocache/commons/transport"
+	"gocache/pkg/benchstats"
 	commandmetrics "gocache/pkg/metrics"
 	"gocache/pkg/plugin/router"
 )
@@ -146,7 +147,7 @@ func TestRegisterBuiltinHandlers(t *testing.T) {
 	RegisterBuiltinHandlers(qr, reg, func() []router.PluginConnStats { return nil }, sp)
 
 	topics := qr.Topics()
-	expected := map[string]bool{"health": false, "stats": false, "plugins": false, "plugin.ipc": false}
+	expected := map[string]bool{"health": false, "stats": false, "plugins": false, "bench.stats": false, "plugin.ipc": false}
 	for _, topic := range topics {
 		expected[topic] = true
 	}
@@ -167,6 +168,9 @@ func TestRegisterBuiltinHandlers_NilStateProvider(t *testing.T) {
 	}
 	if _, err := qr.Handle("plugin.ipc", nil); err != nil {
 		t.Errorf("plugin.ipc handler should be registered: %v", err)
+	}
+	if _, err := qr.Handle("bench.stats", nil); err != nil {
+		t.Errorf("bench.stats handler should be registered: %v", err)
 	}
 	if _, err := qr.Handle("health", nil); err == nil {
 		t.Error("health handler should NOT be registered without state provider")
@@ -232,6 +236,34 @@ func TestManagerPluginIPCStatsIncludesEventOnlyConnectionsSorted(t *testing.T) {
 	}
 	if stats[0].PluginName != "alpha" || stats[1].PluginName != "zeta" {
 		t.Fatalf("stats order=%q,%q; want alpha,zeta", stats[0].PluginName, stats[1].PluginName)
+	}
+}
+
+func TestBenchStatsHandler(t *testing.T) {
+	benchstats.Reset()
+	benchstats.SetEnabled(true)
+	t.Cleanup(func() {
+		benchstats.Reset()
+		benchstats.SetEnabled(false)
+	})
+	benchstats.RecordPipelineEvaluation()
+
+	data, err := benchStatsHandler()(map[string]string{"reset": "true"})
+	if err != nil {
+		t.Fatalf("benchStatsHandler error: %v", err)
+	}
+	if data["enabled"] != "true" {
+		t.Fatalf("enabled=%q, want true", data["enabled"])
+	}
+	if data["pipeline.evaluations"] != "1" {
+		t.Fatalf("pipeline.evaluations=%q, want 1", data["pipeline.evaluations"])
+	}
+	data, err = benchStatsHandler()(nil)
+	if err != nil {
+		t.Fatalf("benchStatsHandler second error: %v", err)
+	}
+	if data["pipeline.evaluations"] != "0" {
+		t.Fatalf("pipeline.evaluations after reset=%q, want 0", data["pipeline.evaluations"])
 	}
 }
 
