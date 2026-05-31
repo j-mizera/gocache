@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ops "gocache/api/operations"
+	commandmetrics "gocache/pkg/metrics"
 	"gocache/pkg/plugin/router"
 )
 
@@ -72,6 +73,14 @@ func (r *QueryRegistry) Topics() []string {
 // plugins are visible even when they do not register commands with the router.
 type PluginIPCStatsProvider func() []router.PluginConnStats
 
+// CommandMetricsProvider returns point-in-time command metrics snapshots for
+// metrics exporters that pull aggregates through server-query instead of
+// receiving one event per command.
+type CommandMetricsProvider interface {
+	Buckets() []float64
+	Snapshot() []commandmetrics.CommandSnapshot
+}
+
 // RegisterBuiltinHandlers registers the built-in query topics on the registry.
 func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, ipcStats PluginIPCStatsProvider, sp ServerStateProvider) {
 	if sp != nil {
@@ -81,6 +90,13 @@ func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, ipcStats Plu
 	qr.Register("plugins", pluginsHandler(registry))
 	if ipcStats != nil {
 		qr.Register("plugin.ipc", pluginIPCHandler(ipcStats))
+	}
+}
+
+// RegisterCommandMetricsHandlers registers command metrics query topics.
+func RegisterCommandMetricsHandlers(qr *QueryRegistry, provider CommandMetricsProvider) {
+	if provider != nil {
+		qr.Register(commandmetrics.CommandsTopic, commandMetricsHandler(provider))
 	}
 }
 
@@ -116,6 +132,30 @@ func pluginsHandler(registry *Registry) QueryHandlerFunc {
 		for _, p := range plugins {
 			data[p.Name+".state"] = p.State().String()
 			data[p.Name+".critical"] = strconv.FormatBool(p.Critical())
+		}
+		return data, nil
+	}
+}
+
+func commandMetricsHandler(provider CommandMetricsProvider) QueryHandlerFunc {
+	return func(_ map[string]string) (map[string]string, error) {
+		buckets := provider.Buckets()
+		snapshots := provider.Snapshot()
+		data := make(map[string]string, 2+len(buckets)+len(snapshots)*(4+len(buckets)+1))
+		data["buckets.count"] = strconv.Itoa(len(buckets))
+		for i, bucket := range buckets {
+			data[fmt.Sprintf("bucket.%d.le", i)] = strconv.FormatFloat(bucket, 'g', -1, 64)
+		}
+		data["commands.count"] = strconv.Itoa(len(snapshots))
+		for i, snapshot := range snapshots {
+			prefix := fmt.Sprintf("command.%d.", i)
+			data[prefix+"name"] = snapshot.Command
+			data[prefix+"total"] = strconv.FormatUint(snapshot.Total, 10)
+			data[prefix+"errors"] = strconv.FormatUint(snapshot.Errors, 10)
+			data[prefix+"sum_ns"] = strconv.FormatUint(snapshot.SumNs, 10)
+			for j, count := range snapshot.Counts {
+				data[prefix+"bucket."+strconv.Itoa(j)] = strconv.FormatUint(count, 10)
+			}
 		}
 		return data, nil
 	}

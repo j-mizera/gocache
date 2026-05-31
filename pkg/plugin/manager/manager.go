@@ -22,6 +22,7 @@ import (
 	"gocache/commons/transport"
 	pkgconfig "gocache/pkg/config"
 	serverEvents "gocache/pkg/events"
+	commandmetrics "gocache/pkg/metrics"
 	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/cmdhooks"
@@ -81,13 +82,15 @@ type Manager struct {
 	logCollector   LogCollector
 	tracker        *serverOps.Tracker
 	clientPusher   ClientPusher
+	commandMetrics *commandmetrics.CommandCollector
 
 	// cancel terminates the lifecycle context derived inside Start.
 	// nil before Start; reset to nil by Shutdown.
 	cancel context.CancelFunc
 
-	pluginConns sync.Map // map[pluginName]*router.PluginConn
-	wg          sync.WaitGroup
+	pluginConns             sync.Map // map[pluginName]*router.PluginConn
+	commandMetricsConsumers sync.Map // map[pluginName]struct{}
+	wg                      sync.WaitGroup
 }
 
 // NewManager creates a plugin manager with the given configuration.
@@ -156,6 +159,13 @@ func (m *Manager) SetTracker(t *serverOps.Tracker) {
 // unsolicited data to client connections (e.g. Pub/Sub messages).
 func (m *Manager) SetClientPusher(p ClientPusher) {
 	m.clientPusher = p
+}
+
+// SetCommandMetrics wires the server-side command metrics collector into the
+// manager's server-query registry and plugin-scope interest tracking.
+func (m *Manager) SetCommandMetrics(c *commandmetrics.CommandCollector) {
+	m.commandMetrics = c
+	RegisterCommandMetricsHandlers(m.queryRegistry, c)
 }
 
 // startPluginLifecycleOp creates the lifecycle operation for a plugin instance
@@ -471,6 +481,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 		return
 	}
 	m.scopeRegistry.Register(reg.Name, grantedScopes)
+	m.enableCommandMetricsForPlugin(reg.Name)
 
 	// Plugin self-describes critical, but YAML override takes precedence (already
 	// seeded during Discover). Honor the plugin's value only if no YAML override.
@@ -481,6 +492,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	if len(reg.Commands) > 0 {
 		if err := m.router.RegisterPlugin(reg.Name, conn, reg.Commands); err != nil {
 			logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("command registration failed")
+			m.disableCommandMetricsForPlugin(reg.Name)
 			m.scopeRegistry.Unregister(reg.Name)
 			_ = conn.Send(gcpcv1.NewRegisterAck(false, "command registration failed: "+err.Error(), nil, nil))
 			_ = conn.Close()
@@ -776,6 +788,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 // name that never registered. Callers must still manage instance state
 // (SetState, emit events) separately.
 func (m *Manager) deregisterPlugin(name string) {
+	m.disableCommandMetricsForPlugin(name)
 	m.router.UnregisterPlugin(name)
 	m.hookRegistry.Unregister(name)
 	m.opHookRegistry.Unregister(name)
@@ -785,6 +798,24 @@ func (m *Manager) deregisterPlugin(name string) {
 	}
 	if m.eventBus != nil {
 		m.eventBus.Unsubscribe("plugin:" + name)
+	}
+}
+
+func (m *Manager) enableCommandMetricsForPlugin(name string) {
+	if m.commandMetrics == nil || !m.scopeRegistry.HasScope(name, scope.ScopeForTopic(commandmetrics.CommandsTopic)) {
+		return
+	}
+	if _, loaded := m.commandMetricsConsumers.LoadOrStore(name, struct{}{}); !loaded {
+		m.commandMetrics.AddConsumer()
+	}
+}
+
+func (m *Manager) disableCommandMetricsForPlugin(name string) {
+	if m.commandMetrics == nil {
+		return
+	}
+	if _, loaded := m.commandMetricsConsumers.LoadAndDelete(name); loaded {
+		m.commandMetrics.RemoveConsumer()
 	}
 }
 
