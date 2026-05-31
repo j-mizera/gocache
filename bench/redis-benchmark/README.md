@@ -62,7 +62,7 @@ Targets now form the benchmark matrix:
 |--------|--------|------------------|
 | `valkey` | `run.sh` | Reference Valkey server with persistence disabled |
 | `gocache` | `run.sh` | Core GoCache with no IPC plugins |
-| `gocache-ipc` | `run-ipc.sh` | GoCache with the `prometheus` IPC plugin registered, Prometheus metrics collected from async `command.post` events |
+| `gocache-ipc` | `run-ipc.sh` | GoCache with the `prometheus` IPC plugin registered, Prometheus metrics scraped from `server:query:metrics.commands` aggregate snapshots |
 | `gocache-pubsub` | `run-pubsub.sh` | GoCache with the `pubsub` IPC plugin, measured with real subscribers and `ClientPushV1` fanout |
 
 Pub/Sub output is separate from the generic matrix:
@@ -94,7 +94,7 @@ Fixed parameters (env-overridable):
 | `BENCH_SUITE`     | (see above) | `-t` suite passed to valkey-benchmark    |
 | `GOCACHE_IPC_IMAGE` | `gocache-bench:local-ipc` | IPC benchmark image tag |
 | `IPC_PLUGINS` | `prometheus` | Space-separated IPC plugin list compiled into the IPC benchmark image |
-| `BENCH_IPC_EVENT_MODE` | `full` | IPC event attribution mode for `run-ipc.sh`: `full`, `events-off`, or `bridge-off` |
+| `BENCH_IPC_EVENT_MODE` | `full` | IPC event attribution mode for `run-ipc.sh`: `full`, `events-off`, or `bridge-off`; Prometheus command metrics use `server:query:metrics.commands`, while the event switch remains for attribution and other event consumers |
 | `BENCH_PUBSUB_N` | `10000` | PUBLISH requests per Pub/Sub fanout scenario |
 | `BENCH_PUBSUB_FANOUTS` | `0,1,10` | Comma-separated subscriber counts to verify |
 | `BENCH_PUBSUB_MESSAGE_BYTES` | `32` | Message payload size for Pub/Sub tests |

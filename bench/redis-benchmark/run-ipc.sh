@@ -115,6 +115,7 @@ plugins:
 $PROMETHEUS_EVENT_SCOPE
         - "server:query:health"
         - "server:query:plugins"
+        - "server:query:metrics.commands"
 EOF_CFG
 
 # Keep the metrics server inside the target container for readiness checks.
