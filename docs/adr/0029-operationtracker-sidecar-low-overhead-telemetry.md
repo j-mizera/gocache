@@ -1,7 +1,7 @@
 ---
 title: ADR-0029 OperationTracker Sidecar for Low-Overhead Telemetry
 description: Move operation telemetry production off the command goroutine through a low-allocation OperationTracker submit path and worker-owned telemetry projection
-status: proposed
+status: accepted
 date: 2026-06-01
 deciders: [witherxse]
 related:
@@ -32,7 +32,7 @@ This ADR is intentionally the umbrella performance decision. Focused follow-up A
 
 GoCache introduces an `OperationTracker` sidecar pattern for runtime telemetry. The command goroutine submits compact, pointer-free operation records into a bounded tracker path and returns to command execution; worker goroutines own the expensive work of telemetry-context folding, typed event/log projection, and GCPC/protobuf materialization. Workers must not turn this into server-owned semantic grouping, server-owned aggregation, or exporter-specific telemetry calculation.
 
-The public package for plugin-safe observability contracts is `api/observability`, and it contains interfaces plus stable value contracts only. Reusable concrete tracker, ring, sharding, and operation-identity strategy primitives that both the server and plugin tooling can share live under `commons/observability`. Concrete server wiring, connection context version stores, worker scheduling, subscriber queues, and projection internals remain server-owned implementation under `pkg/`. Plugins interact through SDK/API facades, common primitives where appropriate, and GCPC messages; they do not import `pkg/operations`, `pkg/events`, `pkg/plugin`, `pkg/workers`, or any server-internal tracker implementation.
+The public package for plugin-safe observability contracts is `api/observability`, and it contains interfaces plus stable value contracts only. Reusable concrete tracker, ring, sharding, generic context-version, FIFO drain, and operation-identity strategy primitives that both the server and plugin tooling can share live under `commons/observability`. Concrete server wiring, `ClientContext` extraction, redaction, worker scheduling, subscriber queues, GCPC/log projection, and zerolog emission remain server-owned implementation under `pkg/`. Plugins interact through SDK/API facades, common primitives where appropriate, and GCPC messages; they do not import `pkg/operations`, `pkg/events`, `pkg/plugin`, `pkg/workers`, or any server-internal tracker implementation.
 
 The sidecar design separates telemetry context from Go `context.Context`. Go `context.Context` remains in APIs that need cancellation, deadlines, or request lifetime. Telemetry context becomes operation-associated data managed by `OperationTracker` and carried as immutable snapshots, context patches, or typed event/log fields depending on the boundary. Connection context version references are server-only: the server captures the connection-context version current at operation start, while IPC plugins receive serialized filtered context or provide their own producer context when they create plugin-owned operations.
 
@@ -74,15 +74,17 @@ Telemetry is fire-and-forget and may drop under overload. It is not an audit log
 
 Warning/error logs and lifecycle records may receive priority in implementation, but they remain telemetry signals unless a later durable/audit event system explicitly reclassifies them.
 
-## Priority Review Gates Before Implementation
+## Accepted Scope and Follow-up Gates
 
-This ADR remains `proposed` until the following user-visible gates are resolved or explicitly deferred:
+Accepted on 2026-06-02 for Subplan A: `api/observability` plugin-safe contracts and `commons/observability` reusable tracker, ring, identity, FIFO drain, and generic context-version primitives. Package-level submit-path benchmarks now defend the API/commons surface as zero-allocation. Server runtime wiring remains Subplan B.
 
-1. **Operation identity wiring**: define how the server-selected UUIDv7 or W3C strategy is exposed through API/commons, injected into IPC plugins through GCPC registration/configuration, and reused by embedded plugins.
+The following gates remain before full server runtime telemetry is complete:
+
+1. **Operation identity wiring**: extend the server-selected UUIDv7 or W3C strategy through IPC plugin registration/configuration and embedded plugin setup.
 2. **GCPC typed-event projection**: align the worker projection target with ADR-0030's typed oneof events plus common context/source fields.
-3. **Context snapshot/version proof**: align with ADR-0032 so command-time context is event-time correct and GCPC receives serialized/dereferenced context, not server version ids.
-4. **Performance proof**: require package benchmarks plus Docker benchmark before/after evidence for submit-path allocation, p99 latency, overload visibility, and IPC projection cost before accepting the implementation.
-5. **Common/API split**: keep `api/observability` as interfaces/value contracts, `commons/observability` as reusable engine primitives and strategy implementations, and server projection/context-version state in `pkg/` as described by ADR-0033.
+3. **Server context materialization**: align server `ClientContext` extraction, redaction, and projection with ADR-0032 so GCPC receives serialized/dereferenced context, not server version ids.
+4. **End-to-end performance proof**: require Docker benchmark before/after evidence for command p99 latency, overload visibility, and IPC projection cost before claiming runtime throughput improvement.
+5. **Server/API/common split enforcement**: keep `api/observability` as interfaces/value contracts, `commons/observability` as reusable engine primitives and strategy implementations, and server projection/context-version state in `pkg/` as described by ADR-0033.
 
 ## Alternatives Considered
 

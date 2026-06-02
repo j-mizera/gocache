@@ -2,7 +2,7 @@
 title: Architecture Decision Records
 description: Index of architectural decisions captured for gocache — Nygard-format ADRs, one per significant decision
 status: living
-last_updated: 2026-06-01
+last_updated: 2026-06-02
 related:
   - Server-Architecture
   - Performance
@@ -58,11 +58,11 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0026](0026-event-traffic-classes-and-backpressure.md) | Event Traffic Classes and Backpressure | proposed | 2026-05-29 |
 | [0027](0027-event-replay-cursors-and-gaps.md) | Event Replay, Cursors, and Gaps | proposed | 2026-05-29 |
 | [0028](0028-operation-observability-and-log-records.md) | Operation Observability and Log Records | proposed | 2026-05-30 |
-| [0029](0029-operationtracker-sidecar-low-overhead-telemetry.md) | OperationTracker Sidecar for Low-Overhead Telemetry | proposed | 2026-06-01 |
+| [0029](0029-operationtracker-sidecar-low-overhead-telemetry.md) | OperationTracker Sidecar for Low-Overhead Telemetry | accepted | 2026-06-01 |
 | [0030](0030-gcpc-v1-observability-context-contract.md) | GCPC v1 Observability Context Contract | proposed | 2026-06-01 |
 | [0031](0031-operation-identity-export-contract.md) | Operation Identity Export Contract | proposed | 2026-06-01 |
-| [0032](0032-telemetry-context-version-ownership.md) | Telemetry Context Version Ownership | proposed | 2026-06-01 |
-| [0033](0033-common-operationtracker-sharding-contract.md) | Common OperationTracker Sharding Contract | proposed | 2026-06-01 |
+| [0032](0032-telemetry-context-version-ownership.md) | Telemetry Context Version Ownership | accepted | 2026-06-01 |
+| [0033](0033-common-operationtracker-sharding-contract.md) | Common OperationTracker Sharding Contract | accepted | 2026-06-01 |
 
 ## Writing a new ADR
 

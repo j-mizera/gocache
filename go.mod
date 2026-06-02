@@ -15,6 +15,7 @@ require (
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/gammazero/deque v1.2.1
+	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.6
 	github.com/rs/zerolog v1.34.0
 	github.com/testcontainers/testcontainers-go v0.42.0
@@ -85,7 +86,6 @@ require (
 	github.com/go-task/template v0.2.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.3 // indirect
 	github.com/googleapis/gax-go/v2 v2.7.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
