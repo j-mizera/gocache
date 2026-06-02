@@ -1,7 +1,7 @@
 ---
 title: ADR-0032 Telemetry Context Version Ownership
 description: Keep server context versions internal while exposing event-time serialized context buckets to plugins
-status: proposed
+status: accepted
 date: 2026-06-01
 deciders: [witherxse]
 related:
@@ -25,9 +25,9 @@ This ADR covers telemetry context ownership only. It does not redefine Go `conte
 
 ## Decision
 
-Server-side `ClientContext` state is converted into a telemetry-relevant base context map at operation start. The operation start record pins the server-only base context version current for that operation. `OperationTracker` workers resolve that version, fold operation-level context update/remove records on top of it in submit order, and project serialized filtered context only when records cross an API, SDK, GCPC, event, or log boundary.
+Server-side `ClientContext` state is converted into a telemetry-relevant base context map at operation start. The operation start record pins the manager-owned base context version current for that operation. `OperationTracker` workers or reap callbacks resolve that version, fold operation-level context update/remove records on top of it in FIFO submit order, and project serialized filtered context only when records cross an API, SDK, GCPC, event, or log boundary.
 
-Connection context version ids are server/worker-local handles. They never cross GCPC as common fields, typed event fields, metadata, or SDK-visible ids. Plugins receive serialized filtered context or typed context buckets, never references to the server version table. Plugin-originated background operations own their own telemetry context and may parent to a server operation by exported operation id when there is real operation causality, but they do not mutate or borrow server connection context versions.
+Connection context version ids are in-process manager/worker-local handles. They never cross GCPC as common fields, typed event fields, metadata, or SDK-visible ids. Plugins receive serialized filtered context or typed context buckets, never references to the version table. Plugin-originated background operations own their own telemetry context and may parent to a server operation by exported operation id when there is real operation causality, but they do not mutate or borrow server connection context versions.
 
 GoCache operation `parent_id` represents GoCache operation causality only. A normal client command is a root operation with empty `parent_id`; connection identity, connection context ancestry, context version ancestry, and command sequencing must not be interpreted as GoCache operation parentage. REX `traceparent` may be mapped by an exporter plugin into external trace/span parentage, but core and `OperationTracker` must not rewrite GoCache `parent_id` from REX metadata.
 
@@ -89,14 +89,16 @@ GCPC carries serialized filtered telemetry context or typed `EventContext` bucke
 
 Redaction and visibility filtering happen before context crosses the plugin/GCPC boundary. Redaction tests must cover sensitive keys in base context, REX connection context, REX command context, and additional context. Context replay is best-effort telemetry; dropped context records may make reconstructed telemetry context incomplete and must not be treated as audit-durable truth.
 
-## Priority Review Gates Before Implementation
+## Accepted Scope and Follow-up Gates
 
-This ADR remains `proposed` until these context-lifecycle gates are resolved or explicitly deferred:
+Accepted on 2026-06-02 for Subplan A's manager-owned context-version primitive and FIFO mutation replay contract in `api/observability` and `commons/observability`. Server-specific `ClientContext` mapping, redaction, GCPC materialization, and version lifetime cleanup remain Subplan B.
+
+The following gates remain before full server integration:
 
 1. **Version lifetime**: define finish, abandon, replay-window, async-retainer, and reaper release rules for pinned base context versions.
 2. **Mutation inputs**: enumerate which `ClientContext`, `RexMeta`, `CmdMeta`, hook, plugin, and operation fields become base context, `rexConnectionContext`, `rexCommandContext`, or `additionalContext`.
 3. **Parent rewrite**: replace current command-parent-to-connection-operation behavior with empty command parents by default and update legacy `conn_1` parent tests/docs accordingly.
-4. **Replay tests**: require delayed-worker, concurrent-mutation, update/remove ordering, and tombstone tests proving event-time context correctness.
+4. **Replay tests**: extend delayed-worker, concurrent-mutation, update/remove ordering, and tombstone tests around server-side projection once Subplan B wiring exists.
 5. **Redaction/filtering tests**: verify sensitive keys are removed before plugin/GCPC materialization across all `EventContext` buckets.
 6. **REX/exporter integration**: prove REX traceparent stays context for exporter mapping and does not rewrite core GoCache `parent_id`.
 

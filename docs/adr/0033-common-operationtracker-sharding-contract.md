@@ -1,7 +1,7 @@
 ---
 title: ADR-0033 Common OperationTracker Sharding Contract
 description: Share pointer-free OperationTracker engine primitives from commons while keeping server projection and context-version state internal
-status: proposed
+status: accepted
 date: 2026-06-01
 deciders: [witherxse]
 related:
@@ -24,21 +24,21 @@ This ADR covers package placement, sharding, and the common engine boundary. It 
 
 ## Decision
 
-GoCache places reusable pointer-free OperationTracker engine primitives in `commons/observability`, while keeping server-owned projection, connection context version storage, event/GCPC fanout, subscriber queues, and lifecycle management in `pkg/`. The shared common layer may include record layouts, ring mechanics, shard routing helpers, operation identity strategy implementations, and minimal producer/consumer interfaces. It must not include server connection context state, plugin manager logic, event-bus coupling, or backend/export aggregation.
+GoCache places reusable pointer-free OperationTracker engine primitives in `commons/observability`, while keeping server-owned projection, event/GCPC fanout, subscriber queues, concrete `ClientContext` mapping, redaction, and lifecycle integration in `pkg/`. The shared common layer may include record layouts, ring mechanics, shard routing helpers, operation identity strategy implementations, minimal producer/consumer interfaces, and generic in-memory context-version primitives needed by the manager-owned submit/reap contract. It must not include concrete server connection state, plugin manager logic, event-bus coupling, GCPC/log materialization, zerolog calls, or backend/export aggregation.
 
 `api/observability` remains interface/value-contract only. It defines what plugins and SDK helpers can depend on, not how the server implements the sidecar. `commons/observability` is the reusable implementation layer for code that can safely be shared by server, SDK, embedded plugins, or IPC plugin tooling without importing server internals.
 
 The sidecar runs a configurable number of OperationTracer instances. Records are assigned to tracer instances by the optimized internal operation handle from ADR-0031, using a deterministic sharding rule such as modulo or a stable hash. This keeps a single operation's records on one tracer while distributing concurrent operations across workers. The configured tracer count, ring capacity, and worker scheduling are server configuration and benchmark parameters, not plugin-controlled API.
 
-The common engine remains generic. It submits and drains records; it does not calculate grouped telemetry, aggregate metrics, create traces, export backend-specific data, or own telemetry schemas. Plugins may use common primitives for plugin-local background operation telemetry, but server-side context-version resolution and projection remain server-owned. Plugin-local internal handles are local to the plugin-side engine instance; they are not server internal handles and never cross GCPC.
+The common engine remains generic. It submits and drains records in FIFO order; it does not calculate grouped telemetry, aggregate metrics, create traces, export backend-specific data, or own telemetry schemas. Reap callbacks later convert operation kinds to runtime/GCPC operation output, fold context mutation records into worker-owned context state before subsequent log/event records, and materialize runtime logs/zerolog output off the command goroutine. Plugins may use common primitives for plugin-local background operation telemetry, but server-side `ClientContext` extraction, redaction, GCPC projection, and plugin fanout remain server-owned. Plugin-local internal handles are local to the plugin-side engine instance; they are not server internal handles and never cross GCPC.
 
 ## Contract Shape
 
 ### Package boundary
 
 - `api/observability`: stable value types and interfaces visible to plugins.
-- `commons/observability`: reusable pointer-free records, ring/tracer primitives, shard routing helpers, UUIDv7/W3C identity strategy implementations, and allocation-sensitive tests/benchmarks.
-- `pkg/...`: server OperationTracker sidecar wiring, connection context version store, worker projection, event/GCPC adapters, subscriber queues, overload reporting, and lifecycle/reaper logic.
+- `commons/observability`: reusable pointer-free records, ring/tracer primitives, shard routing helpers, UUIDv7/W3C identity strategy implementations, generic manager-owned context-version primitives, FIFO drain surfaces, and allocation-sensitive tests/benchmarks.
+- `pkg/...`: server OperationTracker sidecar wiring, concrete `ClientContext` to telemetry-context mapping, redaction/filtering, worker projection, event/GCPC adapters, subscriber queues, overload reporting, zerolog/log emission, and lifecycle/reaper scheduling logic.
 - `sdk/...`: plugin ergonomics for starting plugin-owned operations and producing typed records without importing `pkg/`.
 
 ### Sharding
@@ -56,15 +56,17 @@ Telemetry is fire-and-forget and may drop under overload. The common engine shou
 
 This ADR does not turn the server into a telemetry backend or durable audit log. It only defines the common sidecar engine boundary, sharding contract, and minimum visibility expectation for overload.
 
-## Priority Review Gates Before Implementation
+## Accepted Scope and Follow-up Gates
 
-This ADR remains `proposed` until these placement and sharding gates are resolved or explicitly deferred:
+Accepted on 2026-06-02 for Subplan A's `api/observability` and `commons/observability` package split, sharded manager contract, FIFO drain surfaces, identity strategies, generic context-version primitives, and allocation-sensitive package benchmarks. Server projection, GCPC/log materialization, plugin fanout, and lifecycle scheduling remain Subplan B.
 
-1. **Package split**: confirm `api/observability` for plugin-facing interfaces/value contracts, `commons/observability` for reusable engine primitives and identity strategies, and `pkg/` for server projection/context-version state.
-2. **Shard routing key**: align with ADR-0031's internal numeric handle and exported identity mapping.
+The following gates remain before full server integration:
+
+1. **Server wiring**: keep `pkg/` responsible for server `ClientContext` mapping, projection, redaction, GCPC/log emission, plugin fanout, and lifecycle scheduling.
+2. **Shard routing validation**: continue aligning shard routing with ADR-0031's internal numeric handle and exported identity mapping as server wiring adopts the common manager.
 3. **Overload visibility**: define cheap counters, gap metadata, or health-query data that make drop-allowed telemetry visibly incomplete without blocking command execution.
 4. **Plugin-local use**: document that plugin-local handles are never server handles and cannot be used for server operation lookup.
-5. **Benchmarks**: add allocation and throughput benchmarks around common ring/tracer primitives before relying on them in server hot paths.
+5. **Server benchmarks**: extend allocation and throughput benchmarks from common ring/tracer primitives to server hot paths before claiming runtime improvements.
 
 ## Alternatives Considered
 
