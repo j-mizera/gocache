@@ -4,14 +4,14 @@
 // written to a configurable io.Writer (stdout by default). The log collector
 // worker reads from the pipe and emits periodic runtime log batches to the event bus.
 //
-// The default log methods (Trace, Debug, Info, Warn, Error) take a
-// context.Context and extract the current *ops.Operation via
-// operations.FromContext. If no operation is present the log line is still
-// written but without operation correlation.
+// The default log methods (Trace, Debug, Info, Warn, Error) accept a
+// context.Context for call-site compatibility, but do not derive operation
+// correlation from it. Correlated telemetry must be submitted through an
+// explicit operation scope after the operation has been created.
 //
-// Use the NoCtx variants only at boundaries where no operation exists:
-// early startup before the bootstrap operation, plugin discovery/loading,
-// and config parsing.
+// Use the NoCtx variants at boundaries that intentionally emit local zerolog
+// records without telemetry materialization, such as early startup before the
+// bootstrap operation, plugin discovery/loading, and config parsing.
 package logger
 
 import (
@@ -21,8 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gocache/api/command"
-	ops "gocache/api/operations"
+	apiobs "gocache/api/observability"
 
 	"github.com/rs/zerolog"
 )
@@ -42,31 +41,32 @@ func New(w io.Writer, source, level string) *Logger {
 	return &Logger{zl: zl}
 }
 
-// --- Default log methods (WITH operation context via ctx) ---
-// These are the standard methods. Every log call should pass the ambient ctx.
-// The operation is extracted via ops.FromContext(ctx); if nil, context is omitted.
+// --- Default log methods (context accepted, no operation extraction) ---
+// These methods keep the historical context-taking API, but context is
+// cancellation/request plumbing only. Operation-correlated logs must be
+// recorded through explicit observability scopes before local materialization.
 
-func (l *Logger) Trace(ctx context.Context) *OpEvent {
-	return &OpEvent{event: l.zl.Trace(), op: ops.FromContext(ctx)}
+func (l *Logger) Trace(context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Trace()}
 }
-func (l *Logger) Debug(ctx context.Context) *OpEvent {
-	return &OpEvent{event: l.zl.Debug(), op: ops.FromContext(ctx)}
+func (l *Logger) Debug(context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Debug()}
 }
-func (l *Logger) Info(ctx context.Context) *OpEvent {
-	return &OpEvent{event: l.zl.Info(), op: ops.FromContext(ctx)}
+func (l *Logger) Info(context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Info()}
 }
-func (l *Logger) Warn(ctx context.Context) *OpEvent {
-	return &OpEvent{event: l.zl.Warn(), op: ops.FromContext(ctx)}
+func (l *Logger) Warn(context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Warn()}
 }
-func (l *Logger) Error(ctx context.Context) *OpEvent {
-	return &OpEvent{event: l.zl.Error(), op: ops.FromContext(ctx)}
+func (l *Logger) Error(context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Error()}
 }
 
-// Fatal logs at fatal level with operation context, then exits the process
-// after the message is written. The os.Exit(1) happens inside zerolog's
-// Msg/Msgf call — Msg MUST be invoked for the exit to occur.
-func (l *Logger) Fatal(ctx context.Context) *OpEvent {
-	return &OpEvent{event: l.zl.Fatal(), op: ops.FromContext(ctx)}
+// Fatal logs at fatal level, then exits the process after the message is
+// written. The os.Exit(1) happens inside zerolog's Msg/Msgf call — Msg MUST
+// be invoked for the exit to occur.
+func (l *Logger) Fatal(context.Context) *OpEvent {
+	return &OpEvent{event: l.zl.Fatal()}
 }
 
 // --- NoCtx methods (WITHOUT operation context) ---
@@ -79,11 +79,39 @@ func (l *Logger) WarnNoCtx() *zerolog.Event  { return l.zl.Warn() }
 func (l *Logger) ErrorNoCtx() *zerolog.Event { return l.zl.Error() }
 func (l *Logger) FatalNoCtx() *zerolog.Event { return l.zl.Fatal() }
 
-// OpEvent wraps a zerolog.Event with an optional operation.
-// On Msg/Msgf, the operation's ID and redacted context are injected into JSON.
+// TelemetryNoCtx starts a local materialization event for a telemetry log level.
+// It deliberately uses zerolog.WithLevel so fatal/panic telemetry records can be
+// written before the caller finishes telemetry and decides whether to exit/panic.
+func (l *Logger) TelemetryNoCtx(level apiobs.TelemetryLogLevel) *zerolog.Event {
+	return l.zl.WithLevel(telemetryLevelToZerolog(level))
+}
+
+func telemetryLevelToZerolog(level apiobs.TelemetryLogLevel) zerolog.Level {
+	switch level {
+	case apiobs.TelemetryLogLevelTrace:
+		return zerolog.TraceLevel
+	case apiobs.TelemetryLogLevelDebug:
+		return zerolog.DebugLevel
+	case apiobs.TelemetryLogLevelInfo:
+		return zerolog.InfoLevel
+	case apiobs.TelemetryLogLevelWarn:
+		return zerolog.WarnLevel
+	case apiobs.TelemetryLogLevelError:
+		return zerolog.ErrorLevel
+	case apiobs.TelemetryLogLevelFatal:
+		return zerolog.FatalLevel
+	case apiobs.TelemetryLogLevelPanic:
+		return zerolog.PanicLevel
+	default:
+		return zerolog.NoLevel
+	}
+}
+
+// OpEvent wraps a zerolog.Event while preserving the historical fluent API.
+// It deliberately does not derive operation correlation from context; callers
+// that need correlated output must record through an explicit operation scope.
 type OpEvent struct {
 	event *zerolog.Event
-	op    *ops.Operation
 }
 
 func (e *OpEvent) Str(key, val string) *OpEvent {
@@ -127,24 +155,11 @@ func (e *OpEvent) Interface(key string, val any) *OpEvent {
 }
 
 func (e *OpEvent) Msg(msg string) {
-	e.injectContext()
 	e.event.Msg(msg)
 }
 
 func (e *OpEvent) Msgf(format string, args ...any) {
-	e.injectContext()
 	e.event.Msgf(format, args...)
-}
-
-func (e *OpEvent) injectContext() {
-	if e.op == nil {
-		return
-	}
-	e.event = e.event.Str(command.OperationID, e.op.ID)
-	ctx := e.op.ContextSnapshot(true) // redacted — secrets stripped
-	if len(ctx) > 0 {
-		e.event = e.event.Interface(command.CtxField, ctx)
-	}
 }
 
 // --- Default logger (server uses this, writes to stdout) ---
@@ -189,3 +204,7 @@ func InfoNoCtx() *zerolog.Event  { return Default().InfoNoCtx() }
 func WarnNoCtx() *zerolog.Event  { return Default().WarnNoCtx() }
 func ErrorNoCtx() *zerolog.Event { return Default().ErrorNoCtx() }
 func FatalNoCtx() *zerolog.Event { return Default().FatalNoCtx() }
+
+func TelemetryNoCtx(level apiobs.TelemetryLogLevel) *zerolog.Event {
+	return Default().TelemetryNoCtx(level)
+}
