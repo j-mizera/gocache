@@ -96,6 +96,6 @@ const (
 	CmdObject = "OBJECT"
 
 	// REX metadata
-	CmdMeta    = "META"     // Per-command metadata line (requires REXV negotiation)
-	CmdRexMeta = "REX.META" // Connection-scoped metadata management
+	CmdRexCmdMeta = "REX.CMDMETA" // Per-command metadata directive (requires REXV negotiation)
+	CmdRexMeta    = "REX.META"    // Connection-scoped metadata management
 )

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	apipersistence "gocache/api/persistence"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache"
 )
 
@@ -36,9 +37,9 @@ func TestCoordinator_BootInto_GobRoundTrip(t *testing.T) {
 
 	src := cache.New()
 	src.Lock()
-	_ = src.RawSet(context.Background(), "str", "hello", 0)
-	_ = src.RawSet(context.Background(), "list", []string{"a", "b", "c"}, 0)
-	_ = src.RawSet(context.Background(), "hash", map[string]string{"k": "v"}, 0)
+	_ = src.RawSet(commonobs.OperationScope{}, "str", "hello", 0)
+	_ = src.RawSet(commonobs.OperationScope{}, "list", []string{"a", "b", "c"}, 0)
+	_ = src.RawSet(commonobs.OperationScope{}, "hash", map[string]string{"k": "v"}, 0)
 	src.Unlock()
 
 	gob := NewGobSource(file)
@@ -99,8 +100,8 @@ func TestCoordinator_BootInto_SkipsExpired(t *testing.T) {
 
 	src := cache.New()
 	src.Lock()
-	_ = src.RawSet(context.Background(), "expired", "val", time.Now().Add(-time.Hour).UnixNano())
-	_ = src.RawSet(context.Background(), "alive", "val", 0)
+	_ = src.RawSet(commonobs.OperationScope{}, "expired", "val", time.Now().Add(-time.Hour).UnixNano())
+	_ = src.RawSet(commonobs.OperationScope{}, "alive", "val", 0)
 	src.Unlock()
 
 	gob := NewGobSource(file)

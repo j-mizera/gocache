@@ -8,14 +8,16 @@ import (
 
 	"github.com/gammazero/deque"
 
+	apiobs "gocache/api/observability"
 	apipersistence "gocache/api/persistence"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache"
 	"gocache/pkg/persistence"
 )
 
 func TestCache_Basic(t *testing.T) {
 	c := cache.New()
-	if err := c.RawSet(context.Background(), "key", "value", 0); err != nil {
+	if err := c.RawSet(commonobs.OperationScope{}, "key", "value", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -34,11 +36,61 @@ func TestCache_Basic(t *testing.T) {
 	}
 }
 
+func TestCache_ClearWithScopeRecordsLogRequestThroughHolder(t *testing.T) {
+	manager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   2,
+		CompletedRingPerShard: 1,
+	})
+	handle, ok := manager.StartOperation(102, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("StartOperation should allocate slot")
+	}
+	scope := commonobs.NewOperationScope(manager, handle, 102, apiobs.NewOperationRef("cache-clear-test", ""))
+
+	c := cache.New()
+	if err := c.RawSet(commonobs.OperationScope{}, "first", "1", 0); err != nil {
+		t.Fatalf("first RawSet: %v", err)
+	}
+	if err := c.RawSet(commonobs.OperationScope{}, "second", "2", 0); err != nil {
+		t.Fatalf("second RawSet: %v", err)
+	}
+	c.ClearWithScope(scope)
+	if c.Len() != 0 {
+		t.Fatalf("cache len = %d, want 0", c.Len())
+	}
+	if !scope.Finish(commonobs.SlotTerminalFinished) {
+		t.Fatal("scope should finish")
+	}
+
+	var record apiobs.TelemetryRecord
+	if drained := manager.DrainCompletedShard(0, func(operation commonobs.CompletedOperation) {
+		if len(operation.Records) != 1 {
+			t.Fatalf("record count = %d, want 1", len(operation.Records))
+		}
+		record = operation.Records[0]
+	}); drained != 1 {
+		t.Fatalf("drained %d operations, want 1", drained)
+	}
+	if record.Kind != apiobs.TelemetryRecordLog || record.Level != apiobs.TelemetryLogLevelInfo {
+		t.Fatalf("record kind/level = %v/%v, want log/info", record.Kind, record.Level)
+	}
+	if string(record.NameBytes()) != "cache cleared" {
+		t.Fatalf("log message = %q, want cache cleared", record.NameBytes())
+	}
+	if record.Number != 2 {
+		t.Fatalf("record number = %d, want item count 2", record.Number)
+	}
+}
+
 func TestCache_Snapshot(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "test_cache_snapshot.dat")
 
 	c := cache.New()
-	if err := c.RawSet(context.Background(), "snap", "data", 0); err != nil {
+	if err := c.RawSet(commonobs.OperationScope{}, "snap", "data", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -74,7 +126,7 @@ func TestCache_MemoryLimit_LRU(t *testing.T) {
 	// Fill it: each write evicts the previous LRU entry
 	for i := 0; i < 5; i++ {
 		key := string(rune('a' + i))
-		if err := c.RawSet(context.Background(), key, "value", 0); err != nil {
+		if err := c.RawSet(commonobs.OperationScope{}, key, "value", 0); err != nil {
 			t.Fatalf("unexpected OOM on LRU cache at key %s: %v", key, err)
 		}
 	}
@@ -95,14 +147,61 @@ func TestCache_MemoryLimit_NoEviction(t *testing.T) {
 	c := cache.NewWithBytes(200, cache.EvictionNone)
 
 	// First write should succeed (cache is empty)
-	if err := c.RawSet(context.Background(), "first", "v", 0); err != nil {
+	if err := c.RawSet(commonobs.OperationScope{}, "first", "v", 0); err != nil {
 		t.Fatalf("unexpected error on first write: %v", err)
 	}
 
 	// Subsequent writes that exceed the limit must return ErrOutOfMemory
-	err := c.RawSet(context.Background(), "second", "v", 0)
+	err := c.RawSet(commonobs.OperationScope{}, "second", "v", 0)
 	if !errors.Is(err, cache.ErrOutOfMemory) {
 		t.Errorf("expected ErrOutOfMemory, got %v", err)
+	}
+}
+
+func TestCache_MemoryLimit_NoEvictionRecordsLogRequestThroughHolder(t *testing.T) {
+	manager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   2,
+		CompletedRingPerShard: 1,
+	})
+	handle, ok := manager.StartOperation(101, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("StartOperation should allocate slot")
+	}
+	scope := commonobs.NewOperationScope(manager, handle, 101, apiobs.NewOperationRef("cache-test", ""))
+
+	c := cache.NewWithBytes(200, cache.EvictionNone)
+	if err := c.RawSet(scope, "first", "v", 0); err != nil {
+		t.Fatalf("unexpected error on first write: %v", err)
+	}
+	if err := c.RawSet(scope, "second", "v", 0); !errors.Is(err, cache.ErrOutOfMemory) {
+		t.Fatalf("expected ErrOutOfMemory, got %v", err)
+	}
+	if !scope.Finish(commonobs.SlotTerminalFailed) {
+		t.Fatal("scope should finish")
+	}
+
+	var record apiobs.TelemetryRecord
+	if drained := manager.DrainCompletedShard(0, func(operation commonobs.CompletedOperation) {
+		if len(operation.Records) != 1 {
+			t.Fatalf("record count = %d, want 1", len(operation.Records))
+		}
+		record = operation.Records[0]
+	}); drained != 1 {
+		t.Fatalf("drained %d operations, want 1", drained)
+	}
+	if record.Kind != apiobs.TelemetryRecordLog || record.Level != apiobs.TelemetryLogLevelWarn {
+		t.Fatalf("record kind/level = %v/%v, want log/warn", record.Kind, record.Level)
+	}
+	if string(record.NameBytes()) != "write rejected, out of memory" {
+		t.Fatalf("log message = %q, want write rejected, out of memory", record.NameBytes())
+	}
+	key, value, ok := record.FieldBytes(0)
+	if !ok || string(key) != "key" || string(value) != "second" {
+		t.Fatalf("field[0] = %q/%q/%v, want key/second/true", key, value, ok)
 	}
 }
 
@@ -113,7 +212,7 @@ func TestCache_MemoryTracking(t *testing.T) {
 		t.Errorf("expected 0 used bytes on empty cache, got %d", c.UsedBytes())
 	}
 
-	_ = c.RawSet(context.Background(), "key", "hello", 0)
+	_ = c.RawSet(commonobs.OperationScope{}, "key", "hello", 0)
 	usedAfterSet := c.UsedBytes()
 	if usedAfterSet <= 0 {
 		t.Errorf("expected usedBytes > 0 after set, got %d", usedAfterSet)
@@ -129,14 +228,14 @@ func TestCache_LRU_OrderOnGet(t *testing.T) {
 	// Cache that holds ~2 small entries; verify that GET refreshes LRU order
 	c := cache.NewWithBytes(300, cache.EvictionLRU)
 
-	_ = c.RawSet(context.Background(), "a", "1", 0)
-	_ = c.RawSet(context.Background(), "b", "2", 0) // b is now MRU, a is LRU
+	_ = c.RawSet(commonobs.OperationScope{}, "a", "1", 0)
+	_ = c.RawSet(commonobs.OperationScope{}, "b", "2", 0) // b is now MRU, a is LRU
 
 	// Access "a" to make it MRU; "b" becomes LRU
 	c.RawGet("a")
 
 	// Writing a new key should evict "b" (now LRU), not "a"
-	_ = c.RawSet(context.Background(), "c", "3", 0)
+	_ = c.RawSet(commonobs.OperationScope{}, "c", "3", 0)
 
 	_, aFound := c.RawGet("a")
 	_, bFound := c.RawGet("b")
@@ -158,7 +257,7 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	c := cache.New()
 	for i := 0; i < 10; i++ {
 		key := "key" + string(rune('a'+i))
-		if err := c.RawSet(context.Background(), key, "somevalue", 0); err != nil {
+		if err := c.RawSet(commonobs.OperationScope{}, key, "somevalue", 0); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
@@ -172,13 +271,13 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	}
 
 	// Lower the limit to something tiny — should trigger eviction.
-	c.SetMemoryLimit(context.Background(), 1, cache.EvictionLRU) // 1 MB — still bigger than our data
+	c.SetMemoryLimit(commonobs.OperationScope{}, 1, cache.EvictionLRU) // 1 MB — still bigger than our data
 	// Use a byte-level limit via the internal path: set maxBytes directly by
 	// creating a new cache with bytes limit to test eviction trigger.
 	small := cache.NewWithBytes(200, cache.EvictionLRU)
 	for i := 0; i < 5; i++ {
 		key := "k" + string(rune('a'+i))
-		_ = small.RawSet(context.Background(), key, "val", 0)
+		_ = small.RawSet(commonobs.OperationScope{}, key, "val", 0)
 	}
 	before := small.Len()
 	if before == 0 {
@@ -186,12 +285,12 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 	}
 
 	// Lower to 1 byte — must evict down.
-	small.SetMemoryLimit(context.Background(), 0, cache.EvictionLRU) // disable limit first
+	small.SetMemoryLimit(commonobs.OperationScope{}, 0, cache.EvictionLRU) // disable limit first
 	// Manually set a very small byte limit. Since SetMemoryLimit takes MB,
 	// we use NewWithBytes + re-populate to test the eviction path.
 	tiny := cache.NewWithBytes(1, cache.EvictionLRU)
 	for i := 0; i < 5; i++ {
-		_ = tiny.RawSet(context.Background(), "k"+string(rune('a'+i)), "val", 0)
+		_ = tiny.RawSet(commonobs.OperationScope{}, "k"+string(rune('a'+i)), "val", 0)
 	}
 	// Only one key should survive (each entry > 128 bytes overhead).
 	if tiny.Len() > 1 {
@@ -202,7 +301,7 @@ func TestCache_SetMemoryLimit_EvictsWhenLowered(t *testing.T) {
 func TestCache_LargeEntryExceedsMaxBytes(t *testing.T) {
 	// A single entry larger than maxBytes should be rejected with noeviction.
 	c := cache.NewWithBytes(1, cache.EvictionNone)
-	err := c.RawSet(context.Background(), "big", "this is way more than 1 byte of data", 0)
+	err := c.RawSet(commonobs.OperationScope{}, "big", "this is way more than 1 byte of data", 0)
 	if !errors.Is(err, cache.ErrOutOfMemory) {
 		t.Errorf("expected ErrOutOfMemory for oversized entry, got %v", err)
 	}

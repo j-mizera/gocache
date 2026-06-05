@@ -309,6 +309,16 @@ func eventTypeBit(eventType apiEvents.Type) uint64 {
 		return 1 << 14
 	case apiEvents.ReplayGap:
 		return 1 << 15
+	case apiEvents.PluginStarted:
+		return 1 << 16
+	case apiEvents.PluginStopped:
+		return 1 << 17
+	case apiEvents.PluginRegistrationFailed:
+		return 1 << 18
+	case apiEvents.PluginCommandRegistered:
+		return 1 << 19
+	case apiEvents.PluginCommandRegistrationFailed:
+		return 1 << 20
 	default:
 		return 0
 	}

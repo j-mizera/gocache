@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	apicommand "gocache/api/command"
-	"gocache/pkg/command"
 	"gocache/commons/resp"
+	"gocache/pkg/command"
 	"gocache/pkg/rex"
 )
 
@@ -39,6 +39,7 @@ func HandleRexMeta(cmdCtx *command.Context) apicommand.Result {
 		if err := store.Set(key, value); err != nil {
 			return apicommand.Result{Err: err}
 		}
+		cmdCtx.UpdateConnectionTelemetryContext(key, value)
 		return apicommand.Result{Value: "OK"}
 
 	case "MSET":
@@ -47,11 +48,17 @@ func HandleRexMeta(cmdCtx *command.Context) apicommand.Result {
 		}
 		store := ensureRexStore(cmdCtx)
 		pairs := cmdCtx.Args[1:]
+		mutated := 0
 		for i := 0; i < len(pairs); i += 2 {
 			if err := store.Set(pairs[i], pairs[i+1]); err != nil {
+				if mutated > 0 {
+					cmdCtx.UpdateConnectionTelemetryContext(pairs[:mutated]...)
+				}
 				return apicommand.Result{Err: err}
 			}
+			mutated = i + 2
 		}
+		cmdCtx.UpdateConnectionTelemetryContext(pairs...)
 		return apicommand.Result{Value: "OK"}
 
 	case "GET":
@@ -74,7 +81,9 @@ func HandleRexMeta(cmdCtx *command.Context) apicommand.Result {
 		if cmdCtx.Client.RexMeta == nil {
 			return apicommand.Result{Value: 0}
 		}
-		if cmdCtx.Client.RexMeta.Del(cmdCtx.Args[1]) {
+		key := cmdCtx.Args[1]
+		if cmdCtx.Client.RexMeta.Del(key) {
+			cmdCtx.RemoveConnectionTelemetryContext(key)
 			return apicommand.Result{Value: 1}
 		}
 		return apicommand.Result{Value: 0}

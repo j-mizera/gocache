@@ -11,6 +11,8 @@ const (
 	CommandsTopic = "metrics.commands"
 
 	nsPerSec = 1e9
+
+	defaultCommandMetricsRingCapacity = 8192
 )
 
 // DefaultCommandDurationBuckets are the command-latency histogram bucket
@@ -26,6 +28,12 @@ type commandStats struct {
 	counts []uint64
 }
 
+type commandMetricRecord struct {
+	command   string
+	elapsedNs uint64
+	isError   bool
+}
+
 // CommandSnapshot is a copy of one command's accumulated metrics.
 type CommandSnapshot struct {
 	Command string
@@ -37,9 +45,15 @@ type CommandSnapshot struct {
 
 // CommandCollector aggregates low-cardinality command metrics in-process.
 // Recording is gated by an active-consumer reference count so deployments that
-// do not grant a metrics query scope pay only a cheap atomic check.
+// do not grant a metrics query scope pay only a cheap atomic check. Active
+// producers enqueue compact records into a bounded sidecar ring; aggregation and
+// map/histogram mutation happen when snapshots are polled, not on the command
+// goroutine.
 type CommandCollector struct {
 	active atomic.Int32
+	drops  atomic.Uint64
+
+	pending chan commandMetricRecord
 
 	mu      sync.Mutex
 	stats   map[string]*commandStats
@@ -48,8 +62,16 @@ type CommandCollector struct {
 
 // NewCommandCollector creates a command metrics collector.
 func NewCommandCollector() *CommandCollector {
+	return newCommandCollector(defaultCommandMetricsRingCapacity)
+}
+
+func newCommandCollector(ringCapacity int) *CommandCollector {
+	if ringCapacity < 1 {
+		ringCapacity = 1
+	}
 	buckets := append([]float64(nil), DefaultCommandDurationBuckets...)
 	return &CommandCollector{
+		pending: make(chan commandMetricRecord, ringCapacity),
 		stats:   make(map[string]*commandStats),
 		buckets: buckets,
 	}
@@ -86,37 +108,30 @@ func (c *CommandCollector) HasCommandMetricsSink() bool {
 	return c != nil && c.active.Load() > 0
 }
 
-// RecordCommand aggregates one command completion. It intentionally accepts the
-// compact metrics tuple Prometheus needs instead of a full event payload.
+// RecordCommand enqueues one command completion for sidecar aggregation. It
+// intentionally accepts the compact metrics tuple Prometheus needs instead of a
+// full event payload. The enqueue is non-blocking; if the bounded ring is full,
+// the occurrence is dropped rather than stalling command execution.
 func (c *CommandCollector) RecordCommand(command string, elapsedNs uint64, isError bool) {
 	if !c.HasCommandMetricsSink() {
 		return
 	}
 
-	durationSec := float64(elapsedNs) / nsPerSec
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	s := c.stats[command]
-	if s == nil {
-		s = &commandStats{counts: make([]uint64, len(c.buckets)+1)}
-		c.stats[command] = s
+	record := commandMetricRecord{command: command, elapsedNs: elapsedNs, isError: isError}
+	select {
+	case c.pending <- record:
+	default:
+		c.drops.Add(1)
 	}
+}
 
-	s.total++
-	s.sumNs += elapsedNs
-	if isError {
-		s.errors++
+// DroppedRecords reports command metric occurrences dropped because the sidecar
+// ring was full.
+func (c *CommandCollector) DroppedRecords() uint64 {
+	if c == nil {
+		return 0
 	}
-
-	for i, bound := range c.buckets {
-		if durationSec <= bound {
-			s.counts[i]++
-			return
-		}
-	}
-	s.counts[len(c.buckets)]++
+	return c.drops.Load()
 }
 
 // Buckets returns a copy of the histogram bucket boundaries.
@@ -136,6 +151,8 @@ func (c *CommandCollector) Snapshot() []CommandSnapshot {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	c.drainPendingLocked()
 
 	commands := make([]string, 0, len(c.stats))
 	for command := range c.stats {
@@ -157,4 +174,38 @@ func (c *CommandCollector) Snapshot() []CommandSnapshot {
 		}
 	}
 	return snapshots
+}
+
+func (c *CommandCollector) drainPendingLocked() {
+	for {
+		select {
+		case record := <-c.pending:
+			c.aggregateLocked(record)
+		default:
+			return
+		}
+	}
+}
+
+func (c *CommandCollector) aggregateLocked(record commandMetricRecord) {
+	s := c.stats[record.command]
+	if s == nil {
+		s = &commandStats{counts: make([]uint64, len(c.buckets)+1)}
+		c.stats[record.command] = s
+	}
+
+	s.total++
+	s.sumNs += record.elapsedNs
+	if record.isError {
+		s.errors++
+	}
+
+	durationSec := float64(record.elapsedNs) / nsPerSec
+	for i, bound := range c.buckets {
+		if durationSec <= bound {
+			s.counts[i]++
+			return
+		}
+	}
+	s.counts[len(c.buckets)]++
 }

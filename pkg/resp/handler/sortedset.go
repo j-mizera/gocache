@@ -5,12 +5,11 @@ import (
 	"strings"
 
 	apicommand "gocache/api/command"
+	"gocache/commons/resp"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
-	"gocache/commons/resp"
 )
-
 
 // Sorted-set commands operate on two encodings:
 //
@@ -87,13 +86,13 @@ func zaddPacked(cmdCtx *command.Context, key string, buf []byte, pairs []cache.S
 					size += int64(len(rest.Member)) + cache.ZSetMemberOverhead
 				}
 			}
-			if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, ttl); err != nil {
+			if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, z, size, ttl); err != nil {
 				return err
 			}
 			return added
 		}
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSortedSet, buf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeSortedSet, buf, ttl); err != nil {
 		return err
 	}
 	return added
@@ -109,7 +108,7 @@ func zaddNative(cmdCtx *command.Context, key string, z *cache.SortedSet, pairs [
 			size += int64(len(p.Member)) + cache.ZSetMemberOverhead
 		}
 	}
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, z, size, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, z, size, ttl); err != nil {
 		return err
 	}
 	return added
@@ -149,7 +148,7 @@ func HandleZrem(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSortedSet, buf, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeSortedSet, buf, ttl); err != nil {
 					return err
 				}
 			}
@@ -169,7 +168,7 @@ func HandleZrem(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, zset, size, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, zset, size, ttl); err != nil {
 					return err
 				}
 			}

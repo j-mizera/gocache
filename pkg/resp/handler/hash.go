@@ -2,10 +2,10 @@ package handler
 
 import (
 	apicommand "gocache/api/command"
+	"gocache/commons/resp"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
-	"gocache/commons/resp"
 )
 
 // Hash commands operate on two physical encodings:
@@ -51,7 +51,6 @@ func HandleHset(cmdCtx *command.Context) apicommand.Result {
 	return command.Dispatch(cmdCtx, executeFn)
 }
 
-
 // hsetStartPacked seeds a new hash from a Packed buffer. Same promotion
 // logic as hsetPacked so a single field larger than maxValue skips Packed
 // entirely.
@@ -71,12 +70,12 @@ func hsetPacked(cmdCtx *command.Context, key string, buf []byte, kvs []string) a
 		if perr != nil {
 			return perr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, m, hashMapSize(m), ttl); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, m, hashMapSize(m), ttl); err != nil {
 			return err
 		}
 		return added
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeHash, newBuf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeHash, newBuf, ttl); err != nil {
 		return err
 	}
 	return added
@@ -110,7 +109,7 @@ func finishHsetNative(cmdCtx *command.Context, key string, hash map[string]strin
 		hash[field] = value
 	}
 	ttl := cmdCtx.Cache.RawTTL(key)
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, hash, size, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, hash, size, ttl); err != nil {
 		return 0, err
 	}
 	return added, nil
@@ -200,7 +199,7 @@ func HandleHdel(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeHash, buf, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeHash, buf, ttl); err != nil {
 					return err
 				}
 			}
@@ -220,7 +219,7 @@ func HandleHdel(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, hash, size, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, hash, size, ttl); err != nil {
 					return err
 				}
 			}

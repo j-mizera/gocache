@@ -7,13 +7,11 @@ import (
 	"github.com/gammazero/deque"
 
 	apicommand "gocache/api/command"
-	"gocache/commons/logger"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/cache/packed"
 	"gocache/pkg/command"
 )
-
 
 func listDequeSize(dq *deque.Deque[string]) int64 {
 	var size int64
@@ -78,12 +76,12 @@ func lpushStartPacked(cmdCtx *command.Context, key string, values []string) any 
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), 0); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, listDequeSize(dq), 0); err != nil {
 			return err
 		}
 		return dq.Len()
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, 0); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeList, buf, 0); err != nil {
 		return err
 	}
 	n, _ := packed.ListLen(buf)
@@ -101,12 +99,12 @@ func lpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), ttl); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, listDequeSize(dq), ttl); err != nil {
 			return err
 		}
 		return dq.Len()
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, newBuf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeList, newBuf, ttl); err != nil {
 		return err
 	}
 	n, _ := packed.ListLen(newBuf)
@@ -119,7 +117,7 @@ func lpushNative(cmdCtx *command.Context, key string, dq *deque.Deque[string], v
 	}
 	ttl := cmdCtx.Cache.RawTTL(key)
 	newSize := cmdCtx.Cache.NativeSize(key) + listAppendSize(values)
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, newSize, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, newSize, ttl); err != nil {
 		return err
 	}
 	return dq.Len()
@@ -160,12 +158,12 @@ func rpushStartPacked(cmdCtx *command.Context, key string, values []string) any 
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), 0); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, listDequeSize(dq), 0); err != nil {
 			return err
 		}
 		return dq.Len()
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, 0); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeList, buf, 0); err != nil {
 		return err
 	}
 	n, _ := packed.ListLen(buf)
@@ -183,12 +181,12 @@ func rpushPacked(cmdCtx *command.Context, key string, buf []byte, values []strin
 		if derr != nil {
 			return derr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, listDequeSize(dq), ttl); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, listDequeSize(dq), ttl); err != nil {
 			return err
 		}
 		return dq.Len()
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, newBuf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeList, newBuf, ttl); err != nil {
 		return err
 	}
 	n, _ := packed.ListLen(newBuf)
@@ -201,7 +199,7 @@ func rpushNative(cmdCtx *command.Context, key string, dq *deque.Deque[string], v
 	}
 	ttl := cmdCtx.Cache.RawTTL(key)
 	newSize := cmdCtx.Cache.NativeSize(key) + listAppendSize(values)
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, newSize, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, newSize, ttl); err != nil {
 		return err
 	}
 	return dq.Len()
@@ -271,8 +269,8 @@ func popList(cmdCtx *command.Context, key string, entry cache.Entry, fromLeft bo
 		if n == 0 {
 			cmdCtx.Cache.RawDelete(key)
 		} else {
-			if werr := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeList, buf, ttl); werr != nil {
-				logger.Error(cmdCtx.Context()).Err(werr).Str("key", key).Msg("unexpected error on pop write-back")
+			if werr := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeList, buf, ttl); werr != nil {
+				submitHandlerErrorLog(cmdCtx.Telemetry(), "unexpected error on pop write-back", key, werr)
 			}
 		}
 		return string(popped), nil
@@ -292,8 +290,8 @@ func popList(cmdCtx *command.Context, key string, entry cache.Entry, fromLeft bo
 			cmdCtx.Cache.RawDelete(key)
 		} else {
 			newSize := cmdCtx.Cache.NativeSize(key) - int64(len(val)) - cache.ListElementOverhead
-			if werr := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, dq, newSize, ttl); werr != nil {
-				logger.Error(cmdCtx.Context()).Err(werr).Str("key", key).Msg("unexpected error on pop write-back")
+			if werr := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, dq, newSize, ttl); werr != nil {
+				submitHandlerErrorLog(cmdCtx.Telemetry(), "unexpected error on pop write-back", key, werr)
 			}
 		}
 		return val, nil
@@ -485,13 +483,13 @@ func tryWakeBlockedClients(cmdCtx *command.Context, key string) {
 			}
 			val, err := popList(cmdCtx, key, entry, true, cmdCtx.Cache.RawTTL(key))
 			if err != nil {
-				logger.Error(cmdCtx.Context()).Err(err).Str("key", key).Msg("blocked-pop pop failed")
+				submitHandlerErrorLog(cmdCtx.Telemetry(), "blocked-pop pop failed", key, err)
 				return nil
 			}
 			return val
 		})
 		if dispatchErr != nil {
-			logger.Error(cmdCtx.Context()).Err(dispatchErr).Str("key", key).Msg("blocked-pop dispatch failed")
+			submitHandlerErrorLog(cmdCtx.Telemetry(), "blocked-pop dispatch failed", key, dispatchErr)
 			return
 		}
 		if popResult == nil {

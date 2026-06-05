@@ -2,11 +2,14 @@ package handler_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
+	apiobs "gocache/api/observability"
+	commonobs "gocache/commons/observability"
+	"gocache/commons/resp"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
-	"gocache/commons/resp"
 	"gocache/pkg/rex"
 	rexhandler "gocache/pkg/rex/handler"
 )
@@ -62,6 +65,24 @@ func TestHandleRexMeta_SetMissingArgs(t *testing.T) {
 	}
 }
 
+func TestHandleRexMeta_SetAdvancesConnectionBaseOnly(t *testing.T) {
+	ctx := makeCtx("SET", "tenant", "acme")
+	ctx.Client.ConnectionIdentity = apiobs.ConnectionIdentity(41)
+	manager := newRexTelemetryManager()
+	manager.UpdateConnectionContext(ctx.Client.ConnectionIdentity, []byte("tenant"), []byte("old"), []byte("role"), []byte("reader"))
+	ctx.SetOperationTrackerManager(manager)
+
+	res := rexhandler.HandleRexMeta(ctx)
+	if res.Value != "OK" {
+		t.Fatalf("SET: expected OK, got %v (err=%v)", res.Value, res.Err)
+	}
+
+	current := currentConnectionContext(t, manager, ctx.Client.ConnectionIdentity)
+	if current["tenant"] != "acme" || current["role"] != "reader" {
+		t.Fatalf("current connection context = %+v, want tenant=acme role=reader", current)
+	}
+}
+
 func TestHandleRexMeta_MSet(t *testing.T) {
 	ctx := makeCtx("MSET", "auth.jwt", "tok1", "tenant.id", "team-a")
 	res := rexhandler.HandleRexMeta(ctx)
@@ -73,6 +94,24 @@ func TestHandleRexMeta_MSet(t *testing.T) {
 	}
 	if v, _ := ctx.Client.RexMeta.Get("tenant.id"); v != "team-a" {
 		t.Errorf("tenant.id=%q, want team-a", v)
+	}
+}
+
+func TestHandleRexMeta_MSetAdvancesConnectionBaseOnly(t *testing.T) {
+	ctx := makeCtx("MSET", "auth.jwt", "tok1", "tenant.id", "team-a")
+	ctx.Client.ConnectionIdentity = apiobs.ConnectionIdentity(42)
+	manager := newRexTelemetryManager()
+	ctx.SetOperationTrackerManager(manager)
+
+	res := rexhandler.HandleRexMeta(ctx)
+	if res.Value != "OK" {
+		t.Fatalf("MSET: expected OK, got %v (err=%v)", res.Value, res.Err)
+	}
+
+	want := map[string]string{"auth.jwt": "tok1", "tenant.id": "team-a"}
+	current := currentConnectionContext(t, manager, ctx.Client.ConnectionIdentity)
+	if !reflect.DeepEqual(current, want) {
+		t.Fatalf("current connection context = %+v, want %+v", current, want)
 	}
 }
 
@@ -127,6 +166,31 @@ func TestHandleRexMeta_Del(t *testing.T) {
 	}
 }
 
+func TestHandleRexMeta_DelAdvancesConnectionBaseOnly(t *testing.T) {
+	ctx := makeCtx("DEL", "role")
+	ctx.Client.ConnectionIdentity = apiobs.ConnectionIdentity(43)
+	ctx.Client.RexMeta = rex.NewStore()
+	if err := ctx.Client.RexMeta.Set("role", "reader"); err != nil {
+		t.Fatalf("seed rex store: %v", err)
+	}
+	manager := newRexTelemetryManager()
+	manager.UpdateConnectionContext(ctx.Client.ConnectionIdentity, []byte("tenant"), []byte("acme"), []byte("role"), []byte("reader"))
+	ctx.SetOperationTrackerManager(manager)
+
+	res := rexhandler.HandleRexMeta(ctx)
+	if res.Value != 1 {
+		t.Fatalf("DEL existing: got %v, want 1 (err=%v)", res.Value, res.Err)
+	}
+
+	current := currentConnectionContext(t, manager, ctx.Client.ConnectionIdentity)
+	if current["tenant"] != "acme" {
+		t.Fatalf("current connection context = %+v, want tenant=acme", current)
+	}
+	if _, ok := current["role"]; ok {
+		t.Fatalf("current connection context should not contain removed role: %+v", current)
+	}
+}
+
 func TestHandleRexMeta_DelEmptyStore(t *testing.T) {
 	ctx := makeCtx("DEL", "nope")
 	res := rexhandler.HandleRexMeta(ctx)
@@ -168,4 +232,32 @@ func TestHandleRexMeta_UnknownSubcommand(t *testing.T) {
 	if v, ok := res.Value.(resp.Value); !ok || v.Type != resp.Error {
 		t.Errorf("expected error for unknown subcommand, got %v", res.Value)
 	}
+}
+
+func newRexTelemetryManager() *commonobs.SlotOperationTrackerManager {
+	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   4,
+		CompletedRingPerShard: 1,
+	})
+}
+
+func currentConnectionContext(t *testing.T, manager *commonobs.SlotOperationTrackerManager, connection apiobs.ConnectionIdentity) map[string]string {
+	t.Helper()
+	version := manager.PinCurrentConnectionContextVersion(connection)
+	if version.IsZero() {
+		t.Fatal("current connection context version should be non-zero")
+	}
+	defer manager.ReleaseConnectionContextVersion(version)
+	out := make(map[string]string)
+	if !manager.VisitConnectionContextVersion(version, func(key, value string) bool {
+		out[key] = value
+		return true
+	}) {
+		t.Fatalf("current connection context version %d should be visitable", version)
+	}
+	return out
 }

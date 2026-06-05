@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"net"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -9,25 +10,29 @@ import (
 	apicommand "gocache/api/command"
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
+	commonobs "gocache/commons/observability"
+	"gocache/commons/transport"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
+	"gocache/pkg/command"
 	"gocache/pkg/engine"
-	serverOps "gocache/pkg/operations"
+	pluginrouter "gocache/pkg/plugin/router"
 	"gocache/pkg/watch"
 )
 
 // --- Test helpers ---
 
-func newTestPipeline() (*Pipeline, *engine.Engine, *serverOps.Tracker) {
+func newTestPipeline() (*Pipeline, *engine.Engine, *commonobs.SlotOperationTrackerManager) {
 	c := cache.New()
 	e := engine.New(c)
 	br := blocking.NewRegistry()
 	wm := watch.NewManager()
 	eval := New(c, e, "", br, wm)
-	tracker := serverOps.NewTracker()
-	eval.SetTracker(tracker)
+	tracker := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(tracker)
 	return eval, e, tracker
 }
 
@@ -86,6 +91,102 @@ func (m *mockEmitter) Emit(evt apiEvents.Event) {
 func (m *mockEmitter) HasSubscribers() bool                           { return true }
 func (m *mockEmitter) HasSubscribersFor(types ...apiEvents.Type) bool { return true }
 
+type commandScopeContextKey struct{}
+
+type drainedTelemetryOperation struct {
+	operation      apiobs.InternalOperationIdentity
+	parent         string
+	contextVersion apiobs.ConnectionContextVersion
+	contextOverlay map[string]string
+	status         commonobs.SlotTerminalStatus
+	records        []apiobs.TelemetryRecord
+}
+
+func countEventRecords(records []apiobs.TelemetryRecord) int {
+	count := 0
+	for _, record := range records {
+		switch record.Kind {
+		case apiobs.TelemetryRecordOperationStart,
+			apiobs.TelemetryRecordOperationFinish,
+			apiobs.TelemetryRecordCommandStart,
+			apiobs.TelemetryRecordCommandFinish,
+			apiobs.TelemetryRecordEvent:
+			count++
+		}
+	}
+	return count
+}
+
+func telemetryRecordStringField(record apiobs.TelemetryRecord, wantKey string) (string, bool) {
+	payload := record.PayloadBytes()
+	if len(payload) == 0 {
+		return "", false
+	}
+	pos := 1
+	for count := int(payload[0]); count > 0; count-- {
+		if pos >= len(payload) {
+			return "", false
+		}
+		keyLen := int(payload[pos])
+		pos++
+		if pos+keyLen > len(payload) {
+			return "", false
+		}
+		key := string(payload[pos : pos+keyLen])
+		pos += keyLen
+		if pos >= len(payload) {
+			return "", false
+		}
+		valueLen := int(payload[pos])
+		pos++
+		if pos+valueLen > len(payload) {
+			return "", false
+		}
+		value := string(payload[pos : pos+valueLen])
+		pos += valueLen
+		if key == wantKey {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func newPipelineTelemetryTracker() *commonobs.SlotOperationTrackerManager {
+	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           64,
+		RecordsPerOperation:   8,
+		CompletedRingPerShard: 64,
+	})
+}
+
+func drainTelemetryOperations(manager *commonobs.SlotOperationTrackerManager) []drainedTelemetryOperation {
+	out := make([]drainedTelemetryOperation, 0, manager.ShardCount())
+	for shard := range manager.ShardCount() {
+		manager.DrainCompletedShard(shard, func(completed commonobs.CompletedOperation) {
+			records := append([]apiobs.TelemetryRecord(nil), completed.Records...)
+			var contextOverlay map[string]string
+			if completed.ContextOverlay != nil {
+				contextOverlay = make(map[string]string, len(completed.ContextOverlay))
+				for key, value := range completed.ContextOverlay {
+					contextOverlay[key] = value
+				}
+			}
+			out = append(out, drainedTelemetryOperation{
+				operation:      completed.Operation,
+				parent:         completed.Parent.String(),
+				contextVersion: completed.ContextVersion,
+				contextOverlay: contextOverlay,
+				status:         completed.Status,
+				records:        records,
+			})
+		})
+	}
+	return out
+}
+
 // --- Tests ---
 
 func TestEvaluate_BasicCommand(t *testing.T) {
@@ -96,6 +197,332 @@ func TestEvaluate_BasicCommand(t *testing.T) {
 	result := eval.Evaluate(context.Background(), ctx, "PING", nil)
 	if result.Value != "PONG" {
 		t.Errorf("expected PONG, got %v", result.Value)
+	}
+}
+
+func TestEvaluate_CommandScopeUsesCancellationContextAcrossPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*Pipeline) *mockCommandMetricsRecorder
+	}{
+		{
+			name: "fast",
+		},
+		{
+			name: "metrics-only",
+			configure: func(eval *Pipeline) *mockCommandMetricsRecorder {
+				recorder := &mockCommandMetricsRecorder{active: true}
+				eval.SetCommandMetricsRecorder(recorder)
+				return recorder
+			},
+		},
+		{
+			name: "full",
+			configure: func(eval *Pipeline) *mockCommandMetricsRecorder {
+				eval.SetEmitter(&mockEmitter{})
+				return nil
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval, e, _ := newTestPipeline()
+			defer e.Stop()
+
+			manager := newPipelineTelemetryTracker()
+			eval.SetOperationTrackerManager(manager)
+			var recorder *mockCommandMetricsRecorder
+			if tt.configure != nil {
+				recorder = tt.configure(eval)
+			}
+
+			marker := "marker-" + tt.name
+			parentCtx := context.WithValue(context.Background(), commandScopeContextKey{}, marker)
+			client := clientctx.New()
+			client.OperationID = "parent-" + tt.name
+			handlerCalled := false
+
+			eval.RegisterHandler("SCOPE", func(cmdCtx *command.Context) apicommand.Result {
+				handlerCalled = true
+				if got := cmdCtx.CancellationContext().Value(commandScopeContextKey{}); got != marker {
+					t.Errorf("cancellation context value = %v, want %q", got, marker)
+				}
+				if op := ops.FromContext(cmdCtx.CancellationContext()); op != nil {
+					t.Errorf("cancellation context carried legacy operation %q", op.ID)
+				}
+				if cmdCtx.Context() != cmdCtx.CancellationContext() {
+					t.Error("Context compatibility alias should return cancellation context")
+				}
+				if cmdCtx.Telemetry().IsZero() {
+					t.Fatal("expected non-zero command telemetry scope")
+				}
+				record := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 0)
+				record.SetNameString("scope")
+				if !cmdCtx.RecordTelemetry(record) {
+					t.Error("expected command telemetry record to be accepted")
+				}
+				if !cmdCtx.Log(apiobs.TelemetryLogLevelInfo, []byte("handler log")) {
+					t.Error("expected command telemetry log to be accepted")
+				}
+				return apicommand.Result{Value: "OK"}
+			})
+
+			result := eval.Evaluate(parentCtx, client, "SCOPE", nil)
+			if result.Value != "OK" {
+				t.Fatalf("result = %v, want OK", result.Value)
+			}
+			if !handlerCalled {
+				t.Fatal("handler was not called")
+			}
+			if recorder != nil && len(recorder.commands) != 1 {
+				t.Fatalf("metrics recorder calls = %d, want 1", len(recorder.commands))
+			}
+
+			drained := drainTelemetryOperations(manager)
+			if len(drained) != 1 {
+				t.Fatalf("drained operations = %d, want 1", len(drained))
+			}
+			completed := drained[0]
+			if completed.operation.IsZero() {
+				t.Fatal("completed operation identity is zero")
+			}
+			if completed.parent != client.OperationID {
+				t.Fatalf("parent = %q, want %q", completed.parent, client.OperationID)
+			}
+			if completed.status != commonobs.SlotTerminalFinished {
+				t.Fatalf("status = %v, want finished", completed.status)
+			}
+			wantRecords := 4
+			if tt.name == "full" {
+				wantRecords = 8
+			}
+			if len(completed.records) != wantRecords {
+				t.Fatalf("records = %d, want %d", len(completed.records), wantRecords)
+			}
+			for i, record := range completed.records {
+				if record.Operation != completed.operation {
+					t.Fatalf("record[%d] operation = %d, want %d", i, record.Operation, completed.operation)
+				}
+			}
+		})
+	}
+}
+
+func TestEvaluate_CommandScopePinsConnectionContextVersionUntilDrain(t *testing.T) {
+	eval, e, _ := newTestPipeline()
+	defer e.Stop()
+
+	manager := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(manager)
+
+	connection := apiobs.ConnectionIdentity(77)
+	startVersion := manager.UpdateConnectionContext(connection, []byte("tenant"), []byte("acme"), []byte("role"), []byte("reader"))
+	client := clientctx.New()
+	client.ConnectionIdentity = connection
+	client.OperationID = "parent-pin"
+	handlerCalled := false
+	var currentVersion apiobs.ConnectionContextVersion
+
+	eval.RegisterHandler("PINCTX", func(cmdCtx *command.Context) apicommand.Result {
+		handlerCalled = true
+		currentVersion = manager.UpdateConnectionContext(connection, []byte("tenant"), []byte("globex"))
+		if currentVersion == startVersion {
+			t.Fatal("context update should create a new current version")
+		}
+		gotStart := map[string]string{}
+		if !manager.VisitConnectionContextVersion(startVersion, func(key, value string) bool {
+			gotStart[key] = value
+			return true
+		}) {
+			t.Fatal("start-time context version should stay retained while command is active")
+		}
+		if gotStart["tenant"] != "acme" || gotStart["role"] != "reader" {
+			t.Fatalf("start-time context while active = %+v, want tenant=acme role=reader", gotStart)
+		}
+		return apicommand.Result{Value: "OK"}
+	})
+
+	result := eval.Evaluate(context.Background(), client, "PINCTX", nil)
+	if result.Value != "OK" {
+		t.Fatalf("result = %v, want OK", result.Value)
+	}
+	if !handlerCalled {
+		t.Fatal("handler was not called")
+	}
+
+	drained := 0
+	manager.DrainCompletedShard(0, func(completed commonobs.CompletedOperation) {
+		drained++
+		if completed.ContextVersion != startVersion {
+			t.Fatalf("completed context version = %d, want start-time version %d", completed.ContextVersion, startVersion)
+		}
+		gotStart := map[string]string{}
+		if !manager.VisitConnectionContextVersion(completed.ContextVersion, func(key, value string) bool {
+			gotStart[key] = value
+			return true
+		}) {
+			t.Fatal("start-time context version should remain visitable during drain")
+		}
+		if gotStart["tenant"] != "acme" || gotStart["role"] != "reader" {
+			t.Fatalf("drained start-time context = %+v, want tenant=acme role=reader", gotStart)
+		}
+	})
+	if drained != 1 {
+		t.Fatalf("drained operations = %d, want 1", drained)
+	}
+	if manager.VisitConnectionContextVersion(startVersion, nil) {
+		t.Fatal("non-current start-time version should be released after drain")
+	}
+	gotCurrent := map[string]string{}
+	if !manager.VisitConnectionContextVersion(currentVersion, func(key, value string) bool {
+		gotCurrent[key] = value
+		return true
+	}) {
+		t.Fatal("current connection context version should remain visitable")
+	}
+	if gotCurrent["tenant"] != "globex" || gotCurrent["role"] != "reader" {
+		t.Fatalf("current context = %+v, want tenant=globex role=reader", gotCurrent)
+	}
+}
+
+func TestEvaluate_CommandScopePinsConnectionBaseAndCommandOverlay(t *testing.T) {
+	eval, e, _ := newTestPipeline()
+	defer e.Stop()
+
+	manager := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(manager)
+
+	connection := apiobs.ConnectionIdentity(79)
+	baseVersion := manager.UpdateConnectionContext(connection, []byte("tenant"), []byte("acme"), []byte("role"), []byte("reader"))
+	client := clientctx.New()
+	client.ConnectionIdentity = connection
+	client.OperationID = "parent-cmd-meta"
+	client.CmdMeta = map[string]string{"tenant": "globex", "traceparent": "00-abc"}
+
+	result := eval.Evaluate(context.Background(), client, "PING", nil)
+	if result.Value != "PONG" {
+		t.Fatalf("PING result = %v, want PONG", result.Value)
+	}
+
+	drained := drainTelemetryOperations(manager)
+	if len(drained) != 1 {
+		t.Fatalf("drained operations = %d, want 1", len(drained))
+	}
+	completed := drained[0]
+	if completed.contextVersion != baseVersion {
+		t.Fatalf("completed context version = %d, want connection base %d", completed.contextVersion, baseVersion)
+	}
+	if completed.contextOverlay["tenant"] != "globex" || completed.contextOverlay["traceparent"] != "00-abc" {
+		t.Fatalf("completed context overlay = %+v, want tenant=globex traceparent=00-abc", completed.contextOverlay)
+	}
+
+	current := make(map[string]string)
+	if !manager.VisitConnectionContextVersion(baseVersion, func(key, value string) bool {
+		current[key] = value
+		return true
+	}) {
+		t.Fatal("connection base should remain visitable")
+	}
+	if current["tenant"] != "acme" || current["role"] != "reader" {
+		t.Fatalf("connection base = %+v, want tenant=acme role=reader", current)
+	}
+	if _, ok := current["traceparent"]; ok {
+		t.Fatalf("command metadata leaked into connection base: %+v", current)
+	}
+}
+
+func TestEvaluate_RexMetaSetUpdatesFutureConnectionContextVersion(t *testing.T) {
+	eval, e, _ := newTestPipeline()
+	defer e.Stop()
+
+	manager := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(manager)
+
+	connection := apiobs.ConnectionIdentity(78)
+	baseVersion := manager.UpdateConnectionContext(connection)
+	client := clientctx.New()
+	client.ConnectionIdentity = connection
+	client.OperationID = "parent-rex-meta"
+
+	setResult := eval.Evaluate(context.Background(), client, "REX.META", []string{"SET", "tenant", "acme"})
+	if setResult.Value != "OK" {
+		t.Fatalf("REX.META SET result = %v, want OK (err=%v)", setResult.Value, setResult.Err)
+	}
+	pingResult := eval.Evaluate(context.Background(), client, "PING", nil)
+	if pingResult.Value != "PONG" {
+		t.Fatalf("PING result = %v, want PONG", pingResult.Value)
+	}
+
+	drained := 0
+	var rexContextVersion apiobs.ConnectionContextVersion
+	var pingContextVersion apiobs.ConnectionContextVersion
+	pingContext := map[string]string{}
+	manager.DrainCompletedShard(0, func(completed commonobs.CompletedOperation) {
+		drained++
+		switch drained {
+		case 1:
+			rexContextVersion = completed.ContextVersion
+			if len(completed.Records) == 0 {
+				t.Fatal("REX.META should record command start/finish telemetry context")
+			}
+		case 2:
+			pingContextVersion = completed.ContextVersion
+			if !manager.VisitConnectionContextVersion(completed.ContextVersion, func(key, value string) bool {
+				pingContext[key] = value
+				return true
+			}) {
+				t.Fatal("PING pinned context version should be visitable during drain")
+			}
+		default:
+			t.Fatalf("unexpected extra completed operation: %+v", completed)
+		}
+	})
+	if drained != 2 {
+		t.Fatalf("drained operations = %d, want 2", drained)
+	}
+	if rexContextVersion != baseVersion {
+		t.Fatalf("REX.META context version = %d, want initial base version %d", rexContextVersion, baseVersion)
+	}
+	if pingContextVersion == baseVersion || pingContextVersion.IsZero() {
+		t.Fatalf("PING context version = %d, want non-zero version newer than %d", pingContextVersion, baseVersion)
+	}
+	if pingContext["tenant"] != "acme" {
+		t.Fatalf("PING pinned context = %+v, want tenant=acme", pingContext)
+	}
+}
+
+func TestEvaluate_CommandScopeMarksDeniedPreHookFailed(t *testing.T) {
+	eval, e, _ := newTestPipeline()
+	defer e.Stop()
+
+	manager := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(manager)
+	eval.SetHookExecutor(&mockHookExecutor{
+		hasAny: true,
+		preResult: &apicommand.PreHookResult{
+			Denied:     true,
+			DenyReason: "unauthorized",
+		},
+	})
+
+	client := clientctx.New()
+	client.OperationID = "parent-denied"
+	result := eval.Evaluate(context.Background(), client, "PING", nil)
+	if result.Value == "PONG" {
+		t.Fatal("denied command should not reach handler")
+	}
+
+	drained := drainTelemetryOperations(manager)
+	if len(drained) != 1 {
+		t.Fatalf("drained operations = %d, want 1", len(drained))
+	}
+	completed := drained[0]
+	if completed.parent != client.OperationID {
+		t.Fatalf("parent = %q, want %q", completed.parent, client.OperationID)
+	}
+	if completed.status != commonobs.SlotTerminalFailed {
+		t.Fatalf("status = %v, want failed", completed.status)
 	}
 }
 
@@ -110,8 +537,8 @@ func TestEvaluate_WithTracker_CreatesOperation(t *testing.T) {
 	}
 
 	// Operation should be completed and removed from tracker.
-	if tracker.ActiveCount() != 0 {
-		t.Errorf("expected 0 active operations after command, got %d", tracker.ActiveCount())
+	if len(tracker.ActiveOperationSnapshots()) != 0 {
+		t.Errorf("expected 0 active operations after command, got %d", len(tracker.ActiveOperationSnapshots()))
 	}
 }
 
@@ -190,6 +617,117 @@ func TestEvaluate_WithTracker_REXMetadataInContext(t *testing.T) {
 	}
 }
 
+func TestEvaluate_PluginCommandProjectsOperationContextAndRedactsSecrets(t *testing.T) {
+	eval, e, _ := newTestPipeline()
+	defer e.Stop()
+
+	manager := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(manager)
+
+	pluginRouter := pluginrouter.NewRouter(eval.CoreCommandNames())
+	serverPipe, clientPipe := net.Pipe()
+	serverConn := transport.NewConn(serverPipe)
+	clientConn := transport.NewConn(clientPipe)
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	decls := []*gcpc.CommandDeclV1{{Name: "PLUGINONLY", MinArgs: 1, MaxArgs: 1}}
+	if err := pluginRouter.RegisterPlugin("echo", serverConn, decls); err != nil {
+		t.Fatal(err)
+	}
+	eval.SetPluginRouter(pluginRouter)
+	go pluginRouter.GetPluginConn("echo").StartReadLoop()
+
+	reqCh := make(chan *gcpc.CommandRequestV1, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		env, err := clientConn.Recv()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		req := env.GetCommandRequest()
+		if req == nil {
+			errCh <- context.Canceled
+			return
+		}
+		reqCh <- req
+		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
+		if err := clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result, false)); err != nil {
+			errCh <- err
+		}
+	}()
+
+	client := clientctx.New()
+	client.ConnectionIdentity = apiobs.ConnectionIdentity(99)
+	client.ConnectionID = "cid_99"
+	client.RemoteAddr = "127.0.0.1:6379"
+	client.OperationID = "conn_99"
+	client.CmdMeta = map[string]string{
+		"traceparent": "00-abc",
+		"tenant":      "acme",
+	}
+	manager.UpdateConnectionContextStrings(
+		client.ConnectionIdentity,
+		"shared.user", "alice",
+		"shared.secret.jwt", "hidden",
+		"echo.private", "visible",
+		"echo.secret.token", "hidden",
+	)
+
+	res := eval.Evaluate(context.Background(), client, "PLUGINONLY", []string{"hello"})
+	if res.Err != nil {
+		t.Fatalf("plugin command returned error: %v", res.Err)
+	}
+	if res.Value != "hello" {
+		t.Fatalf("plugin command value = %v, want hello", res.Value)
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("plugin side error: %v", err)
+	default:
+	}
+
+	var req *gcpc.CommandRequestV1
+	select {
+	case req = <-reqCh:
+	default:
+		t.Fatal("plugin did not receive command request")
+	}
+
+	if req.Metadata["traceparent"] != "00-abc" {
+		t.Errorf("metadata traceparent = %q, want 00-abc", req.Metadata["traceparent"])
+	}
+	if req.Metadata["tenant"] != "acme" {
+		t.Errorf("metadata tenant = %q, want acme", req.Metadata["tenant"])
+	}
+	if _, ok := req.Context["traceparent"]; ok {
+		t.Errorf("bare metadata key leaked into context: %v", req.Context)
+	}
+	if req.Context["shared.rex.traceparent"] != "00-abc" {
+		t.Errorf("context shared.rex.traceparent = %q, want 00-abc", req.Context["shared.rex.traceparent"])
+	}
+	if req.Context["shared.rex.tenant"] != "acme" {
+		t.Errorf("context shared.rex.tenant = %q, want acme", req.Context["shared.rex.tenant"])
+	}
+	if req.Context["shared.user"] != "alice" {
+		t.Errorf("context shared.user = %q, want alice", req.Context["shared.user"])
+	}
+	if req.Context["echo.private"] != "visible" {
+		t.Errorf("context echo.private = %q, want visible", req.Context["echo.private"])
+	}
+	if req.Context[apicommand.CommandKey] != "PLUGINONLY" {
+		t.Errorf("context command = %q, want PLUGINONLY", req.Context[apicommand.CommandKey])
+	}
+	if _, ok := req.Context["shared.secret.jwt"]; ok {
+		t.Errorf("shared secret leaked into context: %v", req.Context)
+	}
+	if _, ok := req.Context["echo.secret.token"]; ok {
+		t.Errorf("plugin secret leaked into context: %v", req.Context)
+	}
+}
+
 func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
 	eval, e, _ := newTestPipeline()
 	defer e.Stop()
@@ -214,7 +752,7 @@ func TestEvaluate_WithTracker_OpHookEnrichment(t *testing.T) {
 	}
 }
 
-func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
+func TestEvaluate_WithoutSidecarDoesNotEmitCommandEventsDirectly(t *testing.T) {
 	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
@@ -224,42 +762,8 @@ func TestEvaluate_WithTracker_EmitsEvents(t *testing.T) {
 	ctx := clientctx.New()
 	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
-	// Should have: operation.started, command.started, command.completed, operation.completed
-	if len(emitter.events) < 4 {
-		t.Fatalf("expected at least 4 events, got %d", len(emitter.events))
-	}
-
-	types := make([]string, len(emitter.events))
-	for i, evt := range emitter.events {
-		types[i] = evt.Proto.Type
-	}
-
-	// Verify order.
-	expectedOrder := []string{
-		string(apiEvents.OperationStarted),
-		string(apiEvents.CommandStarted),
-		string(apiEvents.CommandCompleted),
-		string(apiEvents.OperationCompleted),
-	}
-	for i, expected := range expectedOrder {
-		if i >= len(types) {
-			t.Errorf("missing event at index %d: expected %s", i, expected)
-			continue
-		}
-		if types[i] != expected {
-			t.Errorf("event[%d]: expected %s, got %s", i, expected, types[i])
-		}
-	}
-
-	// All events should carry the operation_id.
-	opID := emitter.events[0].Proto.OperationId
-	if opID == "" {
-		t.Fatal("expected non-empty operation_id on first event")
-	}
-	for i, evt := range emitter.events {
-		if evt.Proto.OperationId != opID {
-			t.Errorf("event[%d] operation_id mismatch: %q vs %q", i, evt.Proto.OperationId, opID)
-		}
+	if len(emitter.events) != 0 {
+		t.Fatalf("expected no direct command events without sidecar scope, got %d", len(emitter.events))
 	}
 }
 
@@ -326,8 +830,8 @@ func TestEvaluate_WithTracker_PreHookDeny_FailsOperation(t *testing.T) {
 	}
 
 	// Operation should have been failed and cleaned up.
-	if tracker.ActiveCount() != 0 {
-		t.Errorf("expected 0 active after denied command, got %d", tracker.ActiveCount())
+	if len(tracker.ActiveOperationSnapshots()) != 0 {
+		t.Errorf("expected 0 active after denied command, got %d", len(tracker.ActiveOperationSnapshots()))
 	}
 
 	// Complete hook should have fired (for cleanup/observation).
@@ -376,8 +880,8 @@ func TestEvaluate_UnknownCommand(t *testing.T) {
 	result := eval.Evaluate(context.Background(), ctx, "NOSUCHCMD", nil)
 
 	// Unknown commands don't create operations (they bail before the op lifecycle).
-	if tracker.ActiveCount() != 0 {
-		t.Errorf("expected 0 active, got %d", tracker.ActiveCount())
+	if len(tracker.ActiveOperationSnapshots()) != 0 {
+		t.Errorf("expected 0 active, got %d", len(tracker.ActiveOperationSnapshots()))
 	}
 	_ = result
 }
@@ -395,8 +899,8 @@ func TestEvaluate_TransactionQueued(t *testing.T) {
 	}
 
 	// Queued commands don't create operations.
-	if tracker.ActiveCount() != 0 {
-		t.Errorf("expected 0 active for queued command, got %d", tracker.ActiveCount())
+	if len(tracker.ActiveOperationSnapshots()) != 0 {
+		t.Errorf("expected 0 active for queued command, got %d", len(tracker.ActiveOperationSnapshots()))
 	}
 }
 
@@ -422,8 +926,8 @@ func TestEvaluate_ConcurrentCommands(t *testing.T) {
 		<-done
 	}
 
-	if tracker.ActiveCount() != 0 {
-		t.Errorf("expected 0 active after all commands, got %d", tracker.ActiveCount())
+	if len(tracker.ActiveOperationSnapshots()) != 0 {
+		t.Errorf("expected 0 active after all commands, got %d", len(tracker.ActiveOperationSnapshots()))
 	}
 
 	if opHook.startCalled.Load() != int32(n) {
@@ -438,29 +942,31 @@ func TestEvaluate_OperationTimingAccuracy(t *testing.T) {
 	eval, e, _ := newTestPipeline()
 	defer e.Stop()
 
-	emitter := &mockEmitter{}
-	eval.SetEmitter(emitter)
+	manager := newPipelineTelemetryTracker()
+	eval.SetOperationTrackerManager(manager)
+	eval.SetEmitter(&mockEmitter{})
 
 	ctx := clientctx.New()
 	eval.Evaluate(context.Background(), ctx, "PING", nil)
 
-	// Find the operation.completed event and check elapsed_ns > 0.
-	for _, evt := range emitter.events {
-		if evt.Proto.Type == string(apiEvents.OperationCompleted) {
-			data := evt.Proto.GetOperationComplete()
-			if data == nil {
-				t.Fatal("expected OperationCompleteEventV1")
-			}
-			if data.ElapsedNs == 0 {
-				t.Error("expected non-zero elapsed_ns")
-			}
-			if data.Status != "completed" {
-				t.Errorf("expected completed, got %s", data.Status)
-			}
-			return
-		}
+	operations := drainTelemetryOperations(manager)
+	if len(operations) != 1 {
+		t.Fatalf("drained operations = %d, want 1", len(operations))
 	}
-	t.Error("operation.completed event not found")
+	for _, record := range operations[0].records {
+		if record.Kind != apiobs.TelemetryRecordOperationFinish {
+			continue
+		}
+		if record.Number == 0 {
+			t.Fatal("expected non-zero elapsed_ns on operation finish record")
+		}
+		status, ok := telemetryRecordStringField(record, "_status")
+		if !ok || status != "completed" {
+			t.Fatalf("operation finish status field = %q/%v, want completed/true", status, ok)
+		}
+		return
+	}
+	t.Fatal("operation finish record not found")
 }
 
 func TestEvaluate_OperationContextHasElapsed(t *testing.T) {
@@ -495,8 +1001,8 @@ func TestEvaluate_ArgValidation_NoOperation(t *testing.T) {
 	// Arg validation failure happens before operation creation.
 	// Actually — arg validation happens BEFORE op creation in current code.
 	// That's correct: no operation for invalid commands.
-	if tracker.ActiveCount() != 0 {
-		t.Errorf("expected 0 active after arg validation failure, got %d", tracker.ActiveCount())
+	if len(tracker.ActiveOperationSnapshots()) != 0 {
+		t.Errorf("expected 0 active after arg validation failure, got %d", len(tracker.ActiveOperationSnapshots()))
 	}
 	_ = result
 }

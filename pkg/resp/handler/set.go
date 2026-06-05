@@ -7,7 +7,6 @@ import (
 	"gocache/pkg/command"
 )
 
-
 // setMapSize walks a map[string]struct{} once for its estimateSize-equivalent
 // payload size. Used at packed→native promotion; subsequent mutations
 // track size incrementally and never re-walk.
@@ -182,12 +181,12 @@ func saddPacked(cmdCtx *command.Context, key string, buf []byte, members []strin
 		if perr != nil {
 			return perr
 		}
-		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, setMapSize(set), ttl); err != nil {
+		if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, set, setMapSize(set), ttl); err != nil {
 			return err
 		}
 		return added
 	}
-	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSet, newBuf, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeSet, newBuf, ttl); err != nil {
 		return err
 	}
 	return added
@@ -204,7 +203,7 @@ func saddNative(cmdCtx *command.Context, key string, set map[string]struct{}, me
 			size += int64(len(m)) + cache.SetMemberOverhead
 		}
 	}
-	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, size, ttl); err != nil {
+	if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, set, size, ttl); err != nil {
 		return err
 	}
 	return added
@@ -243,7 +242,7 @@ func HandleSrem(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSet, buf, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeSet, buf, ttl); err != nil {
 					return err
 				}
 			}
@@ -263,7 +262,7 @@ func HandleSrem(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, size, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, set, size, ttl); err != nil {
 					return err
 				}
 			}
@@ -415,7 +414,7 @@ func HandleSpop(cmdCtx *command.Context) apicommand.Result {
 				cmdCtx.Cache.RawDelete(key)
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
-				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Context(), key, cache.ObjTypeSet, buf, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetPacked(cmdCtx.Telemetry(), key, cache.ObjTypeSet, buf, ttl); err != nil {
 					return err
 				}
 			}
@@ -436,7 +435,7 @@ func HandleSpop(cmdCtx *command.Context) apicommand.Result {
 			} else {
 				ttl := cmdCtx.Cache.RawTTL(key)
 				newSize := cmdCtx.Cache.NativeSize(key) - int64(len(popped)) - cache.SetMemberOverhead
-				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Context(), key, set, newSize, ttl); err != nil {
+				if err := cmdCtx.Cache.RawSetNativeWithSize(cmdCtx.Telemetry(), key, set, newSize, ttl); err != nil {
 					return err
 				}
 			}
