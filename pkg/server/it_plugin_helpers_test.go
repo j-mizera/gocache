@@ -12,13 +12,13 @@ import (
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
 	apiplugin "gocache/api/plugin"
+	commonobs "gocache/commons/observability"
 	"gocache/commons/resp"
 	"gocache/commons/transport"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/engine"
 	serverEvents "gocache/pkg/events"
-	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
 	"gocache/pkg/watch"
@@ -264,11 +264,18 @@ func startTestServerWithPubSub(t *testing.T) string {
 	c.SetOnMutateAll(wm.NotifyAll)
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
-	tracker := serverOps.NewTracker()
 	eventBus := serverEvents.NewBus()
+	trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           128,
+		RecordsPerOperation:   16,
+		CompletedRingPerShard: 128,
+	})
 
 	srv.SetEmitter(eventBus)
-	srv.SetTracker(tracker)
+	srv.SetOperationTrackerManager(trackerManager)
 
 	sockPath := t.TempDir() + "/pubsub.sock"
 	pluginCfg := apiplugin.PluginsConfig{
@@ -284,11 +291,16 @@ func startTestServerWithPubSub(t *testing.T) string {
 	}
 
 	mgr := pluginmgr.NewManager(pluginCfg, srv.CoreCommandNames(), &pluginServerState{srv: srv})
-	mgr.SetTracker(tracker)
+	mgr.SetOperationTrackerManager(trackerManager)
 	mgr.SetClientPusher(srv.ConnRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+
+	drainWorker := NewOperationTrackerDrainWorker(trackerManager, 2*time.Millisecond)
+	drainWorker.SetEmitter(eventBus)
+	drainWorker.Start(ctx)
+	t.Cleanup(drainWorker.Stop)
 
 	mgr.TestSetCancel(cancel)
 	mgr.TestAddInstance("pubsub")

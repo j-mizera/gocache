@@ -23,14 +23,13 @@ import (
 	"testing"
 	"time"
 
+	"gocache/commons/resp"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
 	"gocache/pkg/engine"
-	"gocache/pkg/pipeline"
 	"gocache/pkg/events"
-	serverOps "gocache/pkg/operations"
-	"gocache/commons/resp"
+	"gocache/pkg/pipeline"
 	"gocache/pkg/watch"
 )
 
@@ -56,7 +55,6 @@ func newInProcRig(b *testing.B) *inProcRig {
 	c.SetOnMutate(wm.NotifyMutation)
 
 	ev := pipeline.New(c, e, "", br, wm)
-	ev.SetTracker(serverOps.NewTracker())
 	// Match production: cmd/server/main.go always wires the event bus, even
 	// when no plugins are loaded. Without this, the evaluator's emitter
 	// branch is skipped and the harness understates per-command cost by
@@ -103,7 +101,6 @@ func newTCPRig(b *testing.B) *tcpRig {
 	c.SetOnMutate(wm.NotifyMutation)
 
 	srv := New("127.0.0.1:0", c, e, "", br, wm)
-	srv.SetTracker(serverOps.NewTracker())
 	srv.SetEmitter(events.NewBus())
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -196,7 +193,6 @@ func TestHSET_PromotedHash_O1(t *testing.T) {
 	wm := watch.NewManager()
 	c.SetOnMutate(wm.NotifyMutation)
 	ev := pipeline.New(c, e, "", br, wm)
-	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
 
 	const N = 100_000
@@ -237,7 +233,6 @@ func runPromotedCollectionO1(t *testing.T, deadline time.Duration, n int, makeAr
 	wm := watch.NewManager()
 	c.SetOnMutate(wm.NotifyMutation)
 	ev := pipeline.New(c, e, "", br, wm)
-	ev.SetTracker(serverOps.NewTracker())
 	cli := clientctx.New()
 
 	deadlineCh := time.After(deadline)
@@ -718,4 +713,3 @@ func BenchmarkTCP_SET_Standard(b *testing.B) {
 		}
 	})
 }
-

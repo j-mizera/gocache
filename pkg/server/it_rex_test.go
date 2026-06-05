@@ -70,6 +70,25 @@ func writeCmd(t *testing.T, conn net.Conn, args ...string) {
 	}
 }
 
+// writeCmds writes several RESP arrays and flushes once, modeling one client
+// send that contains metadata directive frames followed by a real command.
+func writeCmds(t *testing.T, conn net.Conn, commands ...[]string) {
+	t.Helper()
+	w := resp.NewWriter(conn)
+	for _, args := range commands {
+		vals := make([]resp.Value, len(args))
+		for i, a := range args {
+			vals[i] = resp.MarshalBulkString(a)
+		}
+		if err := w.Write(resp.ValueArray(vals...)); err != nil {
+			t.Fatalf("write command %v: %v", args, err)
+		}
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatalf("flush commands: %v", err)
+	}
+}
+
 // readResp reads a single RESP value from the connection.
 func readResp(t *testing.T, conn net.Conn) resp.Value {
 	t.Helper()
@@ -132,7 +151,7 @@ func TestServer_REX_META_LinesBeforeCommand(t *testing.T) {
 
 	t.Run("single META line before command", func(t *testing.T) {
 		// Send META line, expect +OK response (RESP-compliant).
-		writeCmd(t, conn, "META", "traceparent", "00-abc123")
+		writeCmd(t, conn, "REX.CMDMETA", "traceparent", "00-abc123")
 		assertOK(t, readResp(t, conn))
 
 		// Send command, expect +OK response.
@@ -148,12 +167,32 @@ func TestServer_REX_META_LinesBeforeCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("pipelined REX.CMDMETA lines are silent and apply to current command", func(t *testing.T) {
+		writeCmds(t, conn,
+			[]string{"REX.CMDMETA", "traceparent", "00-pipelined"},
+			[]string{"REX.CMDMETA", "tenant.id", "team-pipeline"},
+			[]string{"TEST.CAPTURE"},
+		)
+		assertOK(t, readResp(t, conn))
+
+		meta := getCaptured()
+		if len(meta) != 2 {
+			t.Fatalf("expected 2 REX.CMDMETA entries, got %d: %v", len(meta), meta)
+		}
+		if meta["traceparent"] != "00-pipelined" {
+			t.Errorf("traceparent=%q, want 00-pipelined", meta["traceparent"])
+		}
+		if meta["tenant.id"] != "team-pipeline" {
+			t.Errorf("tenant.id=%q, want team-pipeline", meta["tenant.id"])
+		}
+	})
+
 	t.Run("multiple META lines accumulate", func(t *testing.T) {
-		writeCmd(t, conn, "META", "traceparent", "00-xyz")
+		writeCmd(t, conn, "REX.CMDMETA", "traceparent", "00-xyz")
 		assertOK(t, readResp(t, conn))
-		writeCmd(t, conn, "META", "auth.jwt", "eyJhbG")
+		writeCmd(t, conn, "REX.CMDMETA", "auth.jwt", "eyJhbG")
 		assertOK(t, readResp(t, conn))
-		writeCmd(t, conn, "META", "tenant.id", "team-a")
+		writeCmd(t, conn, "REX.CMDMETA", "tenant.id", "team-a")
 		assertOK(t, readResp(t, conn))
 		writeCmd(t, conn, "TEST.CAPTURE")
 		assertOK(t, readResp(t, conn))
@@ -174,7 +213,7 @@ func TestServer_REX_META_LinesBeforeCommand(t *testing.T) {
 	})
 
 	t.Run("META value with spaces joined", func(t *testing.T) {
-		writeCmd(t, conn, "META", "authorization", "Bearer", "eyJhbG...")
+		writeCmd(t, conn, "REX.CMDMETA", "authorization", "Bearer", "eyJhbG...")
 		assertOK(t, readResp(t, conn))
 		writeCmd(t, conn, "TEST.CAPTURE")
 		assertOK(t, readResp(t, conn))
@@ -196,7 +235,7 @@ func TestServer_REX_META_LinesBeforeCommand(t *testing.T) {
 	})
 
 	t.Run("META cleared after command consumes it", func(t *testing.T) {
-		writeCmd(t, conn, "META", "once", "value1")
+		writeCmd(t, conn, "REX.CMDMETA", "once", "value1")
 		assertOK(t, readResp(t, conn))
 		writeCmd(t, conn, "TEST.CAPTURE")
 		assertOK(t, readResp(t, conn))
@@ -214,7 +253,7 @@ func TestServer_REX_META_LinesBeforeCommand(t *testing.T) {
 	})
 
 	t.Run("META invalid key returns error and clears accumulator", func(t *testing.T) {
-		writeCmd(t, conn, "META", "_reserved", "value")
+		writeCmd(t, conn, "REX.CMDMETA", "_reserved", "value")
 		res := readResp(t, conn)
 		if res.Type != resp.Error {
 			t.Errorf("expected error for reserved key META, got type=%c str=%q", res.Type, res.Str)
@@ -237,7 +276,7 @@ func TestServer_REX_META_WithoutREXV(t *testing.T) {
 	defer conn.Close()
 
 	// Don't negotiate REXV. Send META as if it were a command.
-	writeCmd(t, conn, "META", "traceparent", "abc")
+	writeCmd(t, conn, "REX.CMDMETA", "traceparent", "abc")
 	res := readResp(t, conn)
 	// Should get an "unknown command" error since META isn't a real command
 	// and REXV wasn't negotiated.
@@ -333,7 +372,7 @@ func TestServer_REXMeta_PrecedenceMetaOverridesConnDefaults(t *testing.T) {
 	assertOK(t, sendCommand(t, conn, "REX.META", "SET", "auth.jwt", "default-token"))
 
 	// Per-command override
-	writeCmd(t, conn, "META", "auth.jwt", "override-token")
+	writeCmd(t, conn, "REX.CMDMETA", "auth.jwt", "override-token")
 	assertOK(t, readResp(t, conn))
 
 	// Capture both layers
@@ -351,7 +390,7 @@ func TestServer_REXMeta_PrecedenceMetaOverridesConnDefaults(t *testing.T) {
 	_ = getCaptured
 
 	// Send the same META + capture command to verify CmdMeta has the override.
-	writeCmd(t, conn, "META", "auth.jwt", "override-token")
+	writeCmd(t, conn, "REX.CMDMETA", "auth.jwt", "override-token")
 	assertOK(t, readResp(t, conn))
 	writeCmd(t, conn, "TEST.CAPTURE")
 	assertOK(t, readResp(t, conn))
@@ -384,9 +423,9 @@ func TestServer_REX_HookContextEndToEnd(t *testing.T) {
 	assertOK(t, sendCommand(t, conn, "REX.META", "SET", "tenant.id", "team-a"))
 
 	// Per-command override (auth.jwt only) + new key (traceparent).
-	writeCmd(t, conn, "META", "auth.jwt", "override-token")
+	writeCmd(t, conn, "REX.CMDMETA", "auth.jwt", "override-token")
 	assertOK(t, readResp(t, conn))
-	writeCmd(t, conn, "META", "traceparent", "00-abc-def-01")
+	writeCmd(t, conn, "REX.CMDMETA", "traceparent", "00-abc-def-01")
 	assertOK(t, readResp(t, conn))
 
 	// Run a real command -- this triggers hook context construction.
