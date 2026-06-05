@@ -69,6 +69,7 @@ type PluginInstance struct {
 	state         PluginState
 	conn          *transport.Conn
 	cmd           *exec.Cmd
+	processDone   chan struct{}
 	lastHealth    time.Time
 	restarts      int
 	commands      []*gcpc.CommandDeclV1
@@ -120,6 +121,29 @@ func (p *PluginInstance) Cmd() *exec.Cmd {
 func (p *PluginInstance) SetCmd(c *exec.Cmd) {
 	p.mu.Lock()
 	p.cmd = c
+	if c != nil {
+		p.processDone = make(chan struct{})
+	} else {
+		p.processDone = nil
+	}
+	p.mu.Unlock()
+}
+
+// ProcessDone returns a channel closed when the current plugin process has been
+// reaped by the launch monitor. Nil means no process is currently being tracked.
+func (p *PluginInstance) ProcessDone() <-chan struct{} {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.processDone
+}
+
+// MarkProcessDone signals that the launch monitor reaped the current process.
+func (p *PluginInstance) MarkProcessDone() {
+	p.mu.Lock()
+	if p.processDone != nil {
+		close(p.processDone)
+		p.processDone = nil
+	}
 	p.mu.Unlock()
 }
 

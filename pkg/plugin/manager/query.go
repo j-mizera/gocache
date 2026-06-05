@@ -5,9 +5,13 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	apicommand "gocache/api/command"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/benchstats"
 	commandmetrics "gocache/pkg/metrics"
 	"gocache/pkg/plugin/router"
@@ -233,31 +237,183 @@ func (m *Manager) pluginIPCStats() []router.PluginConnStats {
 	return stats
 }
 
-// OperationTracker is the subset of pkg/operations.Tracker needed by
-// plugin-initiated operation management queries.
+// OperationTracker is the subset needed by plugin-initiated operation
+// management queries. Production wiring uses TelemetryOperationTracker so runtime
+// telemetry is submitted to OperationTracker telemetry records before projection.
 type OperationTracker interface {
 	Start(opType ops.Type, parentID string) *ops.Operation
 	Complete(id string)
 	Fail(id, reason string)
 }
 
+type telemetryActiveOperation struct {
+	op    *ops.Operation
+	scope commonobs.OperationScope
+}
+
+// TelemetryOperationTracker implements plugin-initiated operation queries on top
+// of the compact telemetry tracker while preserving the existing query contract
+// that returns an operation context map to plugins.
+type TelemetryOperationTracker struct {
+	manager      *commonobs.SlotOperationTrackerManager
+	identityBase apiobs.InternalOperationIdentity
+	sequence     atomic.Uint64
+	active       sync.Map // operation id -> telemetryActiveOperation
+}
+
+func NewTelemetryOperationTracker(manager *commonobs.SlotOperationTrackerManager, identityBase apiobs.InternalOperationIdentity) *TelemetryOperationTracker {
+	return &TelemetryOperationTracker{manager: manager, identityBase: identityBase}
+}
+
+func (t *TelemetryOperationTracker) Start(opType ops.Type, parentID string) *ops.Operation {
+	op := ops.New(opType, parentID)
+	enrichTelemetryOperationStart(op)
+	if t == nil || t.manager == nil {
+		return op
+	}
+	sequence := t.sequence.Add(1)
+	if sequence == 0 {
+		sequence = t.sequence.Add(1)
+	}
+	operation := t.identityBase + apiobs.InternalOperationIdentity(sequence)
+	ref := apiobs.NewOperationRef(op.ID, parentID)
+	handle, ok := t.manager.StartOperationWithMetadata(operation, apiobs.NewParentRef(parentID), 0, commonobs.OperationSnapshotMetadata{
+		Type:          string(op.Type),
+		Ref:           ref,
+		StartUnixNano: op.StartTime.UnixNano(),
+	})
+	if !ok {
+		return op
+	}
+	scope := commonobs.NewOperationScope(t.manager, handle, operation, ref)
+	scope.ContextUpdateStrings(
+		apicommand.OperationID, op.ID,
+		apicommand.StartNs, strconv.FormatInt(op.StartTime.UnixNano(), 10),
+		"_operation_type", string(op.Type),
+		"_parent_operation_id", parentID,
+	)
+	scope.OperationStartString(string(op.Type),
+		apicommand.OperationID, op.ID,
+		"_operation_type", string(op.Type),
+		"_parent_operation_id", parentID,
+	)
+	t.active.Store(op.ID, telemetryActiveOperation{op: op, scope: scope})
+	return op
+}
+
+func (t *TelemetryOperationTracker) Complete(id string) {
+	t.finish(id, commonobs.SlotTerminalFinished, "")
+}
+
+func (t *TelemetryOperationTracker) Fail(id, reason string) {
+	t.finish(id, commonobs.SlotTerminalFailed, reason)
+}
+
+func (t *TelemetryOperationTracker) EventString(id, eventName string, fields ...string) bool {
+	if t == nil {
+		return false
+	}
+	value, ok := t.active.Load(id)
+	if !ok {
+		return false
+	}
+	active := value.(telemetryActiveOperation)
+	fields = append([]string{apicommand.OperationID, id}, fields...)
+	return active.scope.EventString(eventName, fields...)
+}
+
+func (t *TelemetryOperationTracker) LogString(id string, level apiobs.TelemetryLogLevel, message string, fields ...string) bool {
+	if t == nil {
+		return false
+	}
+	value, ok := t.active.Load(id)
+	if !ok {
+		return false
+	}
+	active := value.(telemetryActiveOperation)
+	record := apiobs.NewLogRecordString(active.scope.Operation(), level, message)
+	record.TimestampUnixNano = time.Now().UnixNano()
+	for i := 0; i+1 < len(fields); i += 2 {
+		record.AddFieldString(fields[i], fields[i+1])
+	}
+	return active.scope.Record(record)
+}
+
+func (t *TelemetryOperationTracker) ContextUpdateStrings(id string, fields ...string) bool {
+	if t == nil {
+		return false
+	}
+	value, ok := t.active.Load(id)
+	if !ok {
+		return false
+	}
+	active := value.(telemetryActiveOperation)
+	return active.scope.ContextUpdateStrings(fields...)
+}
+
+func enrichTelemetryOperationStart(op *ops.Operation) {
+	if op == nil {
+		return
+	}
+	op.Enrich(apicommand.OperationID, op.ID)
+	op.Enrich(apicommand.StartNs, strconv.FormatInt(op.StartTime.UnixNano(), 10))
+	op.Enrich("_operation_type", string(op.Type))
+	if op.ParentID != "" {
+		op.Enrich("_parent_operation_id", op.ParentID)
+	}
+}
+
+func (t *TelemetryOperationTracker) finish(id string, terminal commonobs.SlotTerminalStatus, reason string) {
+	if t == nil {
+		return
+	}
+	value, ok := t.active.LoadAndDelete(id)
+	if !ok {
+		return
+	}
+	active := value.(telemetryActiveOperation)
+	if reason != "" {
+		active.op.Fail(reason)
+	} else {
+		active.op.Complete()
+	}
+	elapsedNs := uint64(active.op.Duration().Nanoseconds())
+	status := "completed"
+	if terminal == commonobs.SlotTerminalFailed {
+		status = "failed"
+	}
+	if reason != "" {
+		active.scope.ContextUpdateStrings(apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10), apicommand.ErrorKey, reason)
+	} else {
+		active.scope.ContextUpdateStrings(apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+	}
+	active.scope.OperationFinishString(string(active.op.Type), elapsedNs,
+		apicommand.OperationID, active.op.ID,
+		"_operation_type", string(active.op.Type),
+		"_status", status,
+		apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+		apicommand.ErrorKey, reason,
+	)
+	active.scope.Finish(terminal)
+}
+
 // RegisterOperationHandlers registers query topics for plugin-initiated
 // operation lifecycle management.
-func RegisterOperationHandlers(qr *QueryRegistry, tracker OperationTracker) {
+func RegisterOperationHandlers(qr *QueryRegistry, operationTracker OperationTracker) {
 	qr.Register("operation.start", func(params map[string]string) (map[string]string, error) {
 		opType := ops.Type(params["type"])
 		if opType == "" {
 			opType = ops.TypeCommand
 		}
-		op := tracker.Start(opType, params["parent_id"])
+		op := operationTracker.Start(opType, params["parent_id"])
 		return op.ContextSnapshot(false), nil
 	})
 	qr.Register("operation.complete", func(params map[string]string) (map[string]string, error) {
-		tracker.Complete(params["_operation_id"])
+		operationTracker.Complete(params["_operation_id"])
 		return nil, nil
 	})
 	qr.Register("operation.fail", func(params map[string]string) (map[string]string, error) {
-		tracker.Fail(params["_operation_id"], params["_fail_reason"])
+		operationTracker.Fail(params["_operation_id"], params["_fail_reason"])
 		return nil, nil
 	})
 }

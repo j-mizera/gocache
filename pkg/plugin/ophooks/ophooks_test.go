@@ -2,13 +2,15 @@ package ophooks
 
 import (
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	gcpc "gocache/api/gcpc/v1"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
+	commonobs "gocache/commons/observability"
 	"gocache/commons/transport"
-	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
 )
 
@@ -264,20 +266,50 @@ drain:
 	return out
 }
 
+var replayTestOperationSequence atomic.Uint64
+
+func newReplayTelemetryManager() *commonobs.SlotOperationTrackerManager {
+	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           16,
+		RecordsPerOperation:   4,
+		CompletedRingPerShard: 16,
+	})
+}
+
+func startReplayOperation(t *testing.T, manager *commonobs.SlotOperationTrackerManager, opType ops.Type, parentID string) *ops.Operation {
+	t.Helper()
+	op := ops.New(opType, parentID)
+	sequence := replayTestOperationSequence.Add(1)
+	operation := apiobs.InternalOperationIdentity(sequence)
+	ref := apiobs.NewOperationRef(op.ID, parentID)
+	_, ok := manager.StartOperationWithMetadata(operation, apiobs.NewParentRef(parentID), 0, commonobs.OperationSnapshotMetadata{
+		Type:          string(op.Type),
+		Ref:           ref,
+		StartUnixNano: op.StartTime.UnixNano(),
+	})
+	if !ok {
+		t.Fatalf("failed to start replay test operation %s", op.ID)
+	}
+	return op
+}
+
 func TestExecutor_ReplayDeliversActiveOpsInStartOrder(t *testing.T) {
 	registry := NewRegistry()
-	tracker := serverOps.NewTracker()
+	manager := newReplayTelemetryManager()
 
 	// Three active ops that started before the plugin subscribes. Stagger
 	// their StartTime via small sleeps so sort-by-start-order is observable.
-	op1 := tracker.Start(ops.TypeCommand, "")
+	op1 := startReplayOperation(t, manager, ops.TypeCommand, "")
 	time.Sleep(1 * time.Millisecond)
-	op2 := tracker.Start(ops.TypeCommand, "")
+	op2 := startReplayOperation(t, manager, ops.TypeCommand, "")
 	time.Sleep(1 * time.Millisecond)
-	op3 := tracker.Start(ops.TypeCommand, "")
+	op3 := startReplayOperation(t, manager, ops.TypeCommand, "")
 
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	exec.SetTracker(tracker)
+	exec.SetOperationTrackerManager(manager)
 
 	s, c := testPipe()
 	defer c.Close()
@@ -324,9 +356,9 @@ func TestExecutor_ReplayDeliversActiveOpsInStartOrder(t *testing.T) {
 
 func TestExecutor_ReplaySkipsOpsStartedAfterRegister(t *testing.T) {
 	registry := NewRegistry()
-	tracker := serverOps.NewTracker()
+	manager := newReplayTelemetryManager()
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	exec.SetTracker(tracker)
+	exec.SetOperationTrackerManager(manager)
 
 	// Capture the regTime via a wrapper that also starts a fresh op after
 	// registration lands. This op should NOT be in the replay set.
@@ -335,11 +367,11 @@ func TestExecutor_ReplaySkipsOpsStartedAfterRegister(t *testing.T) {
 		// Start a new op strictly after regTime — mirrors a live command
 		// arriving the moment after a plugin finishes subscribing.
 		time.Sleep(5 * time.Millisecond)
-		postRegOp = tracker.Start(ops.TypeCommand, "")
+		postRegOp = startReplayOperation(t, manager, ops.TypeCommand, "")
 		exec.Replay(pluginName, regTime)
 	})
 
-	op1 := tracker.Start(ops.TypeCommand, "")
+	op1 := startReplayOperation(t, manager, ops.TypeCommand, "")
 
 	s, c := testPipe()
 	defer c.Close()
@@ -365,13 +397,13 @@ func TestExecutor_ReplaySkipsOpsStartedAfterRegister(t *testing.T) {
 
 func TestExecutor_ReplayFiltersByPluginPattern(t *testing.T) {
 	registry := NewRegistry()
-	tracker := serverOps.NewTracker()
+	manager := newReplayTelemetryManager()
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	exec.SetTracker(tracker)
+	exec.SetOperationTrackerManager(manager)
 
-	_ = tracker.Start(ops.TypeCommand, "")  // should be replayed
-	_ = tracker.Start(ops.TypeCleanup, "")  // should NOT match cmdonly
-	_ = tracker.Start(ops.TypeSnapshot, "") // should NOT match cmdonly
+	_ = startReplayOperation(t, manager, ops.TypeCommand, "")  // should be replayed
+	_ = startReplayOperation(t, manager, ops.TypeCleanup, "")  // should NOT match cmdonly
+	_ = startReplayOperation(t, manager, ops.TypeSnapshot, "") // should NOT match cmdonly
 
 	s, c := testPipe()
 	defer c.Close()
@@ -396,7 +428,7 @@ func TestExecutor_ReplayFiltersByPluginPattern(t *testing.T) {
 func TestExecutor_ReplayNoOpWhenTrackerUnset(t *testing.T) {
 	registry := NewRegistry()
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	// Deliberately no SetTracker.
+	// Deliberately no operation tracker manager.
 
 	s, c := testPipe()
 	defer c.Close()
@@ -411,18 +443,18 @@ func TestExecutor_ReplayNoOpWhenTrackerUnset(t *testing.T) {
 	// Nothing should arrive; poll briefly.
 	envs := collect(t, ch, 1, 200*time.Millisecond)
 	if len(envs) != 0 {
-		t.Errorf("expected no replay without tracker, got %d envelopes", len(envs))
+		t.Errorf("expected no replay without operation tracker manager, got %d envelopes", len(envs))
 	}
 }
 
 func TestExecutor_ReplaySuppressedWithinRestartWindow(t *testing.T) {
 	registry := NewRegistry()
-	tracker := serverOps.NewTracker()
+	manager := newReplayTelemetryManager()
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	exec.SetTracker(tracker)
+	exec.SetOperationTrackerManager(manager)
 	exec.SetMinRestartInterval(1 * time.Second)
 
-	tracker.Start(ops.TypeCommand, "")
+	startReplayOperation(t, manager, ops.TypeCommand, "")
 
 	s1, c1 := testPipe()
 	defer c1.Close()
@@ -462,12 +494,12 @@ func TestExecutor_ReplaySuppressedWithinRestartWindow(t *testing.T) {
 
 func TestExecutor_ReplayResumesAfterRestartWindow(t *testing.T) {
 	registry := NewRegistry()
-	tracker := serverOps.NewTracker()
+	manager := newReplayTelemetryManager()
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	exec.SetTracker(tracker)
+	exec.SetOperationTrackerManager(manager)
 	exec.SetMinRestartInterval(50 * time.Millisecond)
 
-	tracker.Start(ops.TypeCommand, "")
+	startReplayOperation(t, manager, ops.TypeCommand, "")
 
 	s1, c1 := testPipe()
 	defer c1.Close()
@@ -501,13 +533,13 @@ func TestExecutor_ReplayResumesAfterRestartWindow(t *testing.T) {
 
 func TestExecutor_ReplayWildcardMatchesEveryType(t *testing.T) {
 	registry := NewRegistry()
-	tracker := serverOps.NewTracker()
+	manager := newReplayTelemetryManager()
 	exec := NewExecutor(registry, 100*time.Millisecond)
-	exec.SetTracker(tracker)
+	exec.SetOperationTrackerManager(manager)
 
-	tracker.Start(ops.TypeCommand, "")
-	tracker.Start(ops.TypeCleanup, "")
-	tracker.Start(ops.TypeSnapshot, "")
+	startReplayOperation(t, manager, ops.TypeCommand, "")
+	startReplayOperation(t, manager, ops.TypeCleanup, "")
+	startReplayOperation(t, manager, ops.TypeSnapshot, "")
 
 	s, c := testPipe()
 	defer c.Close()

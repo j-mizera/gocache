@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	opctx "gocache/api/context"
 	gcpc "gocache/api/gcpc/v1"
 	ops "gocache/api/operations"
 	"gocache/commons/logger"
@@ -703,6 +704,13 @@ func (r *Router) LookupMeta(op string) *RouteMeta {
 // metadata carries REX metadata with bare keys (no shared.rex. prefix).
 // conn carries the originating client connection info.
 func (r *Router) Route(ctx context.Context, op string, args []string, metadata map[string]string, conn *gcpc.ConnectionInfoV1) (any, bool, error) {
+	return r.RouteWithContext(ctx, op, args, metadata, conn, nil)
+}
+
+// RouteWithContext dispatches a command with an already-materialized operation
+// context. Callers that have an OperationTracker projection pass it here; older
+// callers fall back to a legacy operation carried in context.Context.
+func (r *Router) RouteWithContext(ctx context.Context, op string, args []string, metadata map[string]string, conn *gcpc.ConnectionInfoV1, operationContext map[string]string) (any, bool, error) {
 	r.mu.RLock()
 	route, pc, found := r.lookup(op)
 	r.mu.RUnlock()
@@ -719,8 +727,10 @@ func (r *Router) Route(ctx context.Context, op string, args []string, metadata m
 
 	requestID := NextRequestID()
 	var opCtx map[string]string
-	if ctxOp := ops.FromContext(ctx); ctxOp != nil {
-		opCtx = ctxOp.FilteredContext(route.PluginName, false)
+	if operationContext != nil {
+		opCtx = opctx.RedactSecrets(opctx.FilterForPlugin(operationContext, route.PluginName))
+	} else if ctxOp := ops.FromContext(ctx); ctxOp != nil {
+		opCtx = opctx.RedactSecrets(ctxOp.FilteredContext(route.PluginName, false))
 	}
 	cmd := &gcpc.CommandInfoV1{Name: route.Command, Args: args}
 	env := gcpc.NewCommandRequest(requestID, cmd, conn, metadata, opCtx)

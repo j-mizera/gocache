@@ -12,7 +12,7 @@ import (
 	ops "gocache/api/operations"
 	apiplugin "gocache/api/plugin"
 	"gocache/commons/logger"
-	"gocache/pkg/operations"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/plugin/router"
 )
 
@@ -22,10 +22,10 @@ type Executor struct {
 	timeout  time.Duration // deadline for start hooks (synchronous)
 
 	// Replay dependency — optional at construction, set by main.go.
-	// Replay is a no-op when tracker is absent, keeping tests and
+	// Replay is a no-op when telemetry storage is absent, keeping tests and
 	// headless integration flows simple.
-	mu      sync.RWMutex
-	tracker *operations.Tracker
+	mu                      sync.RWMutex
+	operationTrackerManager *commonobs.SlotOperationTrackerManager
 
 	// lastReplay remembers when each plugin last received a replay. If
 	// it re-registers within minRestartInterval, replay is skipped —
@@ -53,11 +53,11 @@ func (e *Executor) SetMinRestartInterval(d time.Duration) {
 	e.mu.Unlock()
 }
 
-// SetTracker wires the operation tracker used for Active-op snapshots
-// during replay.
-func (e *Executor) SetTracker(t *operations.Tracker) {
+// SetOperationTrackerManager wires telemetry storage used for active-operation
+// snapshots during replay. Snapshot materialization runs off the command path.
+func (e *Executor) SetOperationTrackerManager(manager *commonobs.SlotOperationTrackerManager) {
 	e.mu.Lock()
-	e.tracker = t
+	e.operationTrackerManager = manager
 	e.mu.Unlock()
 }
 
@@ -142,10 +142,10 @@ func (e *Executor) RunCompleteHooks(op *ops.Operation) {
 // no ophook connection (for example: registration failed midway).
 func (e *Executor) Replay(pluginName string, regTime time.Time) {
 	e.mu.Lock()
-	tracker := e.tracker
+	manager := e.operationTrackerManager
 	interval := e.minRestartInterval
 	last, hadPrior := e.lastReplay[pluginName]
-	if tracker == nil {
+	if manager == nil {
 		e.mu.Unlock()
 		return
 	}
@@ -178,17 +178,20 @@ func (e *Executor) Replay(pluginName string, regTime time.Time) {
 	}
 	matchAll := patternSet["*"]
 
-	active := tracker.Active()
-	// Filter first, sort second — keeps allocation bounded.
+	active := manager.ActiveOperationSnapshots()
+	// Filter first, sort second — keeps allocation bounded to replay processing.
 	retained := active[:0]
 	for _, op := range active {
-		if !op.StartTime.Before(regTime) {
-			// Op started after the plugin became visible in the
-			// registry; live dispatch will deliver the start hook.
-			// Skipping here avoids double delivery.
+		if op.StartUnixNano == 0 || !time.Unix(0, op.StartUnixNano).Before(regTime) {
+			// Op started after the plugin became visible in the registry, or
+			// lacks a telemetry start timestamp; live dispatch covers the former
+			// and replay must not guess the latter.
 			continue
 		}
-		if !matchAll && !patternSet[strings.ToLower(string(op.Type))] {
+		if op.Type == "" {
+			continue
+		}
+		if !matchAll && !patternSet[strings.ToLower(op.Type)] {
 			continue
 		}
 		retained = append(retained, op)
@@ -200,16 +203,16 @@ func (e *Executor) Replay(pluginName string, regTime time.Time) {
 	// Deliver in start-time order so span reconstruction sees parents
 	// before children (parent ops always start before children).
 	sort.Slice(retained, func(i, j int) bool {
-		return retained[i].StartTime.Before(retained[j].StartTime)
+		return retained[i].StartUnixNano < retained[j].StartUnixNano
 	})
 
 	for _, op := range retained {
-		filteredCtx := op.FilteredContext(pluginName, false)
+		filteredCtx := opctx.FilterForPlugin(op.Context, pluginName)
 		reqID := router.NextRequestID()
-		// Absolute wall-clock start lets the plugin place the
-		// reconstructed span at its real occurrence time without any
-		// shared reference point with the server.
-		env := gcpc.NewOperationHookReplay(reqID, op.ID, string(op.Type), op.ParentID, filteredCtx, op.StartTime.UnixNano())
+		// Absolute wall-clock start lets the plugin place the reconstructed
+		// span at its real occurrence time without any shared reference point
+		// with the server.
+		env := gcpc.NewOperationHookReplay(reqID, op.Ref.ID.String(), op.Type, op.Ref.ParentID.String(), filteredCtx, op.StartUnixNano)
 		// Synchronous send preserves start-time order over the wire — span
 		// reconstruction on the plugin side depends on parents arriving
 		// before children.

@@ -396,6 +396,77 @@ func TestRouteMetadataForwarded(t *testing.T) {
 	clientConn.Close()
 }
 
+func TestRouteWithContextForwardsFilteredOperationContext(t *testing.T) {
+	r := NewRouter([]string{"GET"})
+	serverConn, clientConn := testPipe()
+	defer serverConn.Close()
+
+	decls := []*gcpc.CommandDeclV1{
+		{Name: "ECHO", MinArgs: 1, MaxArgs: 1},
+	}
+	if err := r.RegisterPlugin("echo", serverConn, decls); err != nil {
+		t.Fatal(err)
+	}
+	go r.GetPluginConn("echo").StartReadLoop()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		env, err := clientConn.Recv()
+		if err != nil {
+			t.Errorf("plugin recv: %v", err)
+			return
+		}
+		req := env.GetCommandRequest()
+		if req == nil {
+			t.Error("expected CommandRequest")
+			return
+		}
+		if req.Context["_operation_id"] != "cmd_1" {
+			t.Errorf("server context _operation_id = %q, want cmd_1", req.Context["_operation_id"])
+		}
+		if req.Context["shared.rex.traceparent"] != "00-abc" {
+			t.Errorf("shared context traceparent = %q, want 00-abc", req.Context["shared.rex.traceparent"])
+		}
+		if req.Context["echo.private"] != "visible" {
+			t.Errorf("own private context = %q, want visible", req.Context["echo.private"])
+		}
+		if _, ok := req.Context["other.private"]; ok {
+			t.Errorf("other plugin private context leaked: %v", req.Context)
+		}
+		if _, ok := req.Context["shared.secret.token"]; ok {
+			t.Errorf("shared secret context leaked: %v", req.Context)
+		}
+		if _, ok := req.Context["echo.secret.token"]; ok {
+			t.Errorf("plugin secret context leaked: %v", req.Context)
+		}
+		result := &gcpc.ResultV1{Value: &gcpc.ResultV1_BulkString{BulkString: "hello"}}
+		_ = clientConn.Send(gcpc.NewCommandResponse(req.RequestId, result, false))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	operationContext := map[string]string{
+		"_operation_id":          "cmd_1",
+		"shared.rex.traceparent": "00-abc",
+		"shared.secret.token":    "hidden",
+		"echo.private":           "visible",
+		"echo.secret.token":      "hidden",
+		"other.private":          "hidden",
+	}
+	val, _, err := r.RouteWithContext(ctx, "ECHO", []string{"hello"}, nil, nil, operationContext)
+	if err != nil {
+		t.Fatalf("RouteWithContext error: %v", err)
+	}
+	if val != "hello" {
+		t.Errorf("expected 'hello', got %v", val)
+	}
+
+	wg.Wait()
+	clientConn.Close()
+}
+
 func TestRouteNilMetadata(t *testing.T) {
 	r := NewRouter([]string{"GET"})
 	serverConn, clientConn := testPipe()
