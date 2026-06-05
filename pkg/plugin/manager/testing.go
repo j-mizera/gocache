@@ -13,10 +13,12 @@ func (m *Manager) TestSetCancel(cancel context.CancelFunc) {
 
 // TestAddInstance pre-registers a plugin entry. Test-only.
 func (m *Manager) TestAddInstance(name string) {
-	m.registry.Add(&PluginInstance{
+	inst := &PluginInstance{
 		Name:        name,
 		MaxRestarts: 0,
-	})
+	}
+	m.registry.Add(inst)
+	m.startPluginLifecycleOp(inst)
 }
 
 // TestHandleConnection exposes handleConnection for cross-package tests.

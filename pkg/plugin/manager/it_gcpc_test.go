@@ -12,7 +12,6 @@ import (
 	ops "gocache/api/operations"
 	"gocache/commons/transport"
 	serverEvents "gocache/pkg/events"
-	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin"
 	"gocache/pkg/plugin/router"
 )
@@ -106,7 +105,7 @@ func waitForOperationHooks(t *testing.T, mgr *Manager) {
 }
 
 // setupManager creates a manager with a temp socket and returns it ready for connections.
-func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, *serverOps.Tracker, string) {
+func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, string) {
 	t.Helper()
 
 	sockPath := t.TempDir() + "/test.sock"
@@ -119,7 +118,6 @@ func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, *serverOps.Tracker
 		ConnectTimeout:  5 * time.Second,
 	}
 
-	tracker := serverOps.NewTracker()
 	eventBus := serverEvents.NewBus()
 
 	mgr := NewManager(cfg, []string{"GET", "SET", "PING"}, &mockState{})
@@ -154,7 +152,7 @@ func setupManager(t *testing.T) (*Manager, *serverEvents.Bus, *serverOps.Tracker
 		}
 	}()
 
-	return mgr, eventBus, tracker, sockPath
+	return mgr, eventBus, sockPath
 }
 
 type mockState struct{}
@@ -169,7 +167,7 @@ func (m *mockState) CacheMaxBytes() int64   { return 0 }
 // --- Integration Tests ---
 
 func TestGCPC_Registration_Accepted(t *testing.T) {
-	_, _, _, sockPath := setupManager(t)
+	_, _, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
 
 	ack := p.register("test-plugin", []string{"read"}, nil, nil)
@@ -183,7 +181,7 @@ func TestGCPC_Registration_Accepted(t *testing.T) {
 }
 
 func TestGCPC_Registration_AddsQueryOnlyPluginToIPCStats(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
 
 	ack := p.register("test-plugin", []string{"read"}, nil, nil)
@@ -204,7 +202,7 @@ func TestGCPC_Registration_AddsQueryOnlyPluginToIPCStats(t *testing.T) {
 }
 
 func TestGCPC_Registration_UnknownPlugin(t *testing.T) {
-	_, _, _, sockPath := setupManager(t)
+	_, _, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
 
 	ack := p.register("nonexistent", []string{"read"}, nil, nil)
@@ -215,7 +213,7 @@ func TestGCPC_Registration_UnknownPlugin(t *testing.T) {
 }
 
 func TestGCPC_Registration_PartialScopeGrant(t *testing.T) {
-	_, _, _, sockPath := setupManager(t)
+	_, _, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
 
 	// Request scopes beyond what's allowed (default allows "read" only).
@@ -235,7 +233,7 @@ func TestGCPC_Registration_PartialScopeGrant(t *testing.T) {
 }
 
 func TestGCPC_OperationHook_Registration(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "operation:hook"}},
 	}
@@ -263,7 +261,7 @@ func TestGCPC_OperationHook_Registration(t *testing.T) {
 }
 
 func TestGCPC_OperationHook_ReplayIsSentAfterRegisterAck(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "operation:hook"}},
 	}
@@ -291,7 +289,7 @@ func TestGCPC_OperationHook_ReplayIsSentAfterRegisterAck(t *testing.T) {
 }
 
 func TestGCPC_HookOnlyPluginConnClosedOnDeregister(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "hook:pre"}},
 	}
@@ -320,7 +318,7 @@ func TestGCPC_HookOnlyPluginConnClosedOnDeregister(t *testing.T) {
 }
 
 func TestGCPC_OperationHook_DeniedWithoutScope(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	// Default scopes — no operation:hook.
 	p := newTestPlugin(t, sockPath)
 
@@ -334,7 +332,7 @@ func TestGCPC_OperationHook_DeniedWithoutScope(t *testing.T) {
 }
 
 func TestGCPC_EventSubscription(t *testing.T) {
-	mgr, eventBus, _, sockPath := setupManager(t)
+	mgr, eventBus, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "events"}},
 	}
@@ -380,7 +378,7 @@ func TestGCPC_EventSubscription(t *testing.T) {
 func TestGCPC_EventSubscription_BridgeOffKeepsSubscriptionButSkipsIPCEnqueue(t *testing.T) {
 	t.Setenv(benchEventBridgeModeEnv, string(eventBridgeModeBridgeOff))
 
-	mgr, eventBus, _, sockPath := setupManager(t)
+	mgr, eventBus, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "events"}},
 	}
@@ -407,7 +405,7 @@ func TestGCPC_EventSubscription_BridgeOffKeepsSubscriptionButSkipsIPCEnqueue(t *
 }
 
 func TestGCPC_EventSubscription_ContextFiltered(t *testing.T) {
-	mgr, eventBus, _, sockPath := setupManager(t)
+	mgr, eventBus, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "events"}},
 	}
@@ -449,7 +447,7 @@ func TestGCPC_EventSubscription_ContextFiltered(t *testing.T) {
 }
 
 func TestGCPC_EventSubscription_RuntimeLogBatchFiltered(t *testing.T) {
-	mgr, eventBus, _, sockPath := setupManager(t)
+	mgr, eventBus, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "events"}},
 	}
@@ -501,7 +499,7 @@ func TestGCPC_EventSubscription_RuntimeLogBatchFiltered(t *testing.T) {
 }
 
 func TestGCPC_EventSubscription_DeniedWithoutScope(t *testing.T) {
-	_, eventBus, _, sockPath := setupManager(t)
+	_, eventBus, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
 
 	// Register without events scope.
@@ -525,7 +523,7 @@ func TestGCPC_EventSubscription_DeniedWithoutScope(t *testing.T) {
 }
 
 func TestGCPC_ServerQuery(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "server:query"}},
 	}
@@ -556,7 +554,7 @@ func TestGCPC_ServerQuery(t *testing.T) {
 }
 
 func TestGCPC_ServerQuery_DeniedScope(t *testing.T) {
-	_, _, _, sockPath := setupManager(t)
+	_, _, sockPath := setupManager(t)
 	p := newTestPlugin(t, sockPath)
 
 	// Register without server:query scope.
@@ -579,7 +577,7 @@ func TestGCPC_ServerQuery_DeniedScope(t *testing.T) {
 }
 
 func TestGCPC_ServerQuery_Plugins(t *testing.T) {
-	mgr, _, _, sockPath := setupManager(t)
+	mgr, _, sockPath := setupManager(t)
 	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
 		"test-plugin": {Scopes: []string{"read", "server:query"}},
 	}
