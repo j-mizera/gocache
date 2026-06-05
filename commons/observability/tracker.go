@@ -57,12 +57,9 @@ func (t *operationTracker) FinishCommand(operation apiobs.InternalOperationIdent
 	return t.RecordTelemetry(record)
 }
 
-func (t *operationTracker) Log(operation apiobs.InternalOperationIdentity, level apiobs.TelemetryLogLevel, message []byte, fields ...[]byte) bool {
-	record := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordLog, operation)
-	record.Level = level
+func (t *operationTracker) Log(operation apiobs.InternalOperationIdentity, level apiobs.TelemetryLogLevel, message []byte) bool {
+	record := apiobs.NewLogRecordBytes(operation, level, message)
 	record.TimestampUnixNano = nowUnixNano()
-	record.SetName(message)
-	record.PayloadLen = uint16(packKeyValues(record.Payload[:], fields))
 	return t.RecordTelemetry(record)
 }
 
@@ -114,7 +111,50 @@ func packKeyValues(dst []byte, pairs [][]byte) int {
 	return pos
 }
 
+func packKeyValueStrings(dst []byte, pairs []string) int {
+	if len(dst) == 0 {
+		return 0
+	}
+	pos := 1
+	count := 0
+	for i := 0; i+1 < len(pairs); i += 2 {
+		key := pairs[i]
+		value := pairs[i+1]
+		if len(key) > 255 || len(value) > 255 || pos+2+len(key)+len(value) > len(dst) {
+			break
+		}
+		dst[pos] = byte(len(key))
+		pos++
+		pos += copy(dst[pos:], key)
+		dst[pos] = byte(len(value))
+		pos++
+		pos += copy(dst[pos:], value)
+		count++
+	}
+	dst[0] = byte(count)
+	return pos
+}
+
 func packKeys(dst []byte, keys [][]byte) int {
+	if len(dst) == 0 {
+		return 0
+	}
+	pos := 1
+	count := 0
+	for _, key := range keys {
+		if len(key) > 255 || pos+1+len(key) > len(dst) {
+			break
+		}
+		dst[pos] = byte(len(key))
+		pos++
+		pos += copy(dst[pos:], key)
+		count++
+	}
+	dst[0] = byte(count)
+	return pos
+}
+
+func packKeyStrings(dst []byte, keys []string) int {
 	if len(dst) == 0 {
 		return 0
 	}

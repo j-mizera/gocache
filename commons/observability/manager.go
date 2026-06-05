@@ -46,8 +46,16 @@ func (m *ShardedOperationTrackerManager) UpdateConnectionContext(connection apio
 	return m.contexts.update(connection, pairs)
 }
 
+func (m *ShardedOperationTrackerManager) UpdateConnectionContextStrings(connection apiobs.ConnectionIdentity, pairs ...string) apiobs.ConnectionContextVersion {
+	return m.contexts.updateStrings(connection, pairs)
+}
+
 func (m *ShardedOperationTrackerManager) RemoveConnectionContext(connection apiobs.ConnectionIdentity, keys ...[]byte) apiobs.ConnectionContextVersion {
 	return m.contexts.remove(connection, keys)
+}
+
+func (m *ShardedOperationTrackerManager) RemoveConnectionContextStrings(connection apiobs.ConnectionIdentity, keys ...string) apiobs.ConnectionContextVersion {
+	return m.contexts.removeStrings(connection, keys)
 }
 
 func (m *ShardedOperationTrackerManager) PinCurrentConnectionContextVersion(connection apiobs.ConnectionIdentity) apiobs.ConnectionContextVersion {
@@ -64,6 +72,10 @@ func (m *ShardedOperationTrackerManager) ReleaseConnectionContextVersion(version
 
 func (m *ShardedOperationTrackerManager) VisitConnectionContextVersion(version apiobs.ConnectionContextVersion, visitor apiobs.ConnectionContextVisitor) bool {
 	return m.contexts.visit(version, visitor)
+}
+
+func (m *ShardedOperationTrackerManager) ForgetConnectionContext(connection apiobs.ConnectionIdentity) bool {
+	return m.contexts.forget(connection)
 }
 
 func (m *ShardedOperationTrackerManager) ShardCount() int {
@@ -120,6 +132,18 @@ func (s *connectionContextStore) update(connection apiobs.ConnectionIdentity, pa
 	return s.replaceCurrentLocked(connection, next)
 }
 
+func (s *connectionContextStore) updateStrings(connection apiobs.ConnectionIdentity, pairs []string) apiobs.ConnectionContextVersion {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureLocked()
+	base := s.currentPairsLocked(connection)
+	next := clonePairs(base, len(pairs)/2)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		next[pairs[i]] = pairs[i+1]
+	}
+	return s.replaceCurrentLocked(connection, next)
+}
+
 func (s *connectionContextStore) remove(connection apiobs.ConnectionIdentity, keys [][]byte) apiobs.ConnectionContextVersion {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,6 +155,21 @@ func (s *connectionContextStore) remove(connection apiobs.ConnectionIdentity, ke
 	next := clonePairs(base, 0)
 	for _, key := range keys {
 		delete(next, string(key))
+	}
+	return s.replaceCurrentLocked(connection, next)
+}
+
+func (s *connectionContextStore) removeStrings(connection apiobs.ConnectionIdentity, keys []string) apiobs.ConnectionContextVersion {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureLocked()
+	base := s.currentPairsLocked(connection)
+	if base == nil {
+		return 0
+	}
+	next := clonePairs(base, 0)
+	for _, key := range keys {
+		delete(next, key)
 	}
 	return s.replaceCurrentLocked(connection, next)
 }
@@ -200,6 +239,26 @@ func (s *connectionContextStore) visit(version apiobs.ConnectionContextVersion, 
 		if !visitor(key, value) {
 			return true
 		}
+	}
+	return true
+}
+
+func (s *connectionContextStore) forget(connection apiobs.ConnectionIdentity) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureLocked()
+	version := s.current[connection]
+	if version == 0 {
+		return false
+	}
+	delete(s.current, connection)
+	entry, ok := s.versions[version]
+	if !ok {
+		return false
+	}
+	entry.current = false
+	if entry.refs == 0 {
+		delete(s.versions, version)
 	}
 	return true
 }

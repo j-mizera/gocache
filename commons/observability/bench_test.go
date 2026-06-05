@@ -54,7 +54,10 @@ func BenchmarkTelemetryTrackerLogFields(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		drainBenchmarkBatch(b, recorder, i, capacity)
-		if !tracker.Log(1, apiobs.TelemetryLogLevelDebug, message, key1, value1, key2, value2) {
+		record := apiobs.NewLogRecordBytes(1, apiobs.TelemetryLogLevelDebug, message)
+		record.AddFieldBytes(key1, value1)
+		record.AddFieldBytes(key2, value2)
+		if !tracker.RecordTelemetry(record) {
 			b.Fatal("record dropped during benchmark")
 		}
 	}
@@ -125,7 +128,10 @@ func BenchmarkTelemetryTrackerInterfaceLogFields(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		drainBenchmarkBatch(b, recorder, i, capacity)
-		if !tracker.Log(1, apiobs.TelemetryLogLevelDebug, message, key1, value1, key2, value2) {
+		record := apiobs.NewLogRecordBytes(1, apiobs.TelemetryLogLevelDebug, message)
+		record.AddFieldBytes(key1, value1)
+		record.AddFieldBytes(key2, value2)
+		if !tracker.RecordTelemetry(record) {
 			b.Fatal("record dropped during benchmark")
 		}
 	}

@@ -1,0 +1,1017 @@
+package observability
+
+import (
+	"strconv"
+	"sync"
+	"sync/atomic"
+
+	apicommand "gocache/api/command"
+	apiobs "gocache/api/observability"
+)
+
+// SlotTerminalStatus records why an operation slot became terminal.
+type SlotTerminalStatus uint8
+
+const (
+	SlotTerminalUnknown SlotTerminalStatus = iota
+	SlotTerminalFinished
+	SlotTerminalFailed
+	SlotTerminalTimedOut
+	SlotTerminalAbandoned
+)
+
+// SlotTrackerConfig configures the preallocated operation-slot storage engine.
+type SlotTrackerConfig struct {
+	ShardCount              int
+	MinSegmentsPerShard     int
+	MaxSegmentsPerShard     int
+	SegmentSize             int
+	RecordsPerOperation     int
+	CompletedRingPerShard   int
+	ReleaseContextVersionFn func(apiobs.ConnectionContextVersion) bool
+}
+
+// InternalTrackerHandle is an implementation-only handle for shard-owned slot
+// storage. It is intentionally separate from api/observability.OperationHandle.
+type InternalTrackerHandle struct {
+	shard      uint16
+	segment    uint16
+	slot       uint32
+	generation uint32
+	segmentRef *operationSegment
+	slotRef    *operationSlot
+}
+
+// IsZero reports whether h cannot reference an active slot.
+func (h InternalTrackerHandle) IsZero() bool {
+	return h.slotRef == nil || h.segmentRef == nil || h.generation == 0
+}
+
+// CompletedOperation is a worker-side view over a completed operation slot.
+// Records is valid only for the duration of the DrainCompletedShard callback.
+type CompletedOperation struct {
+	Operation      apiobs.InternalOperationIdentity
+	Parent         apiobs.ParentRef
+	ContextVersion apiobs.ConnectionContextVersion
+	// ContextOverlay contains command-scoped metadata borrowed from the operation
+	// slot. It is valid only during the DrainCompletedShard callback.
+	ContextOverlay map[string]string
+	Status         SlotTerminalStatus
+	Records        []apiobs.TelemetryRecord
+	DroppedRecords uint64
+}
+
+// OperationSnapshotMetadata is fixed identity metadata stored with an active
+// slot so replay/crashdump can build an off-path projection without depending
+// on later telemetry records having already been published.
+type OperationSnapshotMetadata struct {
+	Type          string
+	Ref           apiobs.OperationRef
+	StartUnixNano int64
+}
+
+// ActiveOperationSnapshot is a worker-side materialized view of an in-flight
+// operation. It is allocated only by diagnostics/replay paths, never by the
+// command telemetry submit path.
+type ActiveOperationSnapshot struct {
+	Operation     apiobs.InternalOperationIdentity
+	Ref           apiobs.OperationRef
+	Type          string
+	Parent        apiobs.ParentRef
+	StartUnixNano int64
+	Context       map[string]string
+}
+
+type activeOperationSnapshotInput struct {
+	Operation      apiobs.InternalOperationIdentity
+	Metadata       OperationSnapshotMetadata
+	Parent         apiobs.ParentRef
+	ContextVersion apiobs.ConnectionContextVersion
+	ContextOverlay map[string]string
+	Records        []apiobs.TelemetryRecord
+}
+
+// SlotShardStats reports shard capacity and pressure counters.
+type SlotShardStats struct {
+	Segments       int
+	FreeSlots      int
+	ActiveSlots    int
+	CompletedSlots int
+}
+
+// SlotOperationTrackerManager stores operation telemetry in preallocated shards
+// and slot segments. It is the ADR-0034 storage primitive; server projection and
+// GCPC/log/event materialization stay outside this type.
+type SlotOperationTrackerManager struct {
+	shards         []operationSlotShard
+	releaseContext func(apiobs.ConnectionContextVersion) bool
+	contexts       connectionContextStore
+
+	skippedOperations uint64
+	droppedRecords    uint64
+	droppedCompleted  uint64
+	invalidHandles    uint64
+}
+
+type operationSlotShard struct {
+	mu sync.Mutex
+
+	segments            []*operationSegment
+	minSegments         int
+	maxSegments         int
+	segmentSize         int
+	recordsPerOperation int
+
+	free           []slotRef
+	freeCount      int
+	completed      []slotRef
+	completedHead  int
+	completedCount int
+	activeSlots    int
+}
+
+type slotRef struct {
+	segment int
+	slot    int
+}
+
+type operationSegment struct {
+	index               int
+	slots               []operationSlot
+	records             []apiobs.TelemetryRecord
+	recordsPerOperation int
+	active              int
+	retiring            bool
+}
+
+type operationSlotState uint8
+
+const (
+	operationSlotFree operationSlotState = iota
+	operationSlotActive
+	operationSlotTerminal
+	operationSlotWorkerOwned
+)
+
+type operationSlot struct {
+	generation            uint32
+	state                 operationSlotState
+	operation             apiobs.InternalOperationIdentity
+	parent                apiobs.ParentRef
+	contextVersion        apiobs.ConnectionContextVersion
+	contextOverlay        map[string]string
+	status                SlotTerminalStatus
+	snapshotTypeLen       uint16
+	snapshotType          [apiobs.TelemetryNameBytes]byte
+	snapshotIDLen         uint16
+	snapshotID            [apiobs.TelemetryNameBytes]byte
+	snapshotParentIDLen   uint16
+	snapshotParentID      [apiobs.TelemetryParentIDBytes]byte
+	snapshotStartUnixNano int64
+	recordCount           atomic.Uint32
+	droppedRecords        uint64
+}
+
+// NewSlotOperationTrackerManager returns preallocated shard-owned operation-slot
+// storage. Growth beyond the minimum must be triggered explicitly by background
+// code with GrowShard; StartOperation never allocates when no slot is free.
+func NewSlotOperationTrackerManager(config SlotTrackerConfig) *SlotOperationTrackerManager {
+	config = normalizeSlotTrackerConfig(config)
+	manager := &SlotOperationTrackerManager{
+		shards:         make([]operationSlotShard, config.ShardCount),
+		releaseContext: config.ReleaseContextVersionFn,
+	}
+	for i := range manager.shards {
+		manager.shards[i].init(config)
+	}
+	manager.contexts.init()
+	return manager
+}
+
+func normalizeSlotTrackerConfig(config SlotTrackerConfig) SlotTrackerConfig {
+	if config.ShardCount < 1 {
+		config.ShardCount = 1
+	}
+	if config.MinSegmentsPerShard < 1 {
+		config.MinSegmentsPerShard = 1
+	}
+	if config.MaxSegmentsPerShard < config.MinSegmentsPerShard {
+		config.MaxSegmentsPerShard = config.MinSegmentsPerShard
+	}
+	if config.SegmentSize < 1 {
+		config.SegmentSize = 1
+	}
+	if config.RecordsPerOperation < 1 {
+		config.RecordsPerOperation = 1
+	}
+	if config.CompletedRingPerShard < 1 {
+		config.CompletedRingPerShard = 1
+	}
+	return config
+}
+
+func (s *operationSlotShard) init(config SlotTrackerConfig) {
+	s.minSegments = config.MinSegmentsPerShard
+	s.maxSegments = config.MaxSegmentsPerShard
+	s.segmentSize = config.SegmentSize
+	s.recordsPerOperation = config.RecordsPerOperation
+	s.segments = make([]*operationSegment, config.MaxSegmentsPerShard)
+	s.free = make([]slotRef, config.MaxSegmentsPerShard*config.SegmentSize)
+	s.completed = make([]slotRef, config.CompletedRingPerShard)
+	for range config.MinSegmentsPerShard {
+		s.addSegmentLocked()
+	}
+}
+
+// ShardCount returns the configured number of slot-storage shards.
+func (m *SlotOperationTrackerManager) ShardCount() int {
+	return len(m.shards)
+}
+
+// StartOperation reserves a preallocated operation slot and returns its internal
+// tracker handle. It returns false when the shard has no free slot.
+func (m *SlotOperationTrackerManager) StartOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion) (InternalTrackerHandle, bool) {
+	return m.StartOperationWithMetadata(operation, parent, contextVersion, OperationSnapshotMetadata{})
+}
+
+// StartOperationWithMetadata reserves a preallocated operation slot and stores
+// fixed replay/crashdump identity metadata with the slot. The metadata is copied
+// into inline storage and does not materialize maps, logs, events, or GCPC data.
+func (m *SlotOperationTrackerManager) StartOperationWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
+	return m.startOperation(operation, parent, contextVersion, nil, metadata)
+}
+
+func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
+	shardIndex := shardIndex(operation, len(m.shards))
+	shard := &m.shards[shardIndex]
+
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if shard.freeCount == 0 {
+		atomic.AddUint64(&m.skippedOperations, 1)
+		return InternalTrackerHandle{}, false
+	}
+	shard.freeCount--
+	ref := shard.free[shard.freeCount]
+	shard.free[shard.freeCount] = slotRef{}
+	segment := shard.segments[ref.segment]
+	if segment == nil || segment.retiring {
+		atomic.AddUint64(&m.skippedOperations, 1)
+		return InternalTrackerHandle{}, false
+	}
+	slot := &segment.slots[ref.slot]
+	slot.generation++
+	if slot.generation == 0 {
+		slot.generation++
+	}
+	slot.state = operationSlotActive
+	slot.operation = operation
+	slot.parent = parent
+	slot.contextVersion = contextVersion
+	slot.contextOverlay = contextOverlay
+	slot.status = SlotTerminalUnknown
+	slot.setSnapshotMetadata(metadata)
+	slot.recordCount.Store(0)
+	slot.droppedRecords = 0
+	segment.active++
+	shard.activeSlots++
+
+	return InternalTrackerHandle{
+		shard:      uint16(shardIndex),
+		segment:    uint16(ref.segment),
+		slot:       uint32(ref.slot),
+		generation: slot.generation,
+		segmentRef: segment,
+		slotRef:    slot,
+	}, true
+}
+
+// StartOperationForConnection pins the current connection-context version and
+// reserves an operation slot. If no slot is available, the pinned version is
+// released before returning.
+func (m *SlotOperationTrackerManager) StartOperationForConnection(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+	return m.StartOperationForConnectionWithMetadata(operation, parent, connection, OperationSnapshotMetadata{})
+}
+
+// StartOperationForConnectionWithMetadata pins the current connection-context
+// version and reserves an operation slot with fixed replay/crashdump metadata.
+func (m *SlotOperationTrackerManager) StartOperationForConnectionWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, metadata OperationSnapshotMetadata) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+	version := m.PinCurrentConnectionContextVersion(connection)
+	handle, ok := m.StartOperationWithMetadata(operation, parent, version, metadata)
+	if !ok {
+		m.ReleaseConnectionContextVersion(version)
+		return InternalTrackerHandle{}, 0, false
+	}
+	return handle, version, true
+}
+
+// StartOperationWithConnectionContext pins the current connection context and
+// attaches command-scoped values as an operation-local overlay. The overlay is
+// not installed as the connection's current base, so command metadata applies
+// only to this operation. Callers must not mutate pairs until the operation is
+// drained.
+func (m *SlotOperationTrackerManager) StartOperationWithConnectionContext(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, pairs map[string]string) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+	return m.StartOperationWithConnectionContextAndMetadata(operation, parent, connection, pairs, OperationSnapshotMetadata{})
+}
+
+// StartOperationWithConnectionContextAndMetadata pins the current connection
+// context, attaches command-scoped overlay, and stores fixed replay/crashdump
+// metadata with the slot.
+func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, pairs map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+	if len(pairs) == 0 {
+		return m.StartOperationForConnectionWithMetadata(operation, parent, connection, metadata)
+	}
+	version := m.PinCurrentConnectionContextVersion(connection)
+	handle, ok := m.startOperation(operation, parent, version, pairs, metadata)
+	if !ok {
+		m.ReleaseConnectionContextVersion(version)
+		return InternalTrackerHandle{}, 0, false
+	}
+	return handle, version, true
+}
+
+// OperationContextSnapshot returns the active operation's materialized context:
+// the pinned connection base, command overlay, and operation-local context
+// update/remove records folded in record order. The returned map is owned by the
+// caller. It is intended for boundary projection paths such as GCPC; the command
+// no-sink path must not call it.
+func (m *SlotOperationTrackerManager) OperationContextSnapshot(handle InternalTrackerHandle) map[string]string {
+	if m == nil || handle.IsZero() || int(handle.shard) >= len(m.shards) {
+		return nil
+	}
+	shard := &m.shards[handle.shard]
+
+	shard.mu.Lock()
+	segment, slot, ok := shard.activeSlotLocked(handle)
+	if !ok {
+		shard.mu.Unlock()
+		return nil
+	}
+	contextVersion := slot.contextVersion
+	contextOverlay := slot.contextOverlay
+	recordCount := int(slot.recordCount.Load())
+	start := int(handle.slot) * segment.recordsPerOperation
+	records := append([]apiobs.TelemetryRecord(nil), segment.records[start:start+recordCount]...)
+	shard.mu.Unlock()
+
+	return m.materializeOperationContext(contextVersion, contextOverlay, records)
+}
+
+// CompletedOperationContext returns a completed operation's materialized context
+// using the same base/overlay/record folding order as OperationContextSnapshot.
+// The returned map is owned by the caller.
+func (m *SlotOperationTrackerManager) CompletedOperationContext(operation CompletedOperation) map[string]string {
+	if m == nil {
+		return nil
+	}
+	return m.materializeOperationContext(operation.ContextVersion, operation.ContextOverlay, operation.Records)
+}
+
+// ActiveOperationSnapshots returns materialized snapshots of active operations.
+// It is intended for replay, crashdump, and diagnostics paths; command telemetry
+// submission must not call it.
+func (m *SlotOperationTrackerManager) ActiveOperationSnapshots() []ActiveOperationSnapshot {
+	if m == nil {
+		return nil
+	}
+	var inputs []activeOperationSnapshotInput
+	for shardIndex := range m.shards {
+		inputs = m.appendActiveOperationSnapshotInputs(inputs, shardIndex)
+	}
+	if len(inputs) == 0 {
+		return nil
+	}
+	snapshots := make([]ActiveOperationSnapshot, 0, len(inputs))
+	for _, input := range inputs {
+		operationContext := m.materializeOperationContext(input.ContextVersion, input.ContextOverlay, input.Records)
+		snapshots = append(snapshots, activeOperationSnapshotFromContext(input, operationContext))
+	}
+	return snapshots
+}
+
+func (m *SlotOperationTrackerManager) appendActiveOperationSnapshotInputs(inputs []activeOperationSnapshotInput, shardIndex int) []activeOperationSnapshotInput {
+	shard := &m.shards[shardIndex]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	for _, segment := range shard.segments {
+		if segment == nil {
+			continue
+		}
+		for slotIndex := range segment.slots {
+			slot := &segment.slots[slotIndex]
+			if slot.state != operationSlotActive {
+				continue
+			}
+			start := slotIndex * segment.recordsPerOperation
+			end := start + int(slot.recordCount.Load())
+			input := activeOperationSnapshotInput{
+				Operation:      slot.operation,
+				Metadata:       slot.snapshotMetadata(),
+				Parent:         slot.parent,
+				ContextVersion: slot.contextVersion,
+				ContextOverlay: cloneStringMap(slot.contextOverlay),
+			}
+			if end > start {
+				input.Records = append([]apiobs.TelemetryRecord(nil), segment.records[start:end]...)
+			}
+			inputs = append(inputs, input)
+		}
+	}
+	return inputs
+}
+
+func activeOperationSnapshotFromContext(input activeOperationSnapshotInput, operationContext map[string]string) ActiveOperationSnapshot {
+	start := activeOperationStartProjection(input.Records)
+	operationID := firstNonEmpty(
+		input.Metadata.Ref.ID.String(),
+		operationContext[apicommand.OperationID],
+		start.fields[apicommand.OperationID],
+		strconv.FormatInt(int64(input.Operation), 10),
+	)
+	parentID := firstNonEmpty(
+		input.Metadata.Ref.ParentID.String(),
+		operationContext["_parent_operation_id"],
+		start.fields["_parent_operation_id"],
+		input.Parent.String(),
+	)
+	operationType := firstNonEmpty(
+		input.Metadata.Type,
+		operationContext["_operation_type"],
+		start.operationType,
+		commandOperationType(operationContext),
+	)
+	return ActiveOperationSnapshot{
+		Operation:     input.Operation,
+		Ref:           apiobs.NewOperationRef(operationID, parentID),
+		Type:          operationType,
+		Parent:        input.Parent,
+		StartUnixNano: firstNonZeroInt64(input.Metadata.StartUnixNano, parseInt64(operationContext[apicommand.StartNs]), start.startUnixNano),
+		Context:       operationContext,
+	}
+}
+
+type activeOperationStart struct {
+	operationType string
+	startUnixNano int64
+	fields        map[string]string
+}
+
+func activeOperationStartProjection(records []apiobs.TelemetryRecord) activeOperationStart {
+	for i := range records {
+		record := records[i]
+		if record.Kind != apiobs.TelemetryRecordOperationStart {
+			continue
+		}
+		return activeOperationStart{
+			operationType: string(record.NameBytes()),
+			startUnixNano: record.TimestampUnixNano,
+			fields:        telemetryRecordFields(record),
+		}
+	}
+	return activeOperationStart{}
+}
+
+func commandOperationType(operationContext map[string]string) string {
+	if operationContext[apicommand.CommandKey] == "" {
+		return ""
+	}
+	return "command"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonZeroInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func parseInt64(value string) int64 {
+	parsed, _ := strconv.ParseInt(value, 10, 64)
+	return parsed
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func telemetryRecordFields(record apiobs.TelemetryRecord) map[string]string {
+	payload := record.PayloadBytes()
+	if len(payload) == 0 {
+		return nil
+	}
+	fields := make(map[string]string)
+	pos := 1
+	for count := int(payload[0]); count > 0; count-- {
+		if pos >= len(payload) {
+			return fields
+		}
+		keyLen := int(payload[pos])
+		pos++
+		if pos+keyLen > len(payload) {
+			return fields
+		}
+		key := string(payload[pos : pos+keyLen])
+		pos += keyLen
+		if pos >= len(payload) {
+			return fields
+		}
+		valueLen := int(payload[pos])
+		pos++
+		if pos+valueLen > len(payload) {
+			return fields
+		}
+		fields[key] = string(payload[pos : pos+valueLen])
+		pos += valueLen
+	}
+	return fields
+}
+
+func (m *SlotOperationTrackerManager) materializeOperationContext(contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, records []apiobs.TelemetryRecord) map[string]string {
+	operationContext := m.copyContextVersion(contextVersion)
+	for key, value := range contextOverlay {
+		if operationContext == nil {
+			operationContext = make(map[string]string, len(contextOverlay))
+		}
+		operationContext[key] = value
+	}
+	return foldContextRecords(operationContext, records)
+}
+
+func (m *SlotOperationTrackerManager) copyContextVersion(contextVersion apiobs.ConnectionContextVersion) map[string]string {
+	if contextVersion.IsZero() {
+		return nil
+	}
+	var operationContext map[string]string
+	m.VisitConnectionContextVersion(contextVersion, func(key, value string) bool {
+		if operationContext == nil {
+			operationContext = make(map[string]string)
+		}
+		operationContext[key] = value
+		return true
+	})
+	return operationContext
+}
+
+func foldContextRecords(operationContext map[string]string, records []apiobs.TelemetryRecord) map[string]string {
+	for i := range records {
+		switch records[i].Kind {
+		case apiobs.TelemetryRecordContextUpdate:
+			operationContext = foldContextUpdate(operationContext, records[i])
+		case apiobs.TelemetryRecordContextRemove:
+			foldContextRemove(operationContext, records[i])
+		}
+	}
+	return operationContext
+}
+
+func foldContextUpdate(operationContext map[string]string, record apiobs.TelemetryRecord) map[string]string {
+	payload := record.PayloadBytes()
+	if len(payload) == 0 {
+		return operationContext
+	}
+	pos := 1
+	for count := int(payload[0]); count > 0; count-- {
+		if pos >= len(payload) {
+			return operationContext
+		}
+		keyLen := int(payload[pos])
+		pos++
+		if pos+keyLen > len(payload) {
+			return operationContext
+		}
+		key := string(payload[pos : pos+keyLen])
+		pos += keyLen
+		if pos >= len(payload) {
+			return operationContext
+		}
+		valueLen := int(payload[pos])
+		pos++
+		if pos+valueLen > len(payload) {
+			return operationContext
+		}
+		value := string(payload[pos : pos+valueLen])
+		pos += valueLen
+		if operationContext == nil {
+			operationContext = make(map[string]string, count)
+		}
+		operationContext[key] = value
+	}
+	return operationContext
+}
+
+func foldContextRemove(operationContext map[string]string, record apiobs.TelemetryRecord) {
+	if len(operationContext) == 0 {
+		return
+	}
+	payload := record.PayloadBytes()
+	if len(payload) == 0 {
+		return
+	}
+	pos := 1
+	for count := int(payload[0]); count > 0; count-- {
+		if pos >= len(payload) {
+			return
+		}
+		keyLen := int(payload[pos])
+		pos++
+		if pos+keyLen > len(payload) {
+			return
+		}
+		delete(operationContext, string(payload[pos:pos+keyLen]))
+		pos += keyLen
+	}
+}
+
+// RecordTelemetry appends record to the operation-local fixed record storage.
+func (m *SlotOperationTrackerManager) RecordTelemetry(handle InternalTrackerHandle, record apiobs.TelemetryRecord) bool {
+	segment, slot, ok := m.activeSlot(handle)
+	if !ok {
+		atomic.AddUint64(&m.invalidHandles, 1)
+		return false
+	}
+	count := int(slot.recordCount.Load())
+	if count >= segment.recordsPerOperation {
+		slot.droppedRecords++
+		atomic.AddUint64(&m.droppedRecords, 1)
+		return false
+	}
+	record.Operation = slot.operation
+	segment.records[int(handle.slot)*segment.recordsPerOperation+count] = record
+	slot.recordCount.Store(uint32(count + 1))
+	return true
+}
+
+// FinishOperation marks an active slot terminal and enqueues it for worker drain.
+func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHandle, status SlotTerminalStatus) bool {
+	if int(handle.shard) >= len(m.shards) {
+		atomic.AddUint64(&m.invalidHandles, 1)
+		return false
+	}
+	shard := &m.shards[handle.shard]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	segment, slot, ok := shard.activeSlotLocked(handle)
+	if !ok {
+		atomic.AddUint64(&m.invalidHandles, 1)
+		return false
+	}
+	if status == SlotTerminalUnknown {
+		status = SlotTerminalFinished
+	}
+	slot.state = operationSlotTerminal
+	slot.status = status
+	ref := slotRef{segment: int(handle.segment), slot: int(handle.slot)}
+	if !shard.pushCompletedLocked(ref) {
+		atomic.AddUint64(&m.droppedCompleted, 1)
+		m.releaseContextVersion(slot.contextVersion)
+		shard.resetSlotLocked(segment, ref)
+		return false
+	}
+	return true
+}
+
+// DrainCompletedShard drains terminal slots for worker-side processing.
+func (m *SlotOperationTrackerManager) DrainCompletedShard(index int, fn func(CompletedOperation)) int {
+	if index < 0 || index >= len(m.shards) {
+		return 0
+	}
+	shard := &m.shards[index]
+	drained := 0
+	for {
+		shard.mu.Lock()
+		ref, ok := shard.popCompletedLocked()
+		if !ok {
+			shard.mu.Unlock()
+			return drained
+		}
+		segment := shard.segments[ref.segment]
+		slot := &segment.slots[ref.slot]
+		if slot.state != operationSlotTerminal {
+			shard.mu.Unlock()
+			atomic.AddUint64(&m.invalidHandles, 1)
+			continue
+		}
+		slot.state = operationSlotWorkerOwned
+		operation := completedOperationFromSlot(segment, slot, ref.slot)
+		shard.mu.Unlock()
+
+		if fn != nil {
+			fn(operation)
+		}
+
+		shard.mu.Lock()
+		m.releaseContextVersion(slot.contextVersion)
+		shard.resetSlotLocked(segment, ref)
+		shard.mu.Unlock()
+		drained++
+	}
+}
+
+// GrowShard adds one preallocated segment to shard index. It is intended for a
+// background pressure controller, not the command path.
+func (m *SlotOperationTrackerManager) GrowShard(index int) bool {
+	if index < 0 || index >= len(m.shards) {
+		return false
+	}
+	shard := &m.shards[index]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	return shard.addSegmentLocked()
+}
+
+// RetireFreeSegment removes one fully free segment from shard index. It is
+// intended for a background shrink controller, not the command path.
+func (m *SlotOperationTrackerManager) RetireFreeSegment(index int) bool {
+	if index < 0 || index >= len(m.shards) {
+		return false
+	}
+	shard := &m.shards[index]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	return shard.retireFreeSegmentLocked()
+}
+
+// ShardStats returns a snapshot of shard capacity state.
+func (m *SlotOperationTrackerManager) ShardStats(index int) SlotShardStats {
+	if index < 0 || index >= len(m.shards) {
+		return SlotShardStats{}
+	}
+	shard := &m.shards[index]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	return SlotShardStats{
+		Segments:       shard.segmentCountLocked(),
+		FreeSlots:      shard.freeCount,
+		ActiveSlots:    shard.activeSlots,
+		CompletedSlots: shard.completedCount,
+	}
+}
+
+// UpdateConnectionContext creates a new immutable context version for connection.
+func (m *SlotOperationTrackerManager) UpdateConnectionContext(connection apiobs.ConnectionIdentity, pairs ...[]byte) apiobs.ConnectionContextVersion {
+	return m.contexts.update(connection, pairs)
+}
+
+// UpdateConnectionContextStrings creates a new immutable context version for
+// string-backed metadata without forcing callers to allocate temporary byte slices.
+func (m *SlotOperationTrackerManager) UpdateConnectionContextStrings(connection apiobs.ConnectionIdentity, pairs ...string) apiobs.ConnectionContextVersion {
+	return m.contexts.updateStrings(connection, pairs)
+}
+
+// RemoveConnectionContext creates a new immutable context version without keys.
+func (m *SlotOperationTrackerManager) RemoveConnectionContext(connection apiobs.ConnectionIdentity, keys ...[]byte) apiobs.ConnectionContextVersion {
+	return m.contexts.remove(connection, keys)
+}
+
+// RemoveConnectionContextStrings creates a new immutable context version without
+// string-backed keys and without temporary byte-slice conversions.
+func (m *SlotOperationTrackerManager) RemoveConnectionContextStrings(connection apiobs.ConnectionIdentity, keys ...string) apiobs.ConnectionContextVersion {
+	return m.contexts.removeStrings(connection, keys)
+}
+
+// PinCurrentConnectionContextVersion retains the current context version for connection.
+func (m *SlotOperationTrackerManager) PinCurrentConnectionContextVersion(connection apiobs.ConnectionIdentity) apiobs.ConnectionContextVersion {
+	return m.contexts.pinCurrent(connection)
+}
+
+// RetainConnectionContextVersion increments the reference count for version.
+func (m *SlotOperationTrackerManager) RetainConnectionContextVersion(version apiobs.ConnectionContextVersion) bool {
+	return m.contexts.retain(version)
+}
+
+// ReleaseConnectionContextVersion releases a previously retained context version.
+func (m *SlotOperationTrackerManager) ReleaseConnectionContextVersion(version apiobs.ConnectionContextVersion) bool {
+	return m.contexts.release(version)
+}
+
+// VisitConnectionContextVersion visits immutable key/value pairs for version.
+func (m *SlotOperationTrackerManager) VisitConnectionContextVersion(version apiobs.ConnectionContextVersion, visitor apiobs.ConnectionContextVisitor) bool {
+	return m.contexts.visit(version, visitor)
+}
+
+// ForgetConnectionContext removes the current context version for a closed
+// connection. Pinned versions remain visitable until their holders release them.
+func (m *SlotOperationTrackerManager) ForgetConnectionContext(connection apiobs.ConnectionIdentity) bool {
+	return m.contexts.forget(connection)
+}
+
+func (m *SlotOperationTrackerManager) SkippedOperations() uint64 {
+	return atomic.LoadUint64(&m.skippedOperations)
+}
+
+func (m *SlotOperationTrackerManager) DroppedRecords() uint64 {
+	return atomic.LoadUint64(&m.droppedRecords)
+}
+
+func (m *SlotOperationTrackerManager) DroppedCompletedOperations() uint64 {
+	return atomic.LoadUint64(&m.droppedCompleted)
+}
+
+func (m *SlotOperationTrackerManager) InvalidHandles() uint64 {
+	return atomic.LoadUint64(&m.invalidHandles)
+}
+
+func (s *operationSlot) setSnapshotMetadata(metadata OperationSnapshotMetadata) {
+	s.snapshotTypeLen = uint16(copy(s.snapshotType[:], metadata.Type))
+	s.snapshotIDLen = uint16(copy(s.snapshotID[:], metadata.Ref.ID.String()))
+	s.snapshotParentIDLen = uint16(copy(s.snapshotParentID[:], metadata.Ref.ParentID.String()))
+	if metadata.StartUnixNano != 0 {
+		s.snapshotStartUnixNano = metadata.StartUnixNano
+		return
+	}
+	s.snapshotStartUnixNano = nowUnixNano()
+}
+
+func (s *operationSlot) snapshotMetadata() OperationSnapshotMetadata {
+	return OperationSnapshotMetadata{
+		Type:          string(s.snapshotType[:s.snapshotTypeLen]),
+		Ref:           apiobs.NewOperationRef(string(s.snapshotID[:s.snapshotIDLen]), string(s.snapshotParentID[:s.snapshotParentIDLen])),
+		StartUnixNano: s.snapshotStartUnixNano,
+	}
+}
+
+func (m *SlotOperationTrackerManager) activeSlot(handle InternalTrackerHandle) (*operationSegment, *operationSlot, bool) {
+	if handle.IsZero() {
+		return nil, nil, false
+	}
+	segment := handle.segmentRef
+	slot := handle.slotRef
+	if segment == nil || slot == nil || slot.generation != handle.generation || slot.state != operationSlotActive {
+		return nil, nil, false
+	}
+	return segment, slot, true
+}
+
+func (m *SlotOperationTrackerManager) releaseContextVersion(version apiobs.ConnectionContextVersion) {
+	if version == 0 {
+		return
+	}
+	if m.releaseContext != nil {
+		m.releaseContext(version)
+	}
+	m.contexts.release(version)
+}
+
+func (s *operationSlotShard) addSegmentLocked() bool {
+	index := -1
+	for i, segment := range s.segments {
+		if segment == nil {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	segment := newOperationSegment(index, s.segmentSize, s.recordsPerOperation)
+	s.segments[index] = segment
+	for slot := range s.segmentSize {
+		s.free[s.freeCount] = slotRef{segment: index, slot: slot}
+		s.freeCount++
+	}
+	return true
+}
+
+func newOperationSegment(index, segmentSize, recordsPerOperation int) *operationSegment {
+	return &operationSegment{
+		index:               index,
+		slots:               make([]operationSlot, segmentSize),
+		records:             make([]apiobs.TelemetryRecord, segmentSize*recordsPerOperation),
+		recordsPerOperation: recordsPerOperation,
+	}
+}
+
+func (s *operationSlotShard) activeSlotLocked(handle InternalTrackerHandle) (*operationSegment, *operationSlot, bool) {
+	if handle.IsZero() || int(handle.segment) >= len(s.segments) {
+		return nil, nil, false
+	}
+	segment := s.segments[handle.segment]
+	if segment == nil || segment != handle.segmentRef || int(handle.slot) >= len(segment.slots) {
+		return nil, nil, false
+	}
+	slot := &segment.slots[handle.slot]
+	if slot != handle.slotRef || slot.generation != handle.generation || slot.state != operationSlotActive {
+		return nil, nil, false
+	}
+	return segment, slot, true
+}
+
+func (s *operationSlotShard) pushCompletedLocked(ref slotRef) bool {
+	if s.completedCount == len(s.completed) {
+		return false
+	}
+	index := (s.completedHead + s.completedCount) % len(s.completed)
+	s.completed[index] = ref
+	s.completedCount++
+	return true
+}
+
+func (s *operationSlotShard) popCompletedLocked() (slotRef, bool) {
+	if s.completedCount == 0 {
+		return slotRef{}, false
+	}
+	ref := s.completed[s.completedHead]
+	s.completed[s.completedHead] = slotRef{}
+	s.completedHead = (s.completedHead + 1) % len(s.completed)
+	s.completedCount--
+	return ref, true
+}
+
+func completedOperationFromSlot(segment *operationSegment, slot *operationSlot, slotIndex int) CompletedOperation {
+	start := slotIndex * segment.recordsPerOperation
+	end := start + int(slot.recordCount.Load())
+	return CompletedOperation{
+		Operation:      slot.operation,
+		Parent:         slot.parent,
+		ContextVersion: slot.contextVersion,
+		ContextOverlay: slot.contextOverlay,
+		Status:         slot.status,
+		Records:        segment.records[start:end],
+		DroppedRecords: slot.droppedRecords,
+	}
+}
+
+func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slotRef) {
+	slot := &segment.slots[ref.slot]
+	slot.state = operationSlotFree
+	slot.operation = 0
+	slot.parent = apiobs.ParentRef{}
+	slot.contextVersion = 0
+	slot.contextOverlay = nil
+	slot.status = SlotTerminalUnknown
+	slot.snapshotTypeLen = 0
+	slot.snapshotIDLen = 0
+	slot.snapshotParentIDLen = 0
+	slot.snapshotStartUnixNano = 0
+	slot.recordCount.Store(0)
+	slot.droppedRecords = 0
+	segment.active--
+	s.activeSlots--
+	if !segment.retiring {
+		s.free[s.freeCount] = ref
+		s.freeCount++
+	}
+}
+
+func (s *operationSlotShard) retireFreeSegmentLocked() bool {
+	if s.segmentCountLocked() <= s.minSegments {
+		return false
+	}
+	for index := len(s.segments) - 1; index >= 0; index-- {
+		segment := s.segments[index]
+		if segment == nil || segment.active != 0 {
+			continue
+		}
+		segment.retiring = true
+		s.removeFreeRefsForSegmentLocked(index)
+		s.segments[index] = nil
+		return true
+	}
+	return false
+}
+
+func (s *operationSlotShard) removeFreeRefsForSegmentLocked(segmentIndex int) {
+	write := 0
+	for read := 0; read < s.freeCount; read++ {
+		if s.free[read].segment == segmentIndex {
+			continue
+		}
+		s.free[write] = s.free[read]
+		write++
+	}
+	for i := write; i < s.freeCount; i++ {
+		s.free[i] = slotRef{}
+	}
+	s.freeCount = write
+}
+
+func (s *operationSlotShard) segmentCountLocked() int {
+	count := 0
+	for _, segment := range s.segments {
+		if segment != nil {
+			count++
+		}
+	}
+	return count
+}

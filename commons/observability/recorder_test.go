@@ -94,8 +94,12 @@ func TestTelemetryTrackerCopiesNamePayloadAndFields(t *testing.T) {
 	message := []byte("original-message")
 	key := []byte("status")
 	value := []byte("ok")
-	if !tracker.Log(1, apiobs.TelemetryLogLevelDebug, message, key, value) {
-		t.Fatal("Log should be accepted")
+	record := apiobs.NewLogRecordBytes(1, apiobs.TelemetryLogLevelDebug, message)
+	if !record.AddFieldBytes(key, value) {
+		t.Fatal("AddFieldBytes should fit")
+	}
+	if !tracker.RecordTelemetry(record) {
+		t.Fatal("RecordTelemetry should be accepted")
 	}
 	copy(message, "mutated-message")
 	copy(value, "no")
@@ -110,8 +114,15 @@ func TestTelemetryTrackerCopiesNamePayloadAndFields(t *testing.T) {
 	if got.Level != apiobs.TelemetryLogLevelDebug {
 		t.Fatalf("log level = %v, want debug", got.Level)
 	}
-	if got.Payload[0] != 1 {
-		t.Fatalf("packed field count = %d, want 1", got.Payload[0])
+	if got.FieldCount != 1 {
+		t.Fatalf("field count = %d, want 1", got.FieldCount)
+	}
+	fieldKey, fieldValue, ok := got.FieldBytes(0)
+	if !ok {
+		t.Fatal("FieldBytes(0) should return encoded field")
+	}
+	if string(fieldKey) != "status" || string(fieldValue) != "ok" {
+		t.Fatalf("field = %q:%q, want status:ok", fieldKey, fieldValue)
 	}
 }
 

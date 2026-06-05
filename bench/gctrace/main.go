@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache"
 )
 
@@ -158,7 +159,7 @@ func loadStrings(ctx context.Context, c *cache.Cache, n, valueSize int) {
 	defer c.Unlock()
 	for i := 0; i < n; i++ {
 		key := fmt.Sprintf("s:%08d", i)
-		if err := c.RawSet(ctx, key, value, 0); err != nil {
+		if err := c.RawSet(commonobs.OperationScope{}, key, value, 0); err != nil {
 			fmt.Fprintf(os.Stderr, "RawSet failed at i=%d: %v\n", i, err)
 			os.Exit(1)
 		}
@@ -175,7 +176,7 @@ func loadHashes(ctx context.Context, c *cache.Cache, n int) {
 			"field2": "value2",
 			"field3": fmt.Sprintf("v-%d", i),
 		}
-		if err := c.RawSet(ctx, key, h, 0); err != nil {
+		if err := c.RawSet(commonobs.OperationScope{}, key, h, 0); err != nil {
 			fmt.Fprintf(os.Stderr, "RawSet failed at i=%d: %v\n", i, err)
 			os.Exit(1)
 		}

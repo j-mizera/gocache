@@ -65,9 +65,12 @@ type Options struct {
 	// BootStage is the current bootstate marker (optional but strongly
 	// recommended — makes triage 10× faster).
 	BootStage string
-	// ActiveOps is a snapshot of in-flight operations. Pass tracker.Active()
-	// at call time.
+	// ActiveOps is a legacy snapshot of in-flight operations. New telemetry-backed
+	// callers should prefer ActiveSnapshots.
 	ActiveOps []*ops.Operation
+	// ActiveSnapshots is a pre-materialized snapshot of in-flight operations from
+	// telemetry storage. Values are copied into the dump as-is.
+	ActiveSnapshots []OpSnapshot
 	// Meta carries arbitrary key-value pairs (config path, hostname, etc.).
 	Meta map[string]string
 }
@@ -99,8 +102,13 @@ func Write(panicVal any, stack []byte, o Options) (string, error) {
 		Stack:      string(stack),
 		Meta:       o.Meta,
 	}
+	if len(o.ActiveSnapshots) > 0 {
+		d.ActiveOps = append(d.ActiveOps, o.ActiveSnapshots...)
+	}
 	if len(o.ActiveOps) > 0 {
-		d.ActiveOps = make([]OpSnapshot, 0, len(o.ActiveOps))
+		if d.ActiveOps == nil {
+			d.ActiveOps = make([]OpSnapshot, 0, len(o.ActiveOps))
+		}
 		for _, op := range o.ActiveOps {
 			if op == nil {
 				continue
