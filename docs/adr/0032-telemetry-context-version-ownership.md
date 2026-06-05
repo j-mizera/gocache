@@ -59,9 +59,9 @@ REX keys stay bare inside the REX buckets. Projection to legacy flat keys such a
 
 ### Operation context replay
 
-Operation-level context updates are submitted as sidecar records and folded by the worker in FIFO order for that operation. Each log or event observes the context after all prior mutations and before later mutations. Later context updates must not retroactively change earlier logs or events.
+Operation-level context updates are submitted as sidecar records and folded by the worker in FIFO order for that operation. Active operations do not observe connection or operation-context changes by reading mutable maps; they carry only the pinned base `ConnectionContextVersion` plus ordered telemetry records. During completed-operation processing, the worker copies the pinned base context, releases the version through the tracker lifecycle, and mutates only the worker-owned copy while materializing logs, events, GCPC payloads, or plugin outputs. Each log or event observes the copied context after all prior mutations and before later mutations. Later context updates must not retroactively change earlier logs or events.
 
-Context remove records are idempotent. If a remove can mask an inherited base, REX, or earlier context value, the worker must represent it as a tombstone so the removed value does not reappear during materialization. A context key added and then removed should appear only on logs/events emitted while it was active.
+Context remove records are idempotent. If a remove can mask an inherited base, REX, or earlier context value, the worker-owned copy must represent that removal during materialization so the removed value does not reappear in later output. A context key added and then removed should appear only on logs/events emitted while it was active.
 
 Open/user-defined context keys remain bytes or strings at the boundary. They must not require hot-path interning or map lookup. Worker-side materialization may use maps, pooled state, or packed representations as long as plugin-visible output remains serialized filtered context or the typed `EventContext` buckets above.
 
@@ -87,7 +87,7 @@ Version lifetime is an implementation detail local to server/worker code. GCPC c
 
 GCPC carries serialized filtered telemetry context or typed `EventContext` buckets. It never carries server context version ids. Any GCPC field or SDK type that appears to expose a version id must be treated as a bug in the contract.
 
-Redaction and visibility filtering happen before context crosses the plugin/GCPC boundary. Redaction tests must cover sensitive keys in base context, REX connection context, REX command context, and additional context. Context replay is best-effort telemetry; dropped context records may make reconstructed telemetry context incomplete and must not be treated as audit-durable truth.
+Redaction and visibility filtering happen before context crosses the plugin/GCPC boundary. Secret handling follows the REX/context namespace contract rather than heuristic content scanning: values in visible REX/context namespaces are exportable as supplied, while REX/context keys marked with the contract's `secret` dot-segment such as `secret.password`, `oauth.secret.jwt`, or `<pluginId>.secret.token` are non-exportable and must be redacted or dropped at projection boundaries. If a user places an email or other personal value into a visible namespace, GoCache does not guess that it should be secret; secret data must use REX/context secret semantics. Redaction tests must cover sensitive keys in base context, REX connection context, REX command context, and additional context. Context replay is best-effort telemetry; dropped context records may make reconstructed telemetry context incomplete and must not be treated as audit-durable truth.
 
 ## Accepted Scope and Follow-up Gates
 

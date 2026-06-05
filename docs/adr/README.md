@@ -2,7 +2,7 @@
 title: Architecture Decision Records
 description: Index of architectural decisions captured for gocache — Nygard-format ADRs, one per significant decision
 status: living
-last_updated: 2026-06-02
+last_updated: 2026-06-03
 related:
   - Server-Architecture
   - Performance
@@ -63,6 +63,7 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0031](0031-operation-identity-export-contract.md) | Operation Identity Export Contract | proposed | 2026-06-01 |
 | [0032](0032-telemetry-context-version-ownership.md) | Telemetry Context Version Ownership | accepted | 2026-06-01 |
 | [0033](0033-common-operationtracker-sharding-contract.md) | Common OperationTracker Sharding Contract | accepted | 2026-06-01 |
+| [0034](0034-zero-allocation-operation-telemetry-storage.md) | Zero-Allocation Operation Telemetry Storage | proposed | 2026-06-03 |
 
 ## Writing a new ADR
 
