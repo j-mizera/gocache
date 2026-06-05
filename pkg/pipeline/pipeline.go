@@ -7,13 +7,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	apicommand "gocache/api/command"
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
-	"gocache/commons/logger"
+	commonobs "gocache/commons/observability"
 	"gocache/commons/resp"
 	"gocache/pkg/benchstats"
 	"gocache/pkg/blocking"
@@ -21,7 +23,6 @@ import (
 	"gocache/pkg/clientctx"
 	"gocache/pkg/command"
 	"gocache/pkg/engine"
-	serverOps "gocache/pkg/operations"
 	"gocache/pkg/plugin/router"
 	resphandler "gocache/pkg/resp/handler"
 	"gocache/pkg/rex"
@@ -81,21 +82,22 @@ type CommandMetricsRecorder interface {
 // should define their own interface locally (pkg/server does this via a
 // package-private alias of the methods it actually calls).
 type Pipeline struct {
-	cache              *cache.Cache
-	engine             *engine.Engine
-	transactionManager *transaction.Manager
-	handlers           map[string]command.Handler
-	specs              map[string]apicommand.Spec
-	requirePass        string
-	blockingRegistry   *blocking.Registry
-	watchManager       *watch.Manager
-	pluginRouter       *router.Router
-	hookExecutor       apicommand.HookExecutor
-	emitter            events.Emitter
-	tracker            *serverOps.Tracker
-	opHookExecutor     OpHookExecutor
-	commandMetrics     CommandMetricsRecorder
-	persistenceFeed    command.MutationEmitter
+	cache                    *cache.Cache
+	engine                   *engine.Engine
+	transactionManager       *transaction.Manager
+	handlers                 map[string]command.Handler
+	specs                    map[string]apicommand.Spec
+	requirePass              string
+	blockingRegistry         *blocking.Registry
+	watchManager             *watch.Manager
+	pluginRouter             *router.Router
+	hookExecutor             apicommand.HookExecutor
+	emitter                  events.Emitter
+	operationTrackerManager  *commonobs.SlotOperationTrackerManager
+	commandOperationSequence atomic.Uint64
+	opHookExecutor           OpHookExecutor
+	commandMetrics           CommandMetricsRecorder
+	persistenceFeed          command.MutationEmitter
 }
 
 func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Pipeline {
@@ -108,7 +110,6 @@ func New(c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Regi
 		requirePass:        requirePass,
 		blockingRegistry:   br,
 		watchManager:       wm,
-		tracker:            serverOps.NewTracker(),
 	}
 	b.registerAll()
 	return b
@@ -142,8 +143,11 @@ func (b *Pipeline) SetEmitter(e events.Emitter) {
 	b.emitter = e
 }
 
-func (b *Pipeline) SetTracker(t *serverOps.Tracker) {
-	b.tracker = t
+// SetOperationTrackerManager wires the commons OperationTracker storage used to
+// thread explicit command telemetry scopes into core handlers. Pass nil to keep
+// command telemetry disabled while preserving cancellation-only contexts.
+func (b *Pipeline) SetOperationTrackerManager(t *commonobs.SlotOperationTrackerManager) {
+	b.operationTrackerManager = t
 }
 
 // SetPersistenceFeed wires the persistence coordinator's mutation-feed
@@ -170,7 +174,7 @@ func (b *Pipeline) SetCommandMetricsRecorder(r CommandMetricsRecorder) {
 func (b *Pipeline) RegisterEmbeddedCommand(name string, fn func(context.Context, []string) (any, error), spec apicommand.Spec) {
 	handler := func(cmdCtx *command.Context) apicommand.Result {
 		executeFn := func() any {
-			val, err := fn(cmdCtx.Context(), cmdCtx.Args)
+			val, err := fn(cmdCtx.CancellationContext(), cmdCtx.Args)
 			if err != nil {
 				return err
 			}
@@ -234,7 +238,6 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		if b.pluginRouter != nil && b.pluginRouter.HasCommand(op) {
 			return b.routeToPlugin(parentCtx, ctx, op, args)
 		}
-		logger.DebugNoCtx().Str("command", op).Msg("unknown command")
 		return apicommand.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 	benchstats.RecordPipelineEvaluation()
@@ -271,104 +274,79 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// reader and writer paths properly. See the #28 PR body for the
 	// measurement detail.
 
-	// --- Fast path: no observers attached, skip the entire instrumentation
-	// block. Profile attribution: bus.Emit + tracker.Start + tracker.Complete
-	// account for ~80% of mutex-contention time on simple writes, plus 4×
-	// ContextSnapshot allocations and 7× Enrich calls per command. None of
-	// this work has a consumer when no plugin is wired, so we bypass it.
-	//
-	// The handler still receives a real *ops.Operation in opCtx so logger
-	// correlation works; the operation is simply never registered, enriched,
-	// emitted, or hook-fired.
-	if !b.hasAnySink(op) {
-		if b.hasCommandMetricsSink() {
-			benchstats.RecordPipelineMetricsOnlyPath()
-			return b.evaluateMetricsOnly(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
-		}
-		benchstats.RecordPipelineFastPath()
-		return b.evaluateFast(parentCtx, ctx, op, args, inBatch, handler, spec, shardLocked)
-	}
+	// Command telemetry is captured unconditionally. Optional event and hook
+	// payloads below still use narrow interest checks before materializing maps or
+	// fanout objects, but current subscribers must not decide whether the command
+	// operation exists.
 	benchstats.RecordPipelineFullPath()
 
-	// --- Create command operation ---
-	cmdOp := b.tracker.Start(ops.TypeCommand, ctx.OperationID)
-	startNs := cmdOp.StartTime.UnixNano()
+	metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
+	telemetryScope := b.startCommandTelemetryScope(ctx)
+	startNs := time.Now().UnixNano()
+	hasHooks := b.hasCommandHookSink(op)
 
-	// Inject server context into operation.
-	cmdOp.Enrich(apicommand.StartNs, strconv.FormatInt(startNs, 10))
-	cmdOp.Enrich(apicommand.OperationID, cmdOp.ID)
-	cmdOp.Enrich(apicommand.CommandKey, op)
-	cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(len(args)))
-	if hasSpec && spec.ReadOnly {
-		cmdOp.Enrich(apicommand.ReadOnlyKey, "true")
+	var cmdOp *ops.Operation
+	if b.needsCommandCompatibilityOperation(hasHooks) {
+		cmdOp = newCommandCompatibilityOperation(ctx.OperationID, op, len(args), hasSpec && spec.ReadOnly, metadata)
+		startNs = cmdOp.StartTime.UnixNano()
 	}
+	operationID := commandOperationID(telemetryScope, cmdOp)
+	recordCommandStartTelemetryContext(telemetryScope, startNs, operationID, op, len(args), hasSpec && spec.ReadOnly)
 
-	// Inject REX metadata into operation context.
-	if ctx.RexMeta != nil || len(ctx.CmdMeta) > 0 {
-		metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
-		for k, v := range metadata {
-			cmdOp.Enrich(rex.Prefix+k, v)
-		}
+	// Build operation-carrying context only for compatibility fanout. The command
+	// cancellation context itself remains serverCtx-derived and is not a telemetry
+	// carrier.
+	opCtx := parentCtx
+	if cmdOp != nil {
+		opCtx = ops.WithContext(parentCtx, cmdOp)
 	}
-
-	// Build operation-carrying context so handlers and downstream (cache,
-	// persistence) can log with correlation. Derives from the parent
-	// (connection) context so cancellation propagates into plugin routing.
-	opCtx := ops.WithContext(parentCtx, cmdOp)
 
 	// Fire operation start hooks (synchronous — enriches context before work).
 	if b.hasCommandOperationHookSink() {
 		b.opHookExecutor.RunStartHooks(opCtx, cmdOp)
+		if cmdOp != nil {
+			recordTelemetryContextMap(telemetryScope, cmdOp.ContextSnapshot(false))
+		}
 	}
 
-	// Emit operation.started + command.started events only for interested subscribers.
-	if b.emitter != nil {
-		if b.emitter.HasSubscribersFor(events.OperationStarted) {
-			buildStart := benchstats.StartTimer()
-			snapshotStart := benchstats.StartTimer()
-			snapshot := cmdOp.ContextSnapshot(false)
-			benchstats.RecordPipelineContextSnapshot(snapshotStart)
-			evt := events.NewOperationStarted(cmdOp.ID, string(cmdOp.Type), cmdOp.ParentID, snapshot)
-			benchstats.RecordPipelineOperationStartedBuilt(buildStart)
-			b.emitter.Emit(evt)
-		}
-		if b.emitter.HasSubscribersFor(events.CommandStarted) {
-			buildStart := benchstats.StartTimer()
-			evt := events.NewCommandStarted(op, args, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID)
-			benchstats.RecordPipelineCommandStartedBuilt(buildStart)
-			b.emitter.Emit(evt)
-		}
-	}
+	b.recordCommandStartSignals(telemetryScope, cmdOp, op, args, metadata)
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
 	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
 	cmdCtx.ShardLocked = shardLocked
-	cmdCtx.SetContext(opCtx)
+	cmdCtx.SetCancellationContext(parentCtx)
+	cmdCtx.SetTelemetry(telemetryScope)
 
 	// --- Command hooks (pre) ---
 	var hookCtx map[string]string
-	hasHooks := b.hasCommandHookSink(op)
 	connInfo := &gcpc.ConnectionInfoV1{Id: ctx.ConnectionID, RemoteAddr: ctx.RemoteAddr}
 	cmdInfo := &gcpc.CommandInfoV1{Name: op, Args: args}
 	if hasHooks {
 		snapshotStart := benchstats.StartTimer()
-		hookCtx = cmdOp.ContextSnapshot(false)
+		hookCtx = commandProjectionContext(telemetryScope, cmdOp, metadata)
 		benchstats.RecordPipelineContextSnapshot(snapshotStart)
 
 		if pre := b.hookExecutor.RunPreHooks(opCtx, cmdInfo, connInfo, hookCtx); pre != nil {
 			if pre.Denied {
-				cmdOp.Fail("denied: " + pre.DenyReason)
-				if b.opHookExecutor != nil {
+				denyReason := "denied: " + pre.DenyReason
+				recordTelemetryContextMap(telemetryScope, pre.Context)
+				telemetryScope.ContextUpdateStrings(apicommand.ErrorKey, denyReason)
+				if cmdOp != nil {
+					cmdOp.Fail(denyReason)
+				}
+				b.recordCommandFinishSignals(telemetryScope, cmdOp, op, args, metadata, uint64(time.Now().UnixNano()-startNs), "", denyReason)
+				telemetryScope.Finish(commonobs.SlotTerminalFailed)
+				if b.opHookExecutor != nil && cmdOp != nil {
 					b.opHookExecutor.RunCompleteHooks(cmdOp)
 				}
-				b.tracker.Fail(cmdOp.ID, "denied: "+pre.DenyReason)
 				return apicommand.Result{Value: resp.MarshalError("DENIED " + pre.DenyReason)}
 			}
 			hookCtx = pre.Context
 			for k, v := range hookCtx {
 				cmdOp.Enrich(k, v)
 			}
+			recordTelemetryContextMap(telemetryScope, hookCtx)
 		}
 	}
 
@@ -384,89 +362,251 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	}
 
 	// --- Complete operation ---
-	cmdOp.Complete()
-	elapsedNs := uint64(cmdOp.Duration().Nanoseconds())
 	resultVal, resultErr := resultToHookStrings(result)
-
-	cmdOp.Enrich(apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
-	cmdOp.Enrich(apicommand.ResultKey, resultVal)
-	if resultErr != "" {
-		cmdOp.Enrich(apicommand.ErrorKey, resultErr)
+	elapsedNs := uint64(time.Now().UnixNano() - startNs)
+	if cmdOp != nil {
+		cmdOp.Complete()
+		elapsedNs = uint64(cmdOp.Duration().Nanoseconds())
+		cmdOp.Enrich(apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+		cmdOp.Enrich(apicommand.ResultKey, resultVal)
+		if resultErr != "" {
+			cmdOp.Enrich(apicommand.ErrorKey, resultErr)
+		}
 	}
 	b.recordCommandMetric(op, elapsedNs, resultErr != "")
+	recordCommandFinishTelemetryContext(telemetryScope, elapsedNs, resultVal, resultErr)
 
-	if b.hasCommandOperationHookSink() {
+	if b.hasCommandOperationHookSink() && cmdOp != nil {
 		b.opHookExecutor.RunCompleteHooks(cmdOp)
 	}
 
-	if b.emitter != nil {
+	b.recordCommandFinishSignals(telemetryScope, cmdOp, op, args, metadata, elapsedNs, resultVal, resultErr)
+
+	finishCommandTelemetryScope(telemetryScope, result)
+	return result
+}
+
+func (b *Pipeline) recordCommandStartSignals(scope commonobs.OperationScope, cmdOp *ops.Operation, op string, args []string, metadata map[string]string) {
+	if b.emitter == nil {
+		return
+	}
+	operationID := commandOperationID(scope, cmdOp)
+	if !scope.IsZero() {
+		if b.emitter.HasSubscribersFor(events.OperationStarted) {
+			buildStart := benchstats.StartTimer()
+			scope.OperationStartString(string(ops.TypeCommand),
+				apicommand.OperationID, operationID,
+				"_operation_type", string(ops.TypeCommand),
+				"_parent_operation_id", commandParentID(scope, cmdOp),
+			)
+			benchstats.RecordPipelineOperationStartedBuilt(buildStart)
+		}
+		if b.emitter.HasSubscribersFor(events.CommandStarted) {
+			buildStart := benchstats.StartTimer()
+			scope.CommandStartString(op, commandEventFields(operationID, op, args, metadata, 0, "", "")...)
+			benchstats.RecordPipelineCommandStartedBuilt(buildStart)
+		}
+		return
+	}
+	// Runtime event fanout is sidecar-owned. If no sidecar scope exists, keep
+	// command execution and hook compatibility working but do not materialize
+	// command/operation events directly on the command goroutine.
+}
+
+func (b *Pipeline) recordCommandFinishSignals(scope commonobs.OperationScope, cmdOp *ops.Operation, op string, args []string, metadata map[string]string, elapsedNs uint64, resultVal, resultErr string) {
+	if b.emitter == nil {
+		return
+	}
+	operationID := commandOperationID(scope, cmdOp)
+	if !scope.IsZero() {
 		if b.emitter.HasSubscribersFor(events.CommandCompleted) {
 			buildStart := benchstats.StartTimer()
-			evt := events.NewCommandCompleted(op, args, elapsedNs, resultVal, resultErr, rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)).WithOperationID(cmdOp.ID)
+			scope.CommandFinishString(op, elapsedNs, commandEventFields(operationID, op, args, metadata, elapsedNs, resultVal, resultErr)...)
 			benchstats.RecordPipelineCommandCompletedBuilt(buildStart)
-			b.emitter.Emit(evt)
 		}
 		if b.emitter.HasSubscribersFor(events.OperationCompleted) {
 			buildStart := benchstats.StartTimer()
-			snapshotStart := benchstats.StartTimer()
-			snapshot := cmdOp.ContextSnapshot(false)
-			benchstats.RecordPipelineContextSnapshot(snapshotStart)
-			evt := events.NewOperationCompleted(cmdOp.ID, string(cmdOp.Type), elapsedNs, "completed", "", snapshot)
+			scope.OperationFinishString(string(ops.TypeCommand), elapsedNs,
+				apicommand.OperationID, operationID,
+				"_operation_type", string(ops.TypeCommand),
+				"_status", "completed",
+				apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+				apicommand.ErrorKey, resultErr,
+			)
 			benchstats.RecordPipelineOperationCompletedBuilt(buildStart)
-			b.emitter.Emit(evt)
 		}
+		return
 	}
-
-	b.tracker.Complete(cmdOp.ID)
-	return result
+	// Runtime event fanout is sidecar-owned. If no sidecar scope exists, keep
+	// command execution and hook compatibility working but do not materialize
+	// command/operation events directly on the command goroutine.
 }
 
-// evaluateFast runs the handler with a bare *ops.Operation and no
-// instrumentation. Hot path when no sinks are attached. See hasAnySink for
-// the documented invariant on late-subscriber visibility.
-func (b *Pipeline) evaluateFast(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec apicommand.Spec, shardLocked bool) apicommand.Result {
-	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
-	opCtx := ops.WithContext(parentCtx, cmdOp)
-
-	cmdCtx := cmdCtxPool.Get().(*command.Context)
-	defer putCmdCtx(cmdCtx)
-	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
-	cmdCtx.ShardLocked = shardLocked
-	cmdCtx.SetContext(opCtx)
-
-	result := handler(cmdCtx)
-
-	if b.tracker != nil {
-		b.tracker.IncrementSkipped()
+func commandOperationID(scope commonobs.OperationScope, cmdOp *ops.Operation) string {
+	if cmdOp != nil && cmdOp.ID != "" {
+		return cmdOp.ID
 	}
-	return result
+	if !scope.Ref().IsZero() {
+		return scope.Ref().ID.String()
+	}
+	return ""
 }
 
-// evaluateMetricsOnly keeps Prometheus-style metrics off the full operation,
-// event, and hook path. It measures the handler directly, records the compact
-// tuple, and still skips tracker registration/enrichment just like evaluateFast.
-func (b *Pipeline) evaluateMetricsOnly(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, handler command.Handler, spec apicommand.Spec, shardLocked bool) apicommand.Result {
-	cmdOp := ops.New(ops.TypeCommand, ctx.OperationID)
-	opCtx := ops.WithContext(parentCtx, cmdOp)
-
-	cmdCtx := cmdCtxPool.Get().(*command.Context)
-	defer putCmdCtx(cmdCtx)
-	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
-	cmdCtx.ShardLocked = shardLocked
-	cmdCtx.SetContext(opCtx)
-
-	result := handler(cmdCtx)
-	elapsedNs := uint64(time.Since(cmdOp.StartTime).Nanoseconds())
-	b.recordCommandMetric(op, elapsedNs, resultHasError(result))
-
-	if b.tracker != nil {
-		b.tracker.IncrementSkipped()
+func commandParentID(scope commonobs.OperationScope, cmdOp *ops.Operation) string {
+	if cmdOp != nil {
+		return cmdOp.ParentID
 	}
-	return result
+	return scope.Ref().ParentID.String()
+}
+
+func commandEventFields(operationID, op string, args []string, metadata map[string]string, elapsedNs uint64, resultVal, resultErr string) []string {
+	fields := make([]string, 0, 8+len(args)*2+len(metadata)*2)
+	fields = append(fields,
+		apicommand.OperationID, operationID,
+		apicommand.CommandKey, op,
+		"_args_count", strconv.Itoa(len(args)),
+	)
+	if elapsedNs > 0 {
+		fields = append(fields, apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+	}
+	if resultVal != "" {
+		fields = append(fields, apicommand.ResultKey, resultVal)
+	}
+	if resultErr != "" {
+		fields = append(fields, apicommand.ErrorKey, resultErr)
+	}
+	for i, arg := range args {
+		fields = append(fields, "_arg."+strconv.Itoa(i), arg)
+	}
+	for key, value := range metadata {
+		fields = append(fields, "_metadata."+key, value)
+	}
+	return fields
+}
+
+func (b *Pipeline) needsCommandCompatibilityOperation(hasHooks bool) bool {
+	return b.hasCommandOperationHookSink() || hasHooks || (b.hasCommandEventSink() && b.operationTrackerManager == nil)
+}
+
+func newCommandCompatibilityOperation(parentID, op string, argCount int, readOnly bool, metadata map[string]string) *ops.Operation {
+	cmdOp := ops.New(ops.TypeCommand, parentID)
+	startNs := cmdOp.StartTime.UnixNano()
+	cmdOp.Enrich(apicommand.StartNs, strconv.FormatInt(startNs, 10))
+	cmdOp.Enrich(apicommand.OperationID, cmdOp.ID)
+	cmdOp.Enrich(apicommand.CommandKey, op)
+	cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(argCount))
+	if readOnly {
+		cmdOp.Enrich(apicommand.ReadOnlyKey, "true")
+	}
+	for k, v := range metadata {
+		cmdOp.Enrich(rex.Prefix+k, v)
+	}
+	return cmdOp
+}
+
+func (b *Pipeline) startCommandTelemetryScope(ctx *clientctx.ClientContext) commonobs.OperationScope {
+	if b.operationTrackerManager == nil {
+		return commonobs.OperationScope{}
+	}
+	sequence := b.commandOperationSequence.Add(1)
+	if sequence == 0 {
+		sequence = b.commandOperationSequence.Add(1)
+	}
+	operation := apiobs.InternalOperationIdentity(sequence)
+	operationID := "cmd:" + strconv.FormatUint(sequence, 10)
+	parent := apiobs.NewParentRef(ctx.OperationID)
+	ref := apiobs.NewOperationRef(operationID, ctx.OperationID)
+	handle, _, ok := b.operationTrackerManager.StartOperationWithConnectionContextAndMetadata(operation, parent, ctx.ConnectionIdentity, ctx.CmdMeta, commonobs.OperationSnapshotMetadata{
+		Type:          string(ops.TypeCommand),
+		Ref:           ref,
+		StartUnixNano: time.Now().UnixNano(),
+	})
+	if !ok {
+		return commonobs.OperationScope{}
+	}
+	return commonobs.NewOperationScope(b.operationTrackerManager, handle, operation, ref)
+}
+
+func finishCommandTelemetryScope(scope commonobs.OperationScope, result apicommand.Result) {
+	if resultHasError(result) {
+		scope.Finish(commonobs.SlotTerminalFailed)
+		return
+	}
+	scope.Finish(commonobs.SlotTerminalFinished)
+}
+
+func commandProjectionContext(scope commonobs.OperationScope, fallback *ops.Operation, metadata map[string]string) map[string]string {
+	var projected map[string]string
+	if !scope.IsZero() {
+		projected = scope.ContextSnapshot()
+	}
+	if projected == nil && fallback != nil {
+		projected = fallback.ContextSnapshot(false)
+	}
+	if len(metadata) == 0 {
+		return projected
+	}
+	if projected == nil {
+		projected = make(map[string]string, len(metadata))
+	}
+	for key, value := range metadata {
+		delete(projected, key)
+		projected[rex.Prefix+key] = value
+	}
+	return projected
+}
+
+func recordCommandStartTelemetryContext(scope commonobs.OperationScope, startNs int64, operationID, op string, argCount int, readOnly bool) {
+	if scope.IsZero() {
+		return
+	}
+	if readOnly {
+		scope.ContextUpdateStrings(
+			apicommand.StartNs, strconv.FormatInt(startNs, 10),
+			apicommand.OperationID, operationID,
+			apicommand.CommandKey, op,
+			apicommand.ArgCountKey, strconv.Itoa(argCount),
+			apicommand.ReadOnlyKey, "true",
+		)
+		return
+	}
+	scope.ContextUpdateStrings(
+		apicommand.StartNs, strconv.FormatInt(startNs, 10),
+		apicommand.OperationID, operationID,
+		apicommand.CommandKey, op,
+		apicommand.ArgCountKey, strconv.Itoa(argCount),
+	)
+}
+
+func recordCommandFinishTelemetryContext(scope commonobs.OperationScope, elapsedNs uint64, resultValue, resultError string) {
+	if scope.IsZero() {
+		return
+	}
+	if resultError != "" {
+		scope.ContextUpdateStrings(
+			apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+			apicommand.ResultKey, resultValue,
+			apicommand.ErrorKey, resultError,
+		)
+		return
+	}
+	scope.ContextUpdateStrings(
+		apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+		apicommand.ResultKey, resultValue,
+	)
+}
+
+func recordTelemetryContextMap(scope commonobs.OperationScope, values map[string]string) {
+	if scope.IsZero() || len(values) == 0 {
+		return
+	}
+	for key, value := range values {
+		scope.ContextUpdateStrings(key, value)
+	}
 }
 
 func (b *Pipeline) recordCommandMetric(op string, elapsedNs uint64, isError bool) {
-	if b.commandMetrics != nil {
+	if b.hasCommandMetricsSink() {
 		b.commandMetrics.RecordCommand(op, elapsedNs, isError)
 	}
 }
@@ -512,6 +652,7 @@ func (b *Pipeline) fillCmdCtx(c *command.Context, ctx *clientctx.ClientContext, 
 	c.EvalFn = b.evaluateInternal
 	c.Spec = spec
 	c.Coordinator = b.persistenceFeed
+	c.SetOperationTrackerManager(b.operationTrackerManager)
 }
 
 // routeToPlugin dispatches a command to a plugin via the router. The per-call
@@ -524,31 +665,51 @@ func (b *Pipeline) routeToPlugin(parentCtx context.Context, client *clientctx.Cl
 	ctx, cancel := context.WithTimeout(parentCtx, pluginCommandTimeout)
 	defer cancel()
 
-	if b.hasAnySink(op) {
-		cmdOp := b.tracker.Start(ops.TypeCommand, client.OperationID)
-		cmdOp.Enrich(apicommand.CommandKey, op)
-		cmdOp.Enrich(apicommand.ArgCountKey, strconv.Itoa(len(args)))
-		if meta := b.pluginRouter.LookupMeta(op); meta != nil && meta.ReadOnly {
-			cmdOp.Enrich(apicommand.ReadOnlyKey, "true")
-		}
-		ctx = ops.WithContext(ctx, cmdOp)
-		defer func() { cmdOp.Complete(); b.tracker.Complete(cmdOp.ID) }()
+	readOnly := false
+	if meta := b.pluginRouter.LookupMeta(op); meta != nil && meta.ReadOnly {
+		readOnly = true
 	}
 
-	val, suppress, err := b.pluginRouter.Route(ctx, op, args, metadata, connInfo)
+	cmdOp := newCommandCompatibilityOperation(client.OperationID, op, len(args), readOnly, metadata)
+	ctx = ops.WithContext(ctx, cmdOp)
+	startNs := cmdOp.StartTime.UnixNano()
+
+	telemetryScope := b.startCommandTelemetryScope(client)
+	recordCommandStartTelemetryContext(telemetryScope, startNs, cmdOp.ID, op, len(args), readOnly)
+	requestCtx := commandProjectionContext(telemetryScope, cmdOp, metadata)
+
+	val, suppress, err := b.pluginRouter.RouteWithContext(ctx, op, args, metadata, connInfo, requestCtx)
 	if err != nil {
 		if errors.Is(err, router.ErrPluginTimeout) {
-			return apicommand.Result{Value: resp.MarshalError("ERR plugin timeout")}
+			return b.finishPluginCommand(cmdOp, telemetryScope, apicommand.Result{Value: resp.MarshalError("ERR plugin timeout")})
 		}
 		if errors.Is(err, router.ErrPluginDown) {
-			return apicommand.Result{Value: resp.MarshalError("ERR plugin unavailable")}
+			return b.finishPluginCommand(cmdOp, telemetryScope, apicommand.Result{Value: resp.MarshalError("ERR plugin unavailable")})
 		}
-		return apicommand.Result{Err: err}
+		return b.finishPluginCommand(cmdOp, telemetryScope, apicommand.Result{Err: err})
 	}
 	if e, ok := val.(error); ok {
-		return apicommand.Result{Err: e}
+		return b.finishPluginCommand(cmdOp, telemetryScope, apicommand.Result{Err: e})
 	}
-	return apicommand.Result{Value: val, SuppressResponse: suppress}
+	return b.finishPluginCommand(cmdOp, telemetryScope, apicommand.Result{Value: val, SuppressResponse: suppress})
+}
+
+func (b *Pipeline) finishPluginCommand(cmdOp *ops.Operation, telemetryScope commonobs.OperationScope, result apicommand.Result) apicommand.Result {
+	var elapsedNs uint64
+	if cmdOp != nil {
+		elapsedNs = uint64(time.Since(cmdOp.StartTime).Nanoseconds())
+	}
+	resultVal, resultErr := resultToHookStrings(result)
+	recordCommandFinishTelemetryContext(telemetryScope, elapsedNs, resultVal, resultErr)
+	finishCommandTelemetryScope(telemetryScope, result)
+	if cmdOp != nil {
+		if resultErr != "" {
+			cmdOp.Fail(resultErr)
+			return result
+		}
+		cmdOp.Complete()
+	}
+	return result
 }
 
 func resultToHookStrings(r apicommand.Result) (string, string) {

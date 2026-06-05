@@ -12,7 +12,8 @@ import (
 	"github.com/gammazero/deque"
 
 	apiconfig "gocache/api/config"
-	"gocache/commons/logger"
+	apiobs "gocache/api/observability"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache/slab"
 )
 
@@ -151,7 +152,6 @@ type Cache struct {
 	onMutate    atomic.Pointer[func(key string)]
 	onMutateAll atomic.Pointer[func()]
 }
-
 
 // New constructs a Cache with the default shard count, no memory limit,
 // and LRU eviction.
@@ -324,17 +324,17 @@ func (c *Cache) TTLInternal(key string) (time.Duration, ValueState) {
 func (c *Cache) SetExpiration(key string, expiration int64) bool {
 	return c.Shard(key).SetExpiration(key, expiration)
 }
-func (c *Cache) RawSet(ctx context.Context, key string, value any, expiration int64) error {
-	return c.Shard(key).rawSet(ctx, key, value, expiration)
+func (c *Cache) RawSet(scope commonobs.OperationScope, key string, value any, expiration int64) error {
+	return c.Shard(key).rawSet(scope, key, value, expiration)
 }
 func (c *Cache) RawLoad(key string, value any, expiration int64) {
 	c.Shard(key).rawLoad(key, value, expiration)
 }
-func (c *Cache) RawSetNativeWithSize(ctx context.Context, key string, value any, byteSize int64, expiration int64) error {
-	return c.Shard(key).rawSetNativeWithSize(ctx, key, value, byteSize, expiration)
+func (c *Cache) RawSetNativeWithSize(scope commonobs.OperationScope, key string, value any, byteSize int64, expiration int64) error {
+	return c.Shard(key).rawSetNativeWithSize(scope, key, value, byteSize, expiration)
 }
-func (c *Cache) RawSetPacked(ctx context.Context, key string, vt ValueType, buf []byte, expiration int64) error {
-	return c.Shard(key).rawSetPacked(ctx, key, vt, buf, expiration)
+func (c *Cache) RawSetPacked(scope commonobs.OperationScope, key string, vt ValueType, buf []byte, expiration int64) error {
+	return c.Shard(key).rawSetPacked(scope, key, vt, buf, expiration)
 }
 func (c *Cache) RawLoadPacked(key string, vt ValueType, buf []byte, expiration int64) {
 	c.Shard(key).rawLoadPacked(key, vt, buf, expiration)
@@ -420,9 +420,16 @@ func (c *Cache) Range(fn func(key string, entry Entry, expiration int64) bool) {
 
 // Clear drops every entry on every shard. Caller holds the necessary
 // locks (today: the single shard's write lock via the engine path).
-func (c *Cache) Clear(ctx context.Context) {
+func (c *Cache) Clear(_ context.Context) {
+	c.ClearWithScope(commonobs.OperationScope{})
+}
+
+// ClearWithScope drops every entry and submits the cache-cleared log request
+// through the supplied operation holder. A zero holder preserves non-command
+// replay paths without materializing naked zerolog output.
+func (c *Cache) ClearWithScope(scope commonobs.OperationScope) {
 	totalItems := c.lenLocked()
-	logger.Info(ctx).Int("items", totalItems).Msg("cache cleared")
+	cacheLog(scope, apiobs.TelemetryLogLevelInfo, "cache cleared", "", "", int64(totalItems))
 	for _, s := range c.shards {
 		s.clear()
 	}
@@ -584,7 +591,7 @@ func (c *Cache) MaxBytes() int64 {
 
 // SetMemoryLimit updates the memory limit and eviction policy at runtime.
 // Each shard receives an equal slice of the new total.
-func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy EvictionPolicy) {
+func (c *Cache) SetMemoryLimit(scope commonobs.OperationScope, maxMemoryMB int64, policy EvictionPolicy) {
 	c.configMu.Lock()
 	if maxMemoryMB > 0 {
 		c.maxBytes = maxMemoryMB * bytesPerMB
@@ -594,6 +601,8 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 	c.evictionPolicy = policy
 	maxBytes := c.maxBytes
 	c.configMu.Unlock()
+
+	cacheLog(scope, apiobs.TelemetryLogLevelInfo, "memory limit updated", "policy", c.EvictionPolicyString(), maxBytes)
 
 	perShard := maxBytes
 	if len(c.shards) > 1 && maxBytes > 0 {
@@ -605,11 +614,10 @@ func (c *Cache) SetMemoryLimit(ctx context.Context, maxMemoryMB int64, policy Ev
 		s.evictionPolicy = policy
 		// Evict if the new limit is below current usage on this shard.
 		if s.maxBytes > 0 && s.usedBytes > s.maxBytes && s.evictionPolicy == EvictionLRU {
-			s.evictLRU(ctx, 0)
+			s.evictLRU(scope, 0)
 		}
 		s.Unlock()
 	}
-	logger.Info(ctx).Int64("maxBytes", maxBytes).Str("policy", c.EvictionPolicyString()).Msg("memory limit updated")
 }
 
 // EvictionPolicyString returns the eviction policy as a human-readable string.

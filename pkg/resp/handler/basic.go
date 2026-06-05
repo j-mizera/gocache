@@ -10,9 +10,9 @@ import (
 	"time"
 
 	apicommand "gocache/api/command"
+	"gocache/commons/resp"
 	"gocache/pkg/cache"
 	"gocache/pkg/command"
-	"gocache/commons/resp"
 )
 
 var msetPerShardPool = sync.Pool{
@@ -53,7 +53,7 @@ func HandleSelect(cmdCtx *command.Context) apicommand.Result {
 // HandleFlushDB clears the entire cache (single-DB server, equivalent to FLUSHALL).
 func HandleFlushDB(cmdCtx *command.Context) apicommand.Result {
 	return command.Dispatch(cmdCtx, func() any {
-		cmdCtx.Cache.Clear(cmdCtx.Context())
+		cmdCtx.Cache.ClearWithScope(cmdCtx.Telemetry())
 		return "OK"
 	})
 }
@@ -141,7 +141,7 @@ func HandleIncrByFloat(cmdCtx *command.Context) apicommand.Result {
 		newVal := existing + incr
 		newStr := strconv.FormatFloat(newVal, 'f', -1, 64)
 		rawTTL := cmdCtx.Cache.RawTTL(key)
-		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(newStr), rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Telemetry(), key, []byte(newStr), rawTTL); setErr != nil {
 			return setErr
 		}
 		return newStr
@@ -169,7 +169,7 @@ func HandleAppend(cmdCtx *command.Context) apicommand.Result {
 		newBytes := make([]byte, len(existing)+len(suffix))
 		copy(newBytes, existing)
 		copy(newBytes[len(existing):], suffix)
-		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newBytes, rawTTL); setErr != nil {
+		if setErr := cmdCtx.Cache.RawSet(cmdCtx.Telemetry(), key, newBytes, rawTTL); setErr != nil {
 			return setErr
 		}
 		return int64(len(newBytes))
@@ -291,7 +291,7 @@ func HandleMset(cmdCtx *command.Context) apicommand.Result {
 			if shard == nil {
 				continue
 			}
-			if err := shard.BulkSetBytes(cmdCtx.Context(), pairs, 0); err != nil {
+			if err := shard.BulkSetBytes(cmdCtx.Telemetry(), pairs, 0); err != nil {
 				return err
 			}
 		}
@@ -321,7 +321,7 @@ func incrByDelta(cmdCtx *command.Context, key string, delta int64) any {
 
 	newVal := current + delta
 	newBytes := strconv.AppendInt(make([]byte, 0, 20), newVal, 10)
-	if setErr := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, newBytes, rawTTL); setErr != nil {
+	if setErr := cmdCtx.Cache.RawSet(cmdCtx.Telemetry(), key, newBytes, rawTTL); setErr != nil {
 		return setErr
 	}
 	return newVal
@@ -390,7 +390,7 @@ func HandleSet(cmdCtx *command.Context) apicommand.Result {
 			exp = cmdCtx.Cache.RawTTL(key)
 		}
 
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(val), exp); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Telemetry(), key, []byte(val), exp); err != nil {
 			return err
 		}
 		return "OK"
@@ -410,7 +410,7 @@ func HandleSetnx(cmdCtx *command.Context) apicommand.Result {
 				return 0
 			}
 		}
-		if err := cmdCtx.Cache.RawSet(cmdCtx.Context(), key, []byte(val), 0); err != nil {
+		if err := cmdCtx.Cache.RawSet(cmdCtx.Telemetry(), key, []byte(val), 0); err != nil {
 			return err
 		}
 		return 1

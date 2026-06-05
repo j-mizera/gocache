@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	apipersistence "gocache/api/persistence"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache"
 )
 
@@ -89,9 +90,9 @@ func TestCoordinator_RegisterSnapshotter_GetAndClear(t *testing.T) {
 func TestCoordinator_Snapshot_FeedsAllEntries(t *testing.T) {
 	target := cache.New()
 	target.Lock()
-	_ = target.RawSet(context.Background(), "k1", "v1", 0)
-	_ = target.RawSet(context.Background(), "k2", "v2", 0)
-	_ = target.RawSet(context.Background(), "k3", "v3", 0)
+	_ = target.RawSet(commonobs.OperationScope{}, "k1", "v1", 0)
+	_ = target.RawSet(commonobs.OperationScope{}, "k2", "v2", 0)
+	_ = target.RawSet(commonobs.OperationScope{}, "k3", "v3", 0)
 	target.Unlock()
 
 	rec := &recordingSnapshotter{name: "rec"}
@@ -124,7 +125,7 @@ func TestCoordinator_Snapshot_FeedsAllEntries(t *testing.T) {
 func TestCoordinator_Snapshot_PropagatesError(t *testing.T) {
 	target := cache.New()
 	target.Lock()
-	_ = target.RawSet(context.Background(), "k", "v", 0)
+	_ = target.RawSet(commonobs.OperationScope{}, "k", "v", 0)
 	target.Unlock()
 
 	wantErr := errors.New("disk full")
@@ -145,8 +146,8 @@ func TestCoordinator_Snapshot_GobRoundTrip(t *testing.T) {
 
 	source := cache.New()
 	source.Lock()
-	_ = source.RawSet(context.Background(), "str", "hello", 0)
-	_ = source.RawSet(context.Background(), "list", []string{"a", "b"}, 0)
+	_ = source.RawSet(commonobs.OperationScope{}, "str", "hello", 0)
+	_ = source.RawSet(commonobs.OperationScope{}, "list", []string{"a", "b"}, 0)
 	source.Unlock()
 
 	gob := NewGobSource(file)
@@ -179,7 +180,7 @@ func TestGobSource_SetFilename_HotReload(t *testing.T) {
 
 	source := cache.New()
 	source.Lock()
-	_ = source.RawSet(context.Background(), "k", "v", 0)
+	_ = source.RawSet(commonobs.OperationScope{}, "k", "v", 0)
 	source.Unlock()
 
 	gob := NewGobSource(file1)
@@ -264,7 +265,7 @@ func (r *recordingLSNSnapshotter) SetLSN(lsn apipersistence.LSN) {
 func TestCoordinator_Snapshot_SeedsLSN(t *testing.T) {
 	target := cache.New()
 	target.Lock()
-	_ = target.RawSet(context.Background(), "k", "v", 0)
+	_ = target.RawSet(commonobs.OperationScope{}, "k", "v", 0)
 	target.Unlock()
 
 	rec := &recordingLSNSnapshotter{recordingSnapshotter: recordingSnapshotter{name: "v1-mock"}}
@@ -290,7 +291,7 @@ func TestCoordinator_Snapshot_NoSeedWhenNoLSNSeeder(t *testing.T) {
 	// coordinator's type assertion fails silently.
 	target := cache.New()
 	target.Lock()
-	_ = target.RawSet(context.Background(), "k", "v", 0)
+	_ = target.RawSet(commonobs.OperationScope{}, "k", "v", 0)
 	target.Unlock()
 
 	rec := &recordingSnapshotter{name: "gob-mock"}

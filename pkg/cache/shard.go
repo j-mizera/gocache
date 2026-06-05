@@ -1,12 +1,12 @@
 package cache
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"gocache/commons/logger"
+	apiobs "gocache/api/observability"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache/slab"
 )
 
@@ -22,13 +22,13 @@ import (
 // Today's caller is the Cache's per-shard engine goroutine, which holds
 // the write lock for the duration of one handler.
 type Shard struct {
-	mu             sync.RWMutex
-	items          map[string]slab.SlabPointer
-	nativeValues   map[slab.SlabPointer]any // populated only for EncNative entries
-	keysBySlot     map[slab.SlabPointer]string
-	slabs          *slab.Allocator
-	lruHead        slab.SlabPointer
-	lruTail        slab.SlabPointer
+	mu              sync.RWMutex
+	items           map[string]slab.SlabPointer
+	nativeValues    map[slab.SlabPointer]any // populated only for EncNative entries
+	keysBySlot      map[slab.SlabPointer]string
+	slabs           *slab.Allocator
+	lruHead         slab.SlabPointer
+	lruTail         slab.SlabPointer
 	usedBytes       int64
 	maxBytes        int64
 	evictionPolicy  EvictionPolicy
@@ -148,9 +148,8 @@ func (s *Shard) rename(src, dst string, newExpiration int64) bool {
 }
 
 // rawSet stores key with value and expiration, enforcing the memory limit.
-// Must be called under the write lock. ctx carries the operation for log
-// correlation.
-func (s *Shard) rawSet(ctx context.Context, key string, value any, expiration int64) error {
+// Must be called under the write lock.
+func (s *Shard) rawSet(scope commonobs.OperationScope, key string, value any, expiration int64) error {
 	if s.maxBytes > 0 {
 		newSize := estimateSize(key, value)
 		oldSize := s.keySize(key)
@@ -158,9 +157,9 @@ func (s *Shard) rawSet(ctx context.Context, key string, value any, expiration in
 		if delta > 0 && s.usedBytes+delta > s.maxBytes {
 			switch s.evictionPolicy {
 			case EvictionLRU:
-				s.evictLRU(ctx, delta)
+				s.evictLRU(scope, delta)
 			case EvictionNone:
-				logger.Warn(ctx).Str("key", key).Int64("usedBytes", s.usedBytes).Int64("maxBytes", s.maxBytes).Msg("write rejected, out of memory")
+				logOutOfMemory(scope, key, s.usedBytes)
 				return ErrOutOfMemory
 			}
 		}
@@ -197,7 +196,7 @@ type BulkPair struct {
 // Memory-limit enforcement still runs per-pair so a single oversize
 // value can't bypass eviction; the loop terminates early on
 // ErrOutOfMemory under EvictionNone.
-func (s *Shard) BulkSetBytes(ctx context.Context, pairs []BulkPair, expiration int64) error {
+func (s *Shard) BulkSetBytes(scope commonobs.OperationScope, pairs []BulkPair, expiration int64) error {
 	for _, p := range pairs {
 		if s.maxBytes > 0 {
 			newSize := estimateBytesSize(p.Key, p.Value)
@@ -206,9 +205,9 @@ func (s *Shard) BulkSetBytes(ctx context.Context, pairs []BulkPair, expiration i
 			if delta > 0 && s.usedBytes+delta > s.maxBytes {
 				switch s.evictionPolicy {
 				case EvictionLRU:
-					s.evictLRU(ctx, delta)
+					s.evictLRU(scope, delta)
 				case EvictionNone:
-					logger.Warn(ctx).Str("key", p.Key).Int64("usedBytes", s.usedBytes).Int64("maxBytes", s.maxBytes).Msg("write rejected, out of memory")
+					logOutOfMemory(scope, p.Key, s.usedBytes)
 					return ErrOutOfMemory
 				}
 			}
@@ -221,7 +220,7 @@ func (s *Shard) BulkSetBytes(ctx context.Context, pairs []BulkPair, expiration i
 // rawSetNativeWithSize stores a Go-native collection value at key using
 // a caller-supplied byteSize so we don't walk the value to compute it.
 // Must be called under the write lock.
-func (s *Shard) rawSetNativeWithSize(ctx context.Context, key string, value any, byteSize int64, expiration int64) error {
+func (s *Shard) rawSetNativeWithSize(scope commonobs.OperationScope, key string, value any, byteSize int64, expiration int64) error {
 	if s.maxBytes > 0 {
 		newSize := int64(entryOverhead) + int64(len(key)) + byteSize
 		oldSize := s.keySize(key)
@@ -229,9 +228,9 @@ func (s *Shard) rawSetNativeWithSize(ctx context.Context, key string, value any,
 		if delta > 0 && s.usedBytes+delta > s.maxBytes {
 			switch s.evictionPolicy {
 			case EvictionLRU:
-				s.evictLRU(ctx, delta)
+				s.evictLRU(scope, delta)
 			case EvictionNone:
-				logger.Warn(ctx).Str("key", key).Int64("usedBytes", s.usedBytes).Int64("maxBytes", s.maxBytes).Msg("write rejected, out of memory")
+				logOutOfMemory(scope, key, s.usedBytes)
 				return ErrOutOfMemory
 			}
 		}
@@ -242,7 +241,7 @@ func (s *Shard) rawSetNativeWithSize(ctx context.Context, key string, value any,
 
 // rawSetPacked stores a packed byte-encoded value for the given ValueType.
 // Must be called under the write lock.
-func (s *Shard) rawSetPacked(ctx context.Context, key string, vt ValueType, buf []byte, expiration int64) error {
+func (s *Shard) rawSetPacked(scope commonobs.OperationScope, key string, vt ValueType, buf []byte, expiration int64) error {
 	if s.maxBytes > 0 {
 		newSize := estimateBytesSize(key, buf)
 		oldSize := s.keySize(key)
@@ -250,9 +249,9 @@ func (s *Shard) rawSetPacked(ctx context.Context, key string, vt ValueType, buf 
 		if delta > 0 && s.usedBytes+delta > s.maxBytes {
 			switch s.evictionPolicy {
 			case EvictionLRU:
-				s.evictLRU(ctx, delta)
+				s.evictLRU(scope, delta)
 			case EvictionNone:
-				logger.Warn(ctx).Str("key", key).Int64("usedBytes", s.usedBytes).Int64("maxBytes", s.maxBytes).Msg("write rejected, out of memory")
+				logOutOfMemory(scope, key, s.usedBytes)
 				return ErrOutOfMemory
 			}
 		}
@@ -472,7 +471,7 @@ func (s *Shard) setNativeInternal(key string, value any, vt ValueType, byteSize 
 
 // evictLRU evicts the entry with the oldest LastAccessNs (sampled from the
 // tail of the LRU list) until delta bytes can be accommodated.
-func (s *Shard) evictLRU(ctx context.Context, delta int64) {
+func (s *Shard) evictLRU(scope commonobs.OperationScope, delta int64) {
 	for s.maxBytes > 0 && s.usedBytes+delta > s.maxBytes {
 		if s.lruTail.IsNil() {
 			break
@@ -490,10 +489,10 @@ func (s *Shard) evictLRU(ctx context.Context, delta int64) {
 		}
 		evictKey, ok := s.keysBySlot[victim]
 		if !ok {
-			logger.Warn(ctx).Msg("evictLRU: keysBySlot has no entry for victim; bailing")
+			cacheLog(scope, apiobs.TelemetryLogLevelWarn, "evictLRU: keysBySlot has no entry for victim; bailing", "", "", s.usedBytes)
 			break
 		}
-		logger.Debug(ctx).Str("key", evictKey).Msg("lru eviction")
+		cacheLog(scope, apiobs.TelemetryLogLevelDebug, "lru eviction", "key", evictKey, s.usedBytes)
 		s.delete(evictKey)
 	}
 }

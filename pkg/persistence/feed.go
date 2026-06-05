@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"gocache/commons/logger"
 	apipersistence "gocache/api/persistence"
+	"gocache/commons/logger"
 )
 
 // Group-commit triggers for the per-sink flush loop. Defaults match the
@@ -221,8 +221,8 @@ func (c *Coordinator) AllocateAndEmit(op, key string, args [][]byte) apipersiste
 }
 
 // HasSinks reports whether any sink is currently registered with this
-// coordinator. The check is an atomic load of an int32 sink-count, which
-// is the same shape as the existing evaluator.hasAnySink fast-path gate.
+// coordinator. The check is an atomic load of an int32 sink-count, matching the
+// remaining narrow producer-side guards that skip optional fanout work.
 //
 // Callers in the cache write path use HasSinks as the first check before
 // allocating LSN / building Mutation structs / pushing to channels. When

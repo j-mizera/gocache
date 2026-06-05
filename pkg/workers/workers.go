@@ -2,22 +2,26 @@ package workers
 
 import (
 	"context"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gocache/api/command"
-	"gocache/api/events"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
-	"gocache/commons/logger"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache"
 	pkgcommand "gocache/pkg/command"
 	"gocache/pkg/engine"
-	serverOps "gocache/pkg/operations"
-	"gocache/pkg/pipeline"
 )
 
 const defaultInterval = 5 * time.Minute
+
+const workerOperationIdentityBase apiobs.InternalOperationIdentity = 1 << 58
+
+var workerOperationSequence atomic.Uint64
 
 type Worker interface {
 	// Start begins the worker's ticker loop. parentCtx is the scheduler/server
@@ -36,67 +40,99 @@ type baseWorker struct {
 	stopOnce       sync.Once
 	wg             sync.WaitGroup
 	intervalChan   chan time.Duration
-	tracker        *serverOps.Tracker
-	emitter        events.Emitter
-	opHookExecutor pipeline.OpHookExecutor
+	operationScope *commonobs.SlotOperationTrackerManager
 }
 
-// SetTracker sets the operation tracker.
-func (w *baseWorker) SetTracker(t *serverOps.Tracker) { w.tracker = t }
-
-// SetEmitter sets the event emitter.
-func (w *baseWorker) SetEmitter(e events.Emitter) { w.emitter = e }
-
-// SetOpHookExecutor sets the operation hook executor.
-func (w *baseWorker) SetOpHookExecutor(e pipeline.OpHookExecutor) { w.opHookExecutor = e }
-
-// startOp creates an operation if tracker is set, runs start hooks, emits start
-// event. Returns (op, ctx) where ctx is derived from parentCtx and carries op
-// for log correlation downstream.
-func (w *baseWorker) startOp(parentCtx context.Context, opType ops.Type) (*ops.Operation, context.Context) {
-	if w.tracker == nil {
-		return nil, parentCtx
-	}
-	op := w.tracker.Start(opType, "")
-	op.Enrich(command.TriggerKey, "scheduled")
-	opCtx := ops.WithContext(parentCtx, op)
-	if w.opHookExecutor != nil && w.opHookExecutor.HasAny() {
-		w.opHookExecutor.RunStartHooks(opCtx, op)
-	}
-	if w.emitter != nil {
-		w.emitter.Emit(events.NewOperationStarted(op.ID, string(op.Type), "", op.ContextSnapshot(false)))
-	}
-	return op, opCtx
+// SetOperationTrackerManager sets the sidecar tracker used for worker telemetry.
+func (w *baseWorker) SetOperationTrackerManager(manager *commonobs.SlotOperationTrackerManager) {
+	w.operationScope = manager
 }
 
-// completeOp marks an operation as completed, runs complete hooks, emits events.
-func (w *baseWorker) completeOp(op *ops.Operation) {
-	if op == nil {
+type workerOperation struct {
+	scope  commonobs.OperationScope
+	ctx    context.Context
+	opType string
+	start  time.Time
+}
+
+// startOp creates a sidecar operation. The returned context is the parent
+// lifecycle context only; telemetry correlation is explicit through scope.
+func (w *baseWorker) startOp(parentCtx context.Context, opType ops.Type) workerOperation {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	started := time.Now()
+	manager := w.operationScope
+	if manager == nil {
+		return workerOperation{ctx: parentCtx, opType: string(opType), start: started}
+	}
+	sequence := workerOperationSequence.Add(1)
+	if sequence == 0 {
+		sequence = workerOperationSequence.Add(1)
+	}
+	operation := workerOperationIdentityBase + apiobs.InternalOperationIdentity(sequence)
+	opTypeString := string(opType)
+	operationID := opTypeString + ":" + strconv.FormatUint(sequence, 10)
+	ref := apiobs.NewOperationRef(operationID, "")
+	handle, ok := manager.StartOperationWithMetadata(operation, apiobs.ParentRef{}, 0, commonobs.OperationSnapshotMetadata{
+		Type:          opTypeString,
+		Ref:           ref,
+		StartUnixNano: started.UnixNano(),
+	})
+	if !ok {
+		return workerOperation{ctx: parentCtx, opType: opTypeString, start: started}
+	}
+	scope := commonobs.NewOperationScope(manager, handle, operation, ref)
+	scope.ContextUpdateStrings(command.OperationID, operationID, command.TriggerKey, "scheduled")
+	scope.OperationStartString(opTypeString,
+		command.OperationID, operationID,
+		command.TriggerKey, "scheduled",
+		"_operation_type", opTypeString,
+	)
+	return workerOperation{scope: scope, ctx: parentCtx, opType: opTypeString, start: started}
+}
+
+// completeOp marks a sidecar operation as completed.
+func (w *baseWorker) completeOp(op workerOperation) {
+	if op.scope.IsZero() {
 		return
 	}
-	op.Complete()
-	if w.opHookExecutor != nil {
-		w.opHookExecutor.RunCompleteHooks(op)
-	}
-	if w.emitter != nil {
-		w.emitter.Emit(events.NewOperationCompleted(op.ID, string(op.Type), uint64(op.Duration().Nanoseconds()), "completed", "", op.ContextSnapshot(false)))
-	}
-	w.tracker.Complete(op.ID)
+	elapsedNs := uint64(time.Since(op.start).Nanoseconds())
+	op.scope.OperationFinishString(op.opType, elapsedNs,
+		command.OperationID, op.scope.Ref().ID.String(),
+		"_operation_type", op.opType,
+		"_status", "completed",
+		command.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+	)
+	op.scope.Finish(commonobs.SlotTerminalFinished)
 }
 
-// failOp marks an operation as failed.
-func (w *baseWorker) failOp(op *ops.Operation, reason string) {
-	if op == nil {
+// failOp marks a sidecar operation as failed.
+func (w *baseWorker) failOp(op workerOperation, reason string) {
+	if op.scope.IsZero() {
 		return
 	}
-	op.Fail(reason)
-	if w.opHookExecutor != nil {
-		w.opHookExecutor.RunCompleteHooks(op)
+	elapsedNs := uint64(time.Since(op.start).Nanoseconds())
+	op.scope.OperationFinishString(op.opType, elapsedNs,
+		command.OperationID, op.scope.Ref().ID.String(),
+		"_operation_type", op.opType,
+		"_status", "failed",
+		command.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+		command.ErrorKey, reason,
+	)
+	op.scope.Finish(commonobs.SlotTerminalFailed)
+}
+
+func (w *baseWorker) logOp(op workerOperation, level apiobs.TelemetryLogLevel, message string, err error) {
+	if op.scope.IsZero() {
+		return
 	}
-	if w.emitter != nil {
-		w.emitter.Emit(events.NewOperationCompleted(op.ID, string(op.Type), uint64(op.Duration().Nanoseconds()), "failed", reason, op.ContextSnapshot(false)))
+	record := apiobs.NewLogRecordString(op.scope.Operation(), level, message)
+	record.TimestampUnixNano = time.Now().UnixNano()
+	if err != nil {
+		record.AddFieldString("error", err.Error())
 	}
-	w.tracker.Fail(op.ID, reason)
+	op.scope.Record(record)
 }
 
 // Stop signals the worker to stop and waits for its goroutine to exit.
@@ -156,22 +192,22 @@ func (w *SnapshotWorker) Start(parentCtx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				op, opCtx := w.startOp(parentCtx, ops.TypeSnapshot)
+				op := w.startOp(parentCtx, ops.TypeSnapshot)
 				if w.snapshotter == nil {
-					logger.Warn(opCtx).Msg("snapshot scheduled but no snapshotter registered")
+					w.logOp(op, apiobs.TelemetryLogLevelWarn, "snapshot scheduled but no snapshotter registered", nil)
 					w.failOp(op, "no snapshotter registered")
 					continue
 				}
-				if err := w.engine.Dispatch(opCtx, func() {
-					if err := w.snapshotter.Snapshot(opCtx); err != nil {
-						logger.Warn(opCtx).Err(err).Msg("snapshot save failed")
+				if err := w.engine.Dispatch(op.ctx, func() {
+					if err := w.snapshotter.Snapshot(op.ctx); err != nil {
+						w.logOp(op, apiobs.TelemetryLogLevelWarn, "snapshot save failed", err)
 						w.failOp(op, err.Error())
 					} else {
-						logger.Debug(opCtx).Msg("snapshot saved")
+						w.logOp(op, apiobs.TelemetryLogLevelDebug, "snapshot saved", nil)
 						w.completeOp(op)
 					}
 				}); err != nil {
-					logger.Warn(opCtx).Err(err).Msg("snapshot dispatch failed")
+					w.logOp(op, apiobs.TelemetryLogLevelWarn, "snapshot dispatch failed", err)
 					w.failOp(op, err.Error())
 				}
 			case d := <-w.intervalChan:
@@ -220,8 +256,8 @@ func (w *CleanupWorker) Start(parentCtx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				op, opCtx := w.startOp(parentCtx, ops.TypeCleanup)
-				if err := w.engine.Dispatch(opCtx, func() {
+				op := w.startOp(parentCtx, ops.TypeCleanup)
+				if err := w.engine.Dispatch(op.ctx, func() {
 					now := time.Now().UnixNano()
 					emit := w.feed != nil && w.feed.HasSinks()
 					w.cache.Range(func(key string, _ cache.Entry, expiration int64) bool {
@@ -235,10 +271,10 @@ func (w *CleanupWorker) Start(parentCtx context.Context) {
 						}
 						return true
 					})
-					logger.Debug(opCtx).Msg("cleanup sweep completed")
+					w.logOp(op, apiobs.TelemetryLogLevelDebug, "cleanup sweep completed", nil)
 					w.completeOp(op)
 				}); err != nil {
-					logger.Warn(opCtx).Err(err).Msg("cleanup dispatch failed")
+					w.logOp(op, apiobs.TelemetryLogLevelWarn, "cleanup dispatch failed", err)
 					w.failOp(op, err.Error())
 				}
 			case d := <-w.intervalChan:

@@ -2,6 +2,10 @@ package workers
 
 import (
 	"context"
+
+	apiobs "gocache/api/observability"
+	ops "gocache/api/operations"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/cache"
 	"gocache/pkg/engine"
 	"gocache/pkg/persistence"
@@ -24,7 +28,7 @@ func TestSnapshotWorker_CreatesFile(t *testing.T) {
 
 	// Add some data.
 	e.Dispatch(context.Background(), func() {
-		_ = c.RawSet(context.Background(), "key", "val", 0)
+		_ = c.RawSet(commonobs.OperationScope{}, "key", "val", 0)
 	})
 
 	dir := t.TempDir()
@@ -53,8 +57,8 @@ func TestCleanupWorker_RemovesExpired(t *testing.T) {
 
 	// Add an already-expired key.
 	e.Dispatch(context.Background(), func() {
-		_ = c.RawSet(context.Background(), "expired", "val", time.Now().Add(-time.Hour).UnixNano())
-		_ = c.RawSet(context.Background(), "alive", "val", 0)
+		_ = c.RawSet(commonobs.OperationScope{}, "expired", "val", time.Now().Add(-time.Hour).UnixNano())
+		_ = c.RawSet(commonobs.OperationScope{}, "alive", "val", 0)
 	})
 
 	w := NewCleanupWorker(c, e, 50*time.Millisecond)
@@ -83,6 +87,52 @@ func TestCleanupWorker_RemovesExpired(t *testing.T) {
 	}
 	if !res.(bool) {
 		t.Error("expected alive key to remain")
+	}
+}
+
+func TestWorker_UsesSidecarOperationRecords(t *testing.T) {
+	_, e := setup(t)
+	manager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   4,
+		CompletedRingPerShard: 1,
+	})
+	w := NewCleanupWorker(cache.New(), e, time.Hour)
+	w.SetOperationTrackerManager(manager)
+
+	op := w.startOp(context.Background(), ops.TypeCleanup)
+	w.logOp(op, apiobs.TelemetryLogLevelDebug, "cleanup sweep completed", nil)
+	w.completeOp(op)
+
+	drained := 0
+	manager.DrainCompletedShard(0, func(completed commonobs.CompletedOperation) {
+		drained++
+		if completed.Status != commonobs.SlotTerminalFinished {
+			t.Fatalf("status = %v, want finished", completed.Status)
+		}
+		if len(completed.Records) != 4 {
+			t.Fatalf("records = %d, want context update, operation start, log, operation finish", len(completed.Records))
+		}
+		wantKinds := []apiobs.TelemetryRecordKind{
+			apiobs.TelemetryRecordContextUpdate,
+			apiobs.TelemetryRecordOperationStart,
+			apiobs.TelemetryRecordLog,
+			apiobs.TelemetryRecordOperationFinish,
+		}
+		for i, want := range wantKinds {
+			if completed.Records[i].Kind != want {
+				t.Fatalf("record[%d] kind = %v, want %v", i, completed.Records[i].Kind, want)
+			}
+		}
+		if string(completed.Records[2].NameBytes()) != "cleanup sweep completed" {
+			t.Fatalf("log message = %q, want cleanup sweep completed", completed.Records[2].NameBytes())
+		}
+	})
+	if drained != 1 {
+		t.Fatalf("drained operations = %d, want 1", drained)
 	}
 }
 
