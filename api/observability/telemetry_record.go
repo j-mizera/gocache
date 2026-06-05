@@ -112,6 +112,20 @@ func (k TelemetryRecordKind) String() string {
 	}
 }
 
+// TelemetryRecordFlags are pointer-free materialization hints carried with a
+// compact telemetry request. Flags describe worker-side behavior; they must not
+// be used to bypass OperationTracker submission.
+type TelemetryRecordFlags uint16
+
+const (
+	// TelemetryRecordFlagLocalLogMaterialized marks a log request whose local
+	// zerolog output was already produced by an allowed materializer path, such as
+	// pre-ready startup immediate output. Background processing must still export
+	// the record to non-local telemetry sinks, but must not write the same local
+	// zerolog line again.
+	TelemetryRecordFlagLocalLogMaterialized TelemetryRecordFlags = 1 << iota
+)
+
 // TelemetryRecord is a pointer-free, fixed-size outbox request submitted into
 // common sidecar primitives. It records telemetry intent/state in memory for
 // later processing; it is not itself the final log/event/GCPC payload and does
@@ -122,8 +136,11 @@ func (k TelemetryRecordKind) String() string {
 type TelemetryRecord struct {
 	Kind              TelemetryRecordKind
 	Level             TelemetryLogLevel
+	Flags             TelemetryRecordFlags
 	NameLen           uint16
 	PayloadLen        uint16
+	FieldCount        uint8
+	DroppedFields     uint8
 	Operation         InternalOperationIdentity
 	TimestampUnixNano int64
 	Number            int64
@@ -138,9 +155,37 @@ func NewTelemetryRecord(kind TelemetryRecordKind, operation InternalOperationIde
 	return TelemetryRecord{Kind: kind, Operation: operation}
 }
 
+// NewLogRecordBytes creates a compact log-request telemetry record. Message is
+// copied into fixed inline storage and is not retained.
+func NewLogRecordBytes(operation InternalOperationIdentity, level TelemetryLogLevel, message []byte) TelemetryRecord {
+	record := NewTelemetryRecord(TelemetryRecordLog, operation)
+	record.Level = level
+	record.SetName(message)
+	return record
+}
+
+// NewLogRecordString creates a compact log-request telemetry record from a
+// string without converting it to []byte first. Prefer NewLogRecordBytes on hot
+// paths that already have byte-backed command/log material.
+func NewLogRecordString(operation InternalOperationIdentity, level TelemetryLogLevel, message string) TelemetryRecord {
+	record := NewTelemetryRecord(TelemetryRecordLog, operation)
+	record.Level = level
+	record.SetNameString(message)
+	return record
+}
+
 // SetName copies data into the fixed inline name buffer and returns the number
 // of bytes retained. Data longer than TelemetryNameBytes is truncated.
 func (r *TelemetryRecord) SetName(data []byte) int {
+	n := copy(r.Name[:], data)
+	r.NameLen = uint16(n)
+	return n
+}
+
+// SetNameString copies data into the fixed inline name buffer and returns the
+// number of bytes retained. It does not retain the input string or allocate a
+// temporary []byte.
+func (r *TelemetryRecord) SetNameString(data string) int {
 	n := copy(r.Name[:], data)
 	r.NameLen = uint16(n)
 	return n
@@ -162,4 +207,85 @@ func (r *TelemetryRecord) SetPayload(data []byte) int {
 // PayloadBytes returns the retained inline payload bytes.
 func (r *TelemetryRecord) PayloadBytes() []byte {
 	return r.Payload[:r.PayloadLen]
+}
+
+// AddFieldBytes appends a bounded key/value field to the record payload. The
+// payload encoding is repeated keyLen, valueLen, key bytes, value bytes. It is
+// intended for compact log fields and does not retain caller-owned buffers. When
+// the fixed payload is full, DroppedFields is incremented and false is returned.
+func (r *TelemetryRecord) AddFieldBytes(key, value []byte) bool {
+	if len(key) > 255 || len(value) > 255 {
+		r.dropField()
+		return false
+	}
+	pos := int(r.PayloadLen)
+	need := 2 + len(key) + len(value)
+	if need > len(r.Payload)-pos {
+		r.dropField()
+		return false
+	}
+	r.Payload[pos] = byte(len(key))
+	r.Payload[pos+1] = byte(len(value))
+	copy(r.Payload[pos+2:], key)
+	copy(r.Payload[pos+2+len(key):], value)
+	r.PayloadLen += uint16(need)
+	r.FieldCount++
+	return true
+}
+
+// AddFieldString appends a bounded key/value field without converting strings
+// to temporary []byte values. Prefer AddFieldBytes on hot paths that already
+// have byte-backed values.
+func (r *TelemetryRecord) AddFieldString(key, value string) bool {
+	if len(key) > 255 || len(value) > 255 {
+		r.dropField()
+		return false
+	}
+	pos := int(r.PayloadLen)
+	need := 2 + len(key) + len(value)
+	if need > len(r.Payload)-pos {
+		r.dropField()
+		return false
+	}
+	r.Payload[pos] = byte(len(key))
+	r.Payload[pos+1] = byte(len(value))
+	copy(r.Payload[pos+2:], key)
+	copy(r.Payload[pos+2+len(key):], value)
+	r.PayloadLen += uint16(need)
+	r.FieldCount++
+	return true
+}
+
+func (r *TelemetryRecord) dropField() {
+	if r.DroppedFields < 255 {
+		r.DroppedFields++
+	}
+}
+
+// FieldBytes returns the key/value bytes for an encoded field. The returned
+// slices alias the record payload and are intended for worker-side
+// materialization/tests.
+func (r *TelemetryRecord) FieldBytes(index int) (key, value []byte, ok bool) {
+	if index < 0 || index >= int(r.FieldCount) {
+		return nil, nil, false
+	}
+	pos := 0
+	for field := 0; field < int(r.FieldCount); field++ {
+		if pos+2 > int(r.PayloadLen) {
+			return nil, nil, false
+		}
+		keyLen := int(r.Payload[pos])
+		valueLen := int(r.Payload[pos+1])
+		start := pos + 2
+		endKey := start + keyLen
+		endValue := endKey + valueLen
+		if endValue > int(r.PayloadLen) {
+			return nil, nil, false
+		}
+		if field == index {
+			return r.Payload[start:endKey], r.Payload[endKey:endValue], true
+		}
+		pos = endValue
+	}
+	return nil, nil, false
 }

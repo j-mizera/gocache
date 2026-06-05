@@ -1914,6 +1914,11 @@ type EventV1 struct {
 	//	*EventV1_OperationComplete
 	//	*EventV1_ReplayGap
 	//	*EventV1_RuntimeLogBatch
+	//	*EventV1_PluginStarted
+	//	*EventV1_PluginStopped
+	//	*EventV1_PluginRegistrationFailed
+	//	*EventV1_PluginCommandRegistered
+	//	*EventV1_PluginCommandRegistrationFailed
 	Data          isEventV1_Data `protobuf_oneof:"data"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2121,6 +2126,51 @@ func (x *EventV1) GetRuntimeLogBatch() *RuntimeLogBatchEventV1 {
 	return nil
 }
 
+func (x *EventV1) GetPluginStarted() *PluginStartedEventV1 {
+	if x != nil {
+		if x, ok := x.Data.(*EventV1_PluginStarted); ok {
+			return x.PluginStarted
+		}
+	}
+	return nil
+}
+
+func (x *EventV1) GetPluginStopped() *PluginStoppedEventV1 {
+	if x != nil {
+		if x, ok := x.Data.(*EventV1_PluginStopped); ok {
+			return x.PluginStopped
+		}
+	}
+	return nil
+}
+
+func (x *EventV1) GetPluginRegistrationFailed() *PluginRegistrationFailedEventV1 {
+	if x != nil {
+		if x, ok := x.Data.(*EventV1_PluginRegistrationFailed); ok {
+			return x.PluginRegistrationFailed
+		}
+	}
+	return nil
+}
+
+func (x *EventV1) GetPluginCommandRegistered() *PluginCommandRegisteredEventV1 {
+	if x != nil {
+		if x, ok := x.Data.(*EventV1_PluginCommandRegistered); ok {
+			return x.PluginCommandRegistered
+		}
+	}
+	return nil
+}
+
+func (x *EventV1) GetPluginCommandRegistrationFailed() *PluginCommandRegistrationFailedEventV1 {
+	if x != nil {
+		if x, ok := x.Data.(*EventV1_PluginCommandRegistrationFailed); ok {
+			return x.PluginCommandRegistrationFailed
+		}
+	}
+	return nil
+}
+
 type isEventV1_Data interface {
 	isEventV1_Data()
 }
@@ -2189,6 +2239,26 @@ type EventV1_RuntimeLogBatch struct {
 	RuntimeLogBatch *RuntimeLogBatchEventV1 `protobuf:"bytes,26,opt,name=runtime_log_batch,json=runtimeLogBatch,proto3,oneof"`
 }
 
+type EventV1_PluginStarted struct {
+	PluginStarted *PluginStartedEventV1 `protobuf:"bytes,27,opt,name=plugin_started,json=pluginStarted,proto3,oneof"`
+}
+
+type EventV1_PluginStopped struct {
+	PluginStopped *PluginStoppedEventV1 `protobuf:"bytes,28,opt,name=plugin_stopped,json=pluginStopped,proto3,oneof"`
+}
+
+type EventV1_PluginRegistrationFailed struct {
+	PluginRegistrationFailed *PluginRegistrationFailedEventV1 `protobuf:"bytes,29,opt,name=plugin_registration_failed,json=pluginRegistrationFailed,proto3,oneof"`
+}
+
+type EventV1_PluginCommandRegistered struct {
+	PluginCommandRegistered *PluginCommandRegisteredEventV1 `protobuf:"bytes,30,opt,name=plugin_command_registered,json=pluginCommandRegistered,proto3,oneof"`
+}
+
+type EventV1_PluginCommandRegistrationFailed struct {
+	PluginCommandRegistrationFailed *PluginCommandRegistrationFailedEventV1 `protobuf:"bytes,31,opt,name=plugin_command_registration_failed,json=pluginCommandRegistrationFailed,proto3,oneof"`
+}
+
 func (*EventV1_CommandPre) isEventV1_Data() {}
 
 func (*EventV1_CommandPost) isEventV1_Data() {}
@@ -2220,6 +2290,16 @@ func (*EventV1_OperationComplete) isEventV1_Data() {}
 func (*EventV1_ReplayGap) isEventV1_Data() {}
 
 func (*EventV1_RuntimeLogBatch) isEventV1_Data() {}
+
+func (*EventV1_PluginStarted) isEventV1_Data() {}
+
+func (*EventV1_PluginStopped) isEventV1_Data() {}
+
+func (*EventV1_PluginRegistrationFailed) isEventV1_Data() {}
+
+func (*EventV1_PluginCommandRegistered) isEventV1_Data() {}
+
+func (*EventV1_PluginCommandRegistrationFailed) isEventV1_Data() {}
 
 type CommandPreEventV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2753,6 +2833,322 @@ func (x *PluginRestartedEventV1) GetRestartCount() int32 {
 	return 0
 }
 
+type PluginStartedEventV1 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Critical      bool                   `protobuf:"varint,2,opt,name=critical,proto3" json:"critical,omitempty"`
+	Pid           int32                  `protobuf:"varint,3,opt,name=pid,proto3" json:"pid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginStartedEventV1) Reset() {
+	*x = PluginStartedEventV1{}
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginStartedEventV1) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginStartedEventV1) ProtoMessage() {}
+
+func (x *PluginStartedEventV1) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginStartedEventV1.ProtoReflect.Descriptor instead.
+func (*PluginStartedEventV1) Descriptor() ([]byte, []int) {
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *PluginStartedEventV1) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PluginStartedEventV1) GetCritical() bool {
+	if x != nil {
+		return x.Critical
+	}
+	return false
+}
+
+func (x *PluginStartedEventV1) GetPid() int32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+type PluginStoppedEventV1 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Critical      bool                   `protobuf:"varint,2,opt,name=critical,proto3" json:"critical,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginStoppedEventV1) Reset() {
+	*x = PluginStoppedEventV1{}
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginStoppedEventV1) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginStoppedEventV1) ProtoMessage() {}
+
+func (x *PluginStoppedEventV1) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginStoppedEventV1.ProtoReflect.Descriptor instead.
+func (*PluginStoppedEventV1) Descriptor() ([]byte, []int) {
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *PluginStoppedEventV1) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PluginStoppedEventV1) GetCritical() bool {
+	if x != nil {
+		return x.Critical
+	}
+	return false
+}
+
+func (x *PluginStoppedEventV1) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type PluginRegistrationFailedEventV1 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Critical      bool                   `protobuf:"varint,3,opt,name=critical,proto3" json:"critical,omitempty"`
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginRegistrationFailedEventV1) Reset() {
+	*x = PluginRegistrationFailedEventV1{}
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginRegistrationFailedEventV1) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginRegistrationFailedEventV1) ProtoMessage() {}
+
+func (x *PluginRegistrationFailedEventV1) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginRegistrationFailedEventV1.ProtoReflect.Descriptor instead.
+func (*PluginRegistrationFailedEventV1) Descriptor() ([]byte, []int) {
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *PluginRegistrationFailedEventV1) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PluginRegistrationFailedEventV1) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *PluginRegistrationFailedEventV1) GetCritical() bool {
+	if x != nil {
+		return x.Critical
+	}
+	return false
+}
+
+func (x *PluginRegistrationFailedEventV1) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type PluginCommandRegisteredEventV1 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	Namespaced    bool                   `protobuf:"varint,3,opt,name=namespaced,proto3" json:"namespaced,omitempty"`
+	Readonly      bool                   `protobuf:"varint,4,opt,name=readonly,proto3" json:"readonly,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginCommandRegisteredEventV1) Reset() {
+	*x = PluginCommandRegisteredEventV1{}
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginCommandRegisteredEventV1) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginCommandRegisteredEventV1) ProtoMessage() {}
+
+func (x *PluginCommandRegisteredEventV1) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginCommandRegisteredEventV1.ProtoReflect.Descriptor instead.
+func (*PluginCommandRegisteredEventV1) Descriptor() ([]byte, []int) {
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *PluginCommandRegisteredEventV1) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PluginCommandRegisteredEventV1) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *PluginCommandRegisteredEventV1) GetNamespaced() bool {
+	if x != nil {
+		return x.Namespaced
+	}
+	return false
+}
+
+func (x *PluginCommandRegisteredEventV1) GetReadonly() bool {
+	if x != nil {
+		return x.Readonly
+	}
+	return false
+}
+
+type PluginCommandRegistrationFailedEventV1 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginCommandRegistrationFailedEventV1) Reset() {
+	*x = PluginCommandRegistrationFailedEventV1{}
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginCommandRegistrationFailedEventV1) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginCommandRegistrationFailedEventV1) ProtoMessage() {}
+
+func (x *PluginCommandRegistrationFailedEventV1) ProtoReflect() protoreflect.Message {
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginCommandRegistrationFailedEventV1.ProtoReflect.Descriptor instead.
+func (*PluginCommandRegistrationFailedEventV1) Descriptor() ([]byte, []int) {
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *PluginCommandRegistrationFailedEventV1) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PluginCommandRegistrationFailedEventV1) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *PluginCommandRegistrationFailedEventV1) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type ConfigReloadedEventV1 struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	File          string                 `protobuf:"bytes,1,opt,name=file,proto3" json:"file,omitempty"`
@@ -2762,7 +3158,7 @@ type ConfigReloadedEventV1 struct {
 
 func (x *ConfigReloadedEventV1) Reset() {
 	*x = ConfigReloadedEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2774,7 +3170,7 @@ func (x *ConfigReloadedEventV1) String() string {
 func (*ConfigReloadedEventV1) ProtoMessage() {}
 
 func (x *ConfigReloadedEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[33]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2787,7 +3183,7 @@ func (x *ConfigReloadedEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigReloadedEventV1.ProtoReflect.Descriptor instead.
 func (*ConfigReloadedEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{33}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ConfigReloadedEventV1) GetFile() string {
@@ -2807,7 +3203,7 @@ type AuthFailedEventV1 struct {
 
 func (x *AuthFailedEventV1) Reset() {
 	*x = AuthFailedEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2819,7 +3215,7 @@ func (x *AuthFailedEventV1) String() string {
 func (*AuthFailedEventV1) ProtoMessage() {}
 
 func (x *AuthFailedEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[34]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2832,7 +3228,7 @@ func (x *AuthFailedEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthFailedEventV1.ProtoReflect.Descriptor instead.
 func (*AuthFailedEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{34}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *AuthFailedEventV1) GetRemoteAddr() string {
@@ -2859,7 +3255,7 @@ type CacheEvictionEventV1 struct {
 
 func (x *CacheEvictionEventV1) Reset() {
 	*x = CacheEvictionEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2871,7 +3267,7 @@ func (x *CacheEvictionEventV1) String() string {
 func (*CacheEvictionEventV1) ProtoMessage() {}
 
 func (x *CacheEvictionEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[35]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2884,7 +3280,7 @@ func (x *CacheEvictionEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheEvictionEventV1.ProtoReflect.Descriptor instead.
 func (*CacheEvictionEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{35}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *CacheEvictionEventV1) GetKey() string {
@@ -2911,7 +3307,7 @@ type ReplayGapEventV1 struct {
 
 func (x *ReplayGapEventV1) Reset() {
 	*x = ReplayGapEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2923,7 +3319,7 @@ func (x *ReplayGapEventV1) String() string {
 func (*ReplayGapEventV1) ProtoMessage() {}
 
 func (x *ReplayGapEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[36]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2936,7 +3332,7 @@ func (x *ReplayGapEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayGapEventV1.ProtoReflect.Descriptor instead.
 func (*ReplayGapEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{36}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ReplayGapEventV1) GetSubscriber() string {
@@ -2965,7 +3361,7 @@ type RuntimeLogBatchEventV1 struct {
 
 func (x *RuntimeLogBatchEventV1) Reset() {
 	*x = RuntimeLogBatchEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2977,7 +3373,7 @@ func (x *RuntimeLogBatchEventV1) String() string {
 func (*RuntimeLogBatchEventV1) ProtoMessage() {}
 
 func (x *RuntimeLogBatchEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[37]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2990,7 +3386,7 @@ func (x *RuntimeLogBatchEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeLogBatchEventV1.ProtoReflect.Descriptor instead.
 func (*RuntimeLogBatchEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{37}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *RuntimeLogBatchEventV1) GetRecords() []*RuntimeLogRecordV1 {
@@ -3015,7 +3411,7 @@ type RuntimeLogRecordV1 struct {
 
 func (x *RuntimeLogRecordV1) Reset() {
 	*x = RuntimeLogRecordV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3027,7 +3423,7 @@ func (x *RuntimeLogRecordV1) String() string {
 func (*RuntimeLogRecordV1) ProtoMessage() {}
 
 func (x *RuntimeLogRecordV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[38]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3040,7 +3436,7 @@ func (x *RuntimeLogRecordV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeLogRecordV1.ProtoReflect.Descriptor instead.
 func (*RuntimeLogRecordV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{38}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *RuntimeLogRecordV1) GetTimestamp() uint64 {
@@ -3105,7 +3501,7 @@ type ClientPushV1 struct {
 
 func (x *ClientPushV1) Reset() {
 	*x = ClientPushV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[39]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3117,7 +3513,7 @@ func (x *ClientPushV1) String() string {
 func (*ClientPushV1) ProtoMessage() {}
 
 func (x *ClientPushV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[39]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3130,7 +3526,7 @@ func (x *ClientPushV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientPushV1.ProtoReflect.Descriptor instead.
 func (*ClientPushV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{39}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ClientPushV1) GetConnectionId() string {
@@ -3159,7 +3555,7 @@ type OperationStartEventV1 struct {
 
 func (x *OperationStartEventV1) Reset() {
 	*x = OperationStartEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[40]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3171,7 +3567,7 @@ func (x *OperationStartEventV1) String() string {
 func (*OperationStartEventV1) ProtoMessage() {}
 
 func (x *OperationStartEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[40]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3184,7 +3580,7 @@ func (x *OperationStartEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationStartEventV1.ProtoReflect.Descriptor instead.
 func (*OperationStartEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{40}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *OperationStartEventV1) GetId() string {
@@ -3229,7 +3625,7 @@ type OperationCompleteEventV1 struct {
 
 func (x *OperationCompleteEventV1) Reset() {
 	*x = OperationCompleteEventV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[41]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3241,7 +3637,7 @@ func (x *OperationCompleteEventV1) String() string {
 func (*OperationCompleteEventV1) ProtoMessage() {}
 
 func (x *OperationCompleteEventV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[41]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3254,7 +3650,7 @@ func (x *OperationCompleteEventV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationCompleteEventV1.ProtoReflect.Descriptor instead.
 func (*OperationCompleteEventV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{41}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *OperationCompleteEventV1) GetId() string {
@@ -3310,7 +3706,7 @@ type OperationHookDeclV1 struct {
 
 func (x *OperationHookDeclV1) Reset() {
 	*x = OperationHookDeclV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[42]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3322,7 +3718,7 @@ func (x *OperationHookDeclV1) String() string {
 func (*OperationHookDeclV1) ProtoMessage() {}
 
 func (x *OperationHookDeclV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[42]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3335,7 +3731,7 @@ func (x *OperationHookDeclV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationHookDeclV1.ProtoReflect.Descriptor instead.
 func (*OperationHookDeclV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{42}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *OperationHookDeclV1) GetType() string {
@@ -3377,7 +3773,7 @@ type OperationHookRequestV1 struct {
 
 func (x *OperationHookRequestV1) Reset() {
 	*x = OperationHookRequestV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[43]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3389,7 +3785,7 @@ func (x *OperationHookRequestV1) String() string {
 func (*OperationHookRequestV1) ProtoMessage() {}
 
 func (x *OperationHookRequestV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[43]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3402,7 +3798,7 @@ func (x *OperationHookRequestV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationHookRequestV1.ProtoReflect.Descriptor instead.
 func (*OperationHookRequestV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{43}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *OperationHookRequestV1) GetRequestId() string {
@@ -3472,7 +3868,7 @@ type OperationHookResponseV1 struct {
 
 func (x *OperationHookResponseV1) Reset() {
 	*x = OperationHookResponseV1{}
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[44]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3484,7 +3880,7 @@ func (x *OperationHookResponseV1) String() string {
 func (*OperationHookResponseV1) ProtoMessage() {}
 
 func (x *OperationHookResponseV1) ProtoReflect() protoreflect.Message {
-	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[44]
+	mi := &file_api_gcpc_v1_gcpc_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3497,7 +3893,7 @@ func (x *OperationHookResponseV1) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OperationHookResponseV1.ProtoReflect.Descriptor instead.
 func (*OperationHookResponseV1) Descriptor() ([]byte, []int) {
-	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{44}
+	return file_api_gcpc_v1_gcpc_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *OperationHookResponseV1) GetRequestId() string {
@@ -3685,7 +4081,7 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"(\n" +
 	"\x10EventSubscribeV1\x12\x14\n" +
-	"\x05types\x18\x01 \x03(\tR\x05types\"\xf0\t\n" +
+	"\x05types\x18\x01 \x03(\tR\x05types\"\xd1\r\n" +
 	"\aEventV1\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\x12!\n" +
@@ -3709,7 +4105,12 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\x12operation_complete\x18\x18 \x01(\v2!.gcpc.v1.OperationCompleteEventV1H\x00R\x11operationComplete\x12:\n" +
 	"\n" +
 	"replay_gap\x18\x19 \x01(\v2\x19.gcpc.v1.ReplayGapEventV1H\x00R\treplayGap\x12M\n" +
-	"\x11runtime_log_batch\x18\x1a \x01(\v2\x1f.gcpc.v1.RuntimeLogBatchEventV1H\x00R\x0fruntimeLogBatchB\x06\n" +
+	"\x11runtime_log_batch\x18\x1a \x01(\v2\x1f.gcpc.v1.RuntimeLogBatchEventV1H\x00R\x0fruntimeLogBatch\x12F\n" +
+	"\x0eplugin_started\x18\x1b \x01(\v2\x1d.gcpc.v1.PluginStartedEventV1H\x00R\rpluginStarted\x12F\n" +
+	"\x0eplugin_stopped\x18\x1c \x01(\v2\x1d.gcpc.v1.PluginStoppedEventV1H\x00R\rpluginStopped\x12h\n" +
+	"\x1aplugin_registration_failed\x18\x1d \x01(\v2(.gcpc.v1.PluginRegistrationFailedEventV1H\x00R\x18pluginRegistrationFailed\x12e\n" +
+	"\x19plugin_command_registered\x18\x1e \x01(\v2'.gcpc.v1.PluginCommandRegisteredEventV1H\x00R\x17pluginCommandRegistered\x12~\n" +
+	"\"plugin_command_registration_failed\x18\x1f \x01(\v2/.gcpc.v1.PluginCommandRegistrationFailedEventV1H\x00R\x1fpluginCommandRegistrationFailedB\x06\n" +
 	"\x04data\"\xc4\x01\n" +
 	"\x11CommandPreEventV1\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x12\n" +
@@ -3755,7 +4156,31 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\x16PluginRestartedEventV1\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bcritical\x18\x02 \x01(\bR\bcritical\x12#\n" +
-	"\rrestart_count\x18\x03 \x01(\x05R\frestartCount\"+\n" +
+	"\rrestart_count\x18\x03 \x01(\x05R\frestartCount\"X\n" +
+	"\x14PluginStartedEventV1\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bcritical\x18\x02 \x01(\bR\bcritical\x12\x10\n" +
+	"\x03pid\x18\x03 \x01(\x05R\x03pid\"^\n" +
+	"\x14PluginStoppedEventV1\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bcritical\x18\x02 \x01(\bR\bcritical\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x81\x01\n" +
+	"\x1fPluginRegistrationFailedEventV1\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1a\n" +
+	"\bcritical\x18\x03 \x01(\bR\bcritical\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x8a\x01\n" +
+	"\x1ePluginCommandRegisteredEventV1\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12\x1e\n" +
+	"\n" +
+	"namespaced\x18\x03 \x01(\bR\n" +
+	"namespaced\x12\x1a\n" +
+	"\breadonly\x18\x04 \x01(\bR\breadonly\"l\n" +
+	"&PluginCommandRegistrationFailedEventV1\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"+\n" +
 	"\x15ConfigReloadedEventV1\x12\x12\n" +
 	"\x04file\x18\x01 \x01(\tR\x04file\"N\n" +
 	"\x11AuthFailedEventV1\x12\x1f\n" +
@@ -3847,70 +4272,75 @@ func file_api_gcpc_v1_gcpc_proto_rawDescGZIP() []byte {
 }
 
 var file_api_gcpc_v1_gcpc_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_gcpc_v1_gcpc_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_api_gcpc_v1_gcpc_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
 var file_api_gcpc_v1_gcpc_proto_goTypes = []any{
-	(HookPhaseV1)(0),                 // 0: gcpc.v1.HookPhaseV1
-	(*EnvelopeV1)(nil),               // 1: gcpc.v1.EnvelopeV1
-	(*RegisterV1)(nil),               // 2: gcpc.v1.RegisterV1
-	(*CommandDeclV1)(nil),            // 3: gcpc.v1.CommandDeclV1
-	(*HookDeclV1)(nil),               // 4: gcpc.v1.HookDeclV1
-	(*RegisterAckV1)(nil),            // 5: gcpc.v1.RegisterAckV1
-	(*PluginConfigV1)(nil),           // 6: gcpc.v1.PluginConfigV1
-	(*HealthCheckV1)(nil),            // 7: gcpc.v1.HealthCheckV1
-	(*HealthResponseV1)(nil),         // 8: gcpc.v1.HealthResponseV1
-	(*ShutdownV1)(nil),               // 9: gcpc.v1.ShutdownV1
-	(*ShutdownAckV1)(nil),            // 10: gcpc.v1.ShutdownAckV1
-	(*ConnectionInfoV1)(nil),         // 11: gcpc.v1.ConnectionInfoV1
-	(*CommandInfoV1)(nil),            // 12: gcpc.v1.CommandInfoV1
-	(*CommandRequestV1)(nil),         // 13: gcpc.v1.CommandRequestV1
-	(*CommandResponseV1)(nil),        // 14: gcpc.v1.CommandResponseV1
-	(*HookRequestV1)(nil),            // 15: gcpc.v1.HookRequestV1
-	(*HookResponseV1)(nil),           // 16: gcpc.v1.HookResponseV1
-	(*ResultV1)(nil),                 // 17: gcpc.v1.ResultV1
-	(*ResultArrayV1)(nil),            // 18: gcpc.v1.ResultArrayV1
-	(*ResultMapV1)(nil),              // 19: gcpc.v1.ResultMapV1
-	(*ResultEntryV1)(nil),            // 20: gcpc.v1.ResultEntryV1
-	(*ServerQueryV1)(nil),            // 21: gcpc.v1.ServerQueryV1
-	(*ServerQueryResponseV1)(nil),    // 22: gcpc.v1.ServerQueryResponseV1
-	(*EventSubscribeV1)(nil),         // 23: gcpc.v1.EventSubscribeV1
-	(*EventV1)(nil),                  // 24: gcpc.v1.EventV1
-	(*CommandPreEventV1)(nil),        // 25: gcpc.v1.CommandPreEventV1
-	(*CommandPostEventV1)(nil),       // 26: gcpc.v1.CommandPostEventV1
-	(*ConnectionOpenEventV1)(nil),    // 27: gcpc.v1.ConnectionOpenEventV1
-	(*ConnectionCloseEventV1)(nil),   // 28: gcpc.v1.ConnectionCloseEventV1
-	(*ServerStartEventV1)(nil),       // 29: gcpc.v1.ServerStartEventV1
-	(*ServerShutdownEventV1)(nil),    // 30: gcpc.v1.ServerShutdownEventV1
-	(*PluginRegisteredEventV1)(nil),  // 31: gcpc.v1.PluginRegisteredEventV1
-	(*PluginCrashedEventV1)(nil),     // 32: gcpc.v1.PluginCrashedEventV1
-	(*PluginRestartedEventV1)(nil),   // 33: gcpc.v1.PluginRestartedEventV1
-	(*ConfigReloadedEventV1)(nil),    // 34: gcpc.v1.ConfigReloadedEventV1
-	(*AuthFailedEventV1)(nil),        // 35: gcpc.v1.AuthFailedEventV1
-	(*CacheEvictionEventV1)(nil),     // 36: gcpc.v1.CacheEvictionEventV1
-	(*ReplayGapEventV1)(nil),         // 37: gcpc.v1.ReplayGapEventV1
-	(*RuntimeLogBatchEventV1)(nil),   // 38: gcpc.v1.RuntimeLogBatchEventV1
-	(*RuntimeLogRecordV1)(nil),       // 39: gcpc.v1.RuntimeLogRecordV1
-	(*ClientPushV1)(nil),             // 40: gcpc.v1.ClientPushV1
-	(*OperationStartEventV1)(nil),    // 41: gcpc.v1.OperationStartEventV1
-	(*OperationCompleteEventV1)(nil), // 42: gcpc.v1.OperationCompleteEventV1
-	(*OperationHookDeclV1)(nil),      // 43: gcpc.v1.OperationHookDeclV1
-	(*OperationHookRequestV1)(nil),   // 44: gcpc.v1.OperationHookRequestV1
-	(*OperationHookResponseV1)(nil),  // 45: gcpc.v1.OperationHookResponseV1
-	nil,                              // 46: gcpc.v1.RegisterAckV1.ConfigEntry
-	nil,                              // 47: gcpc.v1.PluginConfigV1.EntriesEntry
-	nil,                              // 48: gcpc.v1.CommandRequestV1.MetadataEntry
-	nil,                              // 49: gcpc.v1.CommandRequestV1.ContextEntry
-	nil,                              // 50: gcpc.v1.HookRequestV1.ContextEntry
-	nil,                              // 51: gcpc.v1.HookRequestV1.MetadataEntry
-	nil,                              // 52: gcpc.v1.HookResponseV1.ContextValuesEntry
-	nil,                              // 53: gcpc.v1.ServerQueryV1.ParamsEntry
-	nil,                              // 54: gcpc.v1.ServerQueryResponseV1.DataEntry
-	nil,                              // 55: gcpc.v1.CommandPreEventV1.MetadataEntry
-	nil,                              // 56: gcpc.v1.CommandPostEventV1.MetadataEntry
-	nil,                              // 57: gcpc.v1.RuntimeLogRecordV1.FieldsEntry
-	nil,                              // 58: gcpc.v1.OperationStartEventV1.ContextEntry
-	nil,                              // 59: gcpc.v1.OperationCompleteEventV1.ContextEntry
-	nil,                              // 60: gcpc.v1.OperationHookRequestV1.ContextEntry
-	nil,                              // 61: gcpc.v1.OperationHookResponseV1.ContextValuesEntry
+	(HookPhaseV1)(0),                               // 0: gcpc.v1.HookPhaseV1
+	(*EnvelopeV1)(nil),                             // 1: gcpc.v1.EnvelopeV1
+	(*RegisterV1)(nil),                             // 2: gcpc.v1.RegisterV1
+	(*CommandDeclV1)(nil),                          // 3: gcpc.v1.CommandDeclV1
+	(*HookDeclV1)(nil),                             // 4: gcpc.v1.HookDeclV1
+	(*RegisterAckV1)(nil),                          // 5: gcpc.v1.RegisterAckV1
+	(*PluginConfigV1)(nil),                         // 6: gcpc.v1.PluginConfigV1
+	(*HealthCheckV1)(nil),                          // 7: gcpc.v1.HealthCheckV1
+	(*HealthResponseV1)(nil),                       // 8: gcpc.v1.HealthResponseV1
+	(*ShutdownV1)(nil),                             // 9: gcpc.v1.ShutdownV1
+	(*ShutdownAckV1)(nil),                          // 10: gcpc.v1.ShutdownAckV1
+	(*ConnectionInfoV1)(nil),                       // 11: gcpc.v1.ConnectionInfoV1
+	(*CommandInfoV1)(nil),                          // 12: gcpc.v1.CommandInfoV1
+	(*CommandRequestV1)(nil),                       // 13: gcpc.v1.CommandRequestV1
+	(*CommandResponseV1)(nil),                      // 14: gcpc.v1.CommandResponseV1
+	(*HookRequestV1)(nil),                          // 15: gcpc.v1.HookRequestV1
+	(*HookResponseV1)(nil),                         // 16: gcpc.v1.HookResponseV1
+	(*ResultV1)(nil),                               // 17: gcpc.v1.ResultV1
+	(*ResultArrayV1)(nil),                          // 18: gcpc.v1.ResultArrayV1
+	(*ResultMapV1)(nil),                            // 19: gcpc.v1.ResultMapV1
+	(*ResultEntryV1)(nil),                          // 20: gcpc.v1.ResultEntryV1
+	(*ServerQueryV1)(nil),                          // 21: gcpc.v1.ServerQueryV1
+	(*ServerQueryResponseV1)(nil),                  // 22: gcpc.v1.ServerQueryResponseV1
+	(*EventSubscribeV1)(nil),                       // 23: gcpc.v1.EventSubscribeV1
+	(*EventV1)(nil),                                // 24: gcpc.v1.EventV1
+	(*CommandPreEventV1)(nil),                      // 25: gcpc.v1.CommandPreEventV1
+	(*CommandPostEventV1)(nil),                     // 26: gcpc.v1.CommandPostEventV1
+	(*ConnectionOpenEventV1)(nil),                  // 27: gcpc.v1.ConnectionOpenEventV1
+	(*ConnectionCloseEventV1)(nil),                 // 28: gcpc.v1.ConnectionCloseEventV1
+	(*ServerStartEventV1)(nil),                     // 29: gcpc.v1.ServerStartEventV1
+	(*ServerShutdownEventV1)(nil),                  // 30: gcpc.v1.ServerShutdownEventV1
+	(*PluginRegisteredEventV1)(nil),                // 31: gcpc.v1.PluginRegisteredEventV1
+	(*PluginCrashedEventV1)(nil),                   // 32: gcpc.v1.PluginCrashedEventV1
+	(*PluginRestartedEventV1)(nil),                 // 33: gcpc.v1.PluginRestartedEventV1
+	(*PluginStartedEventV1)(nil),                   // 34: gcpc.v1.PluginStartedEventV1
+	(*PluginStoppedEventV1)(nil),                   // 35: gcpc.v1.PluginStoppedEventV1
+	(*PluginRegistrationFailedEventV1)(nil),        // 36: gcpc.v1.PluginRegistrationFailedEventV1
+	(*PluginCommandRegisteredEventV1)(nil),         // 37: gcpc.v1.PluginCommandRegisteredEventV1
+	(*PluginCommandRegistrationFailedEventV1)(nil), // 38: gcpc.v1.PluginCommandRegistrationFailedEventV1
+	(*ConfigReloadedEventV1)(nil),                  // 39: gcpc.v1.ConfigReloadedEventV1
+	(*AuthFailedEventV1)(nil),                      // 40: gcpc.v1.AuthFailedEventV1
+	(*CacheEvictionEventV1)(nil),                   // 41: gcpc.v1.CacheEvictionEventV1
+	(*ReplayGapEventV1)(nil),                       // 42: gcpc.v1.ReplayGapEventV1
+	(*RuntimeLogBatchEventV1)(nil),                 // 43: gcpc.v1.RuntimeLogBatchEventV1
+	(*RuntimeLogRecordV1)(nil),                     // 44: gcpc.v1.RuntimeLogRecordV1
+	(*ClientPushV1)(nil),                           // 45: gcpc.v1.ClientPushV1
+	(*OperationStartEventV1)(nil),                  // 46: gcpc.v1.OperationStartEventV1
+	(*OperationCompleteEventV1)(nil),               // 47: gcpc.v1.OperationCompleteEventV1
+	(*OperationHookDeclV1)(nil),                    // 48: gcpc.v1.OperationHookDeclV1
+	(*OperationHookRequestV1)(nil),                 // 49: gcpc.v1.OperationHookRequestV1
+	(*OperationHookResponseV1)(nil),                // 50: gcpc.v1.OperationHookResponseV1
+	nil,                                            // 51: gcpc.v1.RegisterAckV1.ConfigEntry
+	nil,                                            // 52: gcpc.v1.PluginConfigV1.EntriesEntry
+	nil,                                            // 53: gcpc.v1.CommandRequestV1.MetadataEntry
+	nil,                                            // 54: gcpc.v1.CommandRequestV1.ContextEntry
+	nil,                                            // 55: gcpc.v1.HookRequestV1.ContextEntry
+	nil,                                            // 56: gcpc.v1.HookRequestV1.MetadataEntry
+	nil,                                            // 57: gcpc.v1.HookResponseV1.ContextValuesEntry
+	nil,                                            // 58: gcpc.v1.ServerQueryV1.ParamsEntry
+	nil,                                            // 59: gcpc.v1.ServerQueryResponseV1.DataEntry
+	nil,                                            // 60: gcpc.v1.CommandPreEventV1.MetadataEntry
+	nil,                                            // 61: gcpc.v1.CommandPostEventV1.MetadataEntry
+	nil,                                            // 62: gcpc.v1.RuntimeLogRecordV1.FieldsEntry
+	nil,                                            // 63: gcpc.v1.OperationStartEventV1.ContextEntry
+	nil,                                            // 64: gcpc.v1.OperationCompleteEventV1.ContextEntry
+	nil,                                            // 65: gcpc.v1.OperationHookRequestV1.ContextEntry
+	nil,                                            // 66: gcpc.v1.OperationHookResponseV1.ContextValuesEntry
 }
 var file_api_gcpc_v1_gcpc_proto_depIdxs = []int32{
 	2,  // 0: gcpc.v1.EnvelopeV1.register:type_name -> gcpc.v1.RegisterV1
@@ -3927,34 +4357,34 @@ var file_api_gcpc_v1_gcpc_proto_depIdxs = []int32{
 	22, // 11: gcpc.v1.EnvelopeV1.server_query_response:type_name -> gcpc.v1.ServerQueryResponseV1
 	23, // 12: gcpc.v1.EnvelopeV1.event_subscribe:type_name -> gcpc.v1.EventSubscribeV1
 	24, // 13: gcpc.v1.EnvelopeV1.event:type_name -> gcpc.v1.EventV1
-	44, // 14: gcpc.v1.EnvelopeV1.operation_hook_request:type_name -> gcpc.v1.OperationHookRequestV1
-	45, // 15: gcpc.v1.EnvelopeV1.operation_hook_response:type_name -> gcpc.v1.OperationHookResponseV1
+	49, // 14: gcpc.v1.EnvelopeV1.operation_hook_request:type_name -> gcpc.v1.OperationHookRequestV1
+	50, // 15: gcpc.v1.EnvelopeV1.operation_hook_response:type_name -> gcpc.v1.OperationHookResponseV1
 	6,  // 16: gcpc.v1.EnvelopeV1.config_update:type_name -> gcpc.v1.PluginConfigV1
-	40, // 17: gcpc.v1.EnvelopeV1.client_push:type_name -> gcpc.v1.ClientPushV1
+	45, // 17: gcpc.v1.EnvelopeV1.client_push:type_name -> gcpc.v1.ClientPushV1
 	3,  // 18: gcpc.v1.RegisterV1.commands:type_name -> gcpc.v1.CommandDeclV1
 	4,  // 19: gcpc.v1.RegisterV1.hooks:type_name -> gcpc.v1.HookDeclV1
-	43, // 20: gcpc.v1.RegisterV1.operation_hooks:type_name -> gcpc.v1.OperationHookDeclV1
+	48, // 20: gcpc.v1.RegisterV1.operation_hooks:type_name -> gcpc.v1.OperationHookDeclV1
 	0,  // 21: gcpc.v1.HookDeclV1.phase:type_name -> gcpc.v1.HookPhaseV1
-	46, // 22: gcpc.v1.RegisterAckV1.config:type_name -> gcpc.v1.RegisterAckV1.ConfigEntry
-	47, // 23: gcpc.v1.PluginConfigV1.entries:type_name -> gcpc.v1.PluginConfigV1.EntriesEntry
+	51, // 22: gcpc.v1.RegisterAckV1.config:type_name -> gcpc.v1.RegisterAckV1.ConfigEntry
+	52, // 23: gcpc.v1.PluginConfigV1.entries:type_name -> gcpc.v1.PluginConfigV1.EntriesEntry
 	12, // 24: gcpc.v1.CommandRequestV1.command:type_name -> gcpc.v1.CommandInfoV1
 	11, // 25: gcpc.v1.CommandRequestV1.connection:type_name -> gcpc.v1.ConnectionInfoV1
-	48, // 26: gcpc.v1.CommandRequestV1.metadata:type_name -> gcpc.v1.CommandRequestV1.MetadataEntry
-	49, // 27: gcpc.v1.CommandRequestV1.context:type_name -> gcpc.v1.CommandRequestV1.ContextEntry
+	53, // 26: gcpc.v1.CommandRequestV1.metadata:type_name -> gcpc.v1.CommandRequestV1.MetadataEntry
+	54, // 27: gcpc.v1.CommandRequestV1.context:type_name -> gcpc.v1.CommandRequestV1.ContextEntry
 	17, // 28: gcpc.v1.CommandResponseV1.result:type_name -> gcpc.v1.ResultV1
 	0,  // 29: gcpc.v1.HookRequestV1.phase:type_name -> gcpc.v1.HookPhaseV1
 	12, // 30: gcpc.v1.HookRequestV1.command:type_name -> gcpc.v1.CommandInfoV1
 	11, // 31: gcpc.v1.HookRequestV1.connection:type_name -> gcpc.v1.ConnectionInfoV1
-	50, // 32: gcpc.v1.HookRequestV1.context:type_name -> gcpc.v1.HookRequestV1.ContextEntry
-	51, // 33: gcpc.v1.HookRequestV1.metadata:type_name -> gcpc.v1.HookRequestV1.MetadataEntry
-	52, // 34: gcpc.v1.HookResponseV1.context_values:type_name -> gcpc.v1.HookResponseV1.ContextValuesEntry
+	55, // 32: gcpc.v1.HookRequestV1.context:type_name -> gcpc.v1.HookRequestV1.ContextEntry
+	56, // 33: gcpc.v1.HookRequestV1.metadata:type_name -> gcpc.v1.HookRequestV1.MetadataEntry
+	57, // 34: gcpc.v1.HookResponseV1.context_values:type_name -> gcpc.v1.HookResponseV1.ContextValuesEntry
 	18, // 35: gcpc.v1.ResultV1.array:type_name -> gcpc.v1.ResultArrayV1
 	19, // 36: gcpc.v1.ResultV1.map_val:type_name -> gcpc.v1.ResultMapV1
 	17, // 37: gcpc.v1.ResultArrayV1.elements:type_name -> gcpc.v1.ResultV1
 	20, // 38: gcpc.v1.ResultMapV1.entries:type_name -> gcpc.v1.ResultEntryV1
 	17, // 39: gcpc.v1.ResultEntryV1.value:type_name -> gcpc.v1.ResultV1
-	53, // 40: gcpc.v1.ServerQueryV1.params:type_name -> gcpc.v1.ServerQueryV1.ParamsEntry
-	54, // 41: gcpc.v1.ServerQueryResponseV1.data:type_name -> gcpc.v1.ServerQueryResponseV1.DataEntry
+	58, // 40: gcpc.v1.ServerQueryV1.params:type_name -> gcpc.v1.ServerQueryV1.ParamsEntry
+	59, // 41: gcpc.v1.ServerQueryResponseV1.data:type_name -> gcpc.v1.ServerQueryResponseV1.DataEntry
 	25, // 42: gcpc.v1.EventV1.command_pre:type_name -> gcpc.v1.CommandPreEventV1
 	26, // 43: gcpc.v1.EventV1.command_post:type_name -> gcpc.v1.CommandPostEventV1
 	27, // 44: gcpc.v1.EventV1.connection_open:type_name -> gcpc.v1.ConnectionOpenEventV1
@@ -3964,26 +4394,31 @@ var file_api_gcpc_v1_gcpc_proto_depIdxs = []int32{
 	31, // 48: gcpc.v1.EventV1.plugin_registered:type_name -> gcpc.v1.PluginRegisteredEventV1
 	32, // 49: gcpc.v1.EventV1.plugin_crashed:type_name -> gcpc.v1.PluginCrashedEventV1
 	33, // 50: gcpc.v1.EventV1.plugin_restarted:type_name -> gcpc.v1.PluginRestartedEventV1
-	34, // 51: gcpc.v1.EventV1.config_reloaded:type_name -> gcpc.v1.ConfigReloadedEventV1
-	35, // 52: gcpc.v1.EventV1.auth_failed:type_name -> gcpc.v1.AuthFailedEventV1
-	36, // 53: gcpc.v1.EventV1.cache_eviction:type_name -> gcpc.v1.CacheEvictionEventV1
-	41, // 54: gcpc.v1.EventV1.operation_start:type_name -> gcpc.v1.OperationStartEventV1
-	42, // 55: gcpc.v1.EventV1.operation_complete:type_name -> gcpc.v1.OperationCompleteEventV1
-	37, // 56: gcpc.v1.EventV1.replay_gap:type_name -> gcpc.v1.ReplayGapEventV1
-	38, // 57: gcpc.v1.EventV1.runtime_log_batch:type_name -> gcpc.v1.RuntimeLogBatchEventV1
-	55, // 58: gcpc.v1.CommandPreEventV1.metadata:type_name -> gcpc.v1.CommandPreEventV1.MetadataEntry
-	56, // 59: gcpc.v1.CommandPostEventV1.metadata:type_name -> gcpc.v1.CommandPostEventV1.MetadataEntry
-	39, // 60: gcpc.v1.RuntimeLogBatchEventV1.records:type_name -> gcpc.v1.RuntimeLogRecordV1
-	57, // 61: gcpc.v1.RuntimeLogRecordV1.fields:type_name -> gcpc.v1.RuntimeLogRecordV1.FieldsEntry
-	58, // 62: gcpc.v1.OperationStartEventV1.context:type_name -> gcpc.v1.OperationStartEventV1.ContextEntry
-	59, // 63: gcpc.v1.OperationCompleteEventV1.context:type_name -> gcpc.v1.OperationCompleteEventV1.ContextEntry
-	60, // 64: gcpc.v1.OperationHookRequestV1.context:type_name -> gcpc.v1.OperationHookRequestV1.ContextEntry
-	61, // 65: gcpc.v1.OperationHookResponseV1.context_values:type_name -> gcpc.v1.OperationHookResponseV1.ContextValuesEntry
-	66, // [66:66] is the sub-list for method output_type
-	66, // [66:66] is the sub-list for method input_type
-	66, // [66:66] is the sub-list for extension type_name
-	66, // [66:66] is the sub-list for extension extendee
-	0,  // [0:66] is the sub-list for field type_name
+	39, // 51: gcpc.v1.EventV1.config_reloaded:type_name -> gcpc.v1.ConfigReloadedEventV1
+	40, // 52: gcpc.v1.EventV1.auth_failed:type_name -> gcpc.v1.AuthFailedEventV1
+	41, // 53: gcpc.v1.EventV1.cache_eviction:type_name -> gcpc.v1.CacheEvictionEventV1
+	46, // 54: gcpc.v1.EventV1.operation_start:type_name -> gcpc.v1.OperationStartEventV1
+	47, // 55: gcpc.v1.EventV1.operation_complete:type_name -> gcpc.v1.OperationCompleteEventV1
+	42, // 56: gcpc.v1.EventV1.replay_gap:type_name -> gcpc.v1.ReplayGapEventV1
+	43, // 57: gcpc.v1.EventV1.runtime_log_batch:type_name -> gcpc.v1.RuntimeLogBatchEventV1
+	34, // 58: gcpc.v1.EventV1.plugin_started:type_name -> gcpc.v1.PluginStartedEventV1
+	35, // 59: gcpc.v1.EventV1.plugin_stopped:type_name -> gcpc.v1.PluginStoppedEventV1
+	36, // 60: gcpc.v1.EventV1.plugin_registration_failed:type_name -> gcpc.v1.PluginRegistrationFailedEventV1
+	37, // 61: gcpc.v1.EventV1.plugin_command_registered:type_name -> gcpc.v1.PluginCommandRegisteredEventV1
+	38, // 62: gcpc.v1.EventV1.plugin_command_registration_failed:type_name -> gcpc.v1.PluginCommandRegistrationFailedEventV1
+	60, // 63: gcpc.v1.CommandPreEventV1.metadata:type_name -> gcpc.v1.CommandPreEventV1.MetadataEntry
+	61, // 64: gcpc.v1.CommandPostEventV1.metadata:type_name -> gcpc.v1.CommandPostEventV1.MetadataEntry
+	44, // 65: gcpc.v1.RuntimeLogBatchEventV1.records:type_name -> gcpc.v1.RuntimeLogRecordV1
+	62, // 66: gcpc.v1.RuntimeLogRecordV1.fields:type_name -> gcpc.v1.RuntimeLogRecordV1.FieldsEntry
+	63, // 67: gcpc.v1.OperationStartEventV1.context:type_name -> gcpc.v1.OperationStartEventV1.ContextEntry
+	64, // 68: gcpc.v1.OperationCompleteEventV1.context:type_name -> gcpc.v1.OperationCompleteEventV1.ContextEntry
+	65, // 69: gcpc.v1.OperationHookRequestV1.context:type_name -> gcpc.v1.OperationHookRequestV1.ContextEntry
+	66, // 70: gcpc.v1.OperationHookResponseV1.context_values:type_name -> gcpc.v1.OperationHookResponseV1.ContextValuesEntry
+	71, // [71:71] is the sub-list for method output_type
+	71, // [71:71] is the sub-list for method input_type
+	71, // [71:71] is the sub-list for extension type_name
+	71, // [71:71] is the sub-list for extension extendee
+	0,  // [0:71] is the sub-list for field type_name
 }
 
 func init() { file_api_gcpc_v1_gcpc_proto_init() }
@@ -4039,6 +4474,11 @@ func file_api_gcpc_v1_gcpc_proto_init() {
 		(*EventV1_OperationComplete)(nil),
 		(*EventV1_ReplayGap)(nil),
 		(*EventV1_RuntimeLogBatch)(nil),
+		(*EventV1_PluginStarted)(nil),
+		(*EventV1_PluginStopped)(nil),
+		(*EventV1_PluginRegistrationFailed)(nil),
+		(*EventV1_PluginCommandRegistered)(nil),
+		(*EventV1_PluginCommandRegistrationFailed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -4046,7 +4486,7 @@ func file_api_gcpc_v1_gcpc_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_gcpc_v1_gcpc_proto_rawDesc), len(file_api_gcpc_v1_gcpc_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   61,
+			NumMessages:   66,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

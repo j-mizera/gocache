@@ -5,15 +5,27 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	apiobs "gocache/api/observability"
 	"gocache/pkg/rex"
 )
 
 var connSeq atomic.Uint64
 
+// NextConnectionIdentity returns a unique internal connection identity for
+// OperationTracker context-version ownership. It is not a public tracing id.
+func NextConnectionIdentity() apiobs.ConnectionIdentity {
+	return apiobs.ConnectionIdentity(connSeq.Add(1))
+}
+
+// ConnectionIDForIdentity renders the stable public connection identifier.
+func ConnectionIDForIdentity(identity apiobs.ConnectionIdentity) string {
+	return fmt.Sprintf("cid_%d", identity)
+}
+
 // NextConnectionID returns a unique connection identifier, independent of
 // the operation tracking system.
 func NextConnectionID() string {
-	return fmt.Sprintf("cid_%d", connSeq.Add(1))
+	return ConnectionIDForIdentity(NextConnectionIdentity())
 }
 
 var (
@@ -36,13 +48,14 @@ type ClientContext struct {
 	// watch.Manager.NotifyMutation while held by the engine's cache lock,
 	// and read by HandleExec on this connection's goroutine without that
 	// lock. Atomic access bridges the cross-goroutine boundary.
-	watchDirty    atomic.Bool
-	RexVersion    int               // 0 = disabled, 1 = META lines enabled
-	RexMeta       *rex.Store        // nil until first REX.META SET/MSET
-	CmdMeta       map[string]string // transient per-command META, set by server, cleared after eval
-	ConnectionID  string            // stable connection identifier, independent of operations
-	RemoteAddr    string            // remote peer address, set by server
-	OperationID   string            // parent operation ID (connection operation), set by server
+	watchDirty         atomic.Bool
+	RexVersion         int                       // 0 = disabled, 1 = META lines enabled
+	RexMeta            *rex.Store                // nil until first REX.META SET/MSET
+	CmdMeta            map[string]string         // transient per-command META, set by server, cleared after eval
+	ConnectionIdentity apiobs.ConnectionIdentity // internal sidecar connection identity, set by server
+	ConnectionID       string                    // stable connection identifier, independent of operations
+	RemoteAddr         string                    // remote peer address, set by server
+	OperationID        string                    // parent operation ID (connection operation), set by server
 }
 
 // IsWatchDirty reports whether a mutation has invalidated this client's
