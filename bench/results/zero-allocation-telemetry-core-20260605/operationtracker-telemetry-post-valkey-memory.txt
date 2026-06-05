@@ -1,0 +1,17 @@
+label=operationtracker-telemetry-post
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=dc43956ca12b8f4cc609be51eef2a4c8aac64b54
+gocache_branch=zero-allocation-telemetry-subplan-b
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=16378757
+post_standard_rss_bytes=31090278
+final_rss_bytes=35997614
+delta_rss_bytes=19618857
