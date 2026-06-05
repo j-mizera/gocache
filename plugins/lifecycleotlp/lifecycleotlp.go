@@ -18,7 +18,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gocache/api/config"
-	ops "gocache/api/operations"
 	"gocache/commons/logger"
 	"gocache/sdk/embedded"
 )
@@ -166,11 +165,8 @@ func (p *plugin) ProcessShutdown(ctx context.Context) error {
 	}
 	// Use a fresh context with a tight timeout — the main ctx may already be
 	// cancelled, and we don't want a slow telemetry backend to delay process
-	// exit. Propagate the operation for log correlation.
+	// exit.
 	flushCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-	if op := ops.FromContext(ctx); op != nil {
-		flushCtx = ops.WithContext(flushCtx, op)
-	}
 	defer cancel()
 
 	if p.processSpan != nil {

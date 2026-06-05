@@ -7,17 +7,22 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"gocache/api/command"
+	apictx "gocache/api/context"
 	"gocache/api/events"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
 	apipersistence "gocache/api/persistence"
 	"gocache/api/version"
 	"gocache/commons/crashdump"
 	"gocache/commons/logger"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/blocking"
 	"gocache/pkg/bootstate"
 	"gocache/pkg/cache"
@@ -26,7 +31,6 @@ import (
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/logcollector"
 	commandmetrics "gocache/pkg/metrics"
-	serverOps "gocache/pkg/operations"
 	"gocache/pkg/persistence"
 	"gocache/pkg/plugin/cmdhooks"
 	pluginmgr "gocache/pkg/plugin/manager"
@@ -66,6 +70,26 @@ const (
 	// path in pkg/server which has its own shorter timeout.
 	serverShutdownTimeout = 10 * time.Second
 
+	// Steady-state OperationTracker defaults are intentionally hardcoded in
+	// this first production wiring slice. ADR-0034 treats tracker sizing and
+	// config surface as benchmark-driven follow-up work; these bounded values
+	// activate command-scope telemetry without adding deployment knobs yet.
+	steadyStateOperationTrackerShardCount          = 8
+	steadyStateOperationTrackerMinSegmentsPerShard = 1
+	steadyStateOperationTrackerMaxSegmentsPerShard = 4
+	steadyStateOperationTrackerSegmentSize         = 256
+	steadyStateOperationTrackerRecordsPerOperation = 16
+	// Match the initially preallocated slots so accepted operations are retained
+	// for the projection/drain worker instead of being dropped/recycled.
+	steadyStateOperationTrackerCompletedRingPerShard = steadyStateOperationTrackerMinSegmentsPerShard * steadyStateOperationTrackerSegmentSize
+	steadyStateOperationTrackerDrainInterval         = 10 * time.Millisecond
+	// Reserve high internal-id ranges for steady-state server lifecycle scopes
+	// created outside pkg/pipeline's per-command sequence. Keep these distinct
+	// from pkg/server, pkg/workers, and pkg/plugin ranges that share the manager.
+	steadyStateStartupOperationIdentityBase      apiobs.InternalOperationIdentity = 1 << 54
+	steadyStateConfigReloadOperationIdentityBase apiobs.InternalOperationIdentity = 1 << 53
+	steadyStateShutdownOperationIdentityBase     apiobs.InternalOperationIdentity = 1 << 52
+
 	// Env overrides for the crash-survivability layer. Keeping them here
 	// (not in pkg/config) so they apply from line 1 of main(), before any
 	// YAML has been parsed.
@@ -86,6 +110,175 @@ const (
 	stageWorkersStart  = "workers_start"
 	stageListenerStart = "listener_start"
 )
+
+var (
+	steadyStateStartupOperationSequence      atomic.Uint64
+	steadyStateConfigReloadOperationSequence atomic.Uint64
+	steadyStateShutdownOperationSequence     atomic.Uint64
+)
+
+func newSteadyStateOperationTrackerManager() *commonobs.SlotOperationTrackerManager {
+	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            steadyStateOperationTrackerShardCount,
+		MinSegmentsPerShard:   steadyStateOperationTrackerMinSegmentsPerShard,
+		MaxSegmentsPerShard:   steadyStateOperationTrackerMaxSegmentsPerShard,
+		SegmentSize:           steadyStateOperationTrackerSegmentSize,
+		RecordsPerOperation:   steadyStateOperationTrackerRecordsPerOperation,
+		CompletedRingPerShard: steadyStateOperationTrackerCompletedRingPerShard,
+	})
+}
+
+func startSteadyStateOperationTelemetryScope(manager *commonobs.SlotOperationTrackerManager, sequence *atomic.Uint64, identityBase apiobs.InternalOperationIdentity, op *ops.Operation) commonobs.OperationScope {
+	if manager == nil || sequence == nil || op == nil {
+		return commonobs.OperationScope{}
+	}
+	next := sequence.Add(1)
+	if next == 0 {
+		next = sequence.Add(1)
+	}
+	operation := identityBase + apiobs.InternalOperationIdentity(next)
+	ref := apiobs.NewOperationRef(op.ID, op.ParentID)
+	handle, ok := manager.StartOperationWithMetadata(operation, apiobs.NewParentRef(op.ParentID), 0, commonobs.OperationSnapshotMetadata{
+		Type:          string(op.Type),
+		Ref:           ref,
+		StartUnixNano: op.StartTime.UnixNano(),
+	})
+	if !ok {
+		return commonobs.OperationScope{}
+	}
+	scope := commonobs.NewOperationScope(manager, handle, operation, ref)
+	scope.ContextUpdateStrings(
+		command.OperationID, op.ID,
+		command.StartNs, strconv.FormatInt(op.StartTime.UnixNano(), 10),
+		"_operation_type", string(op.Type),
+		"_parent_operation_id", op.ParentID,
+	)
+	recordOperationContext(scope, op)
+	scope.OperationStartString(string(op.Type),
+		command.OperationID, op.ID,
+		"_operation_type", string(op.Type),
+		"_parent_operation_id", op.ParentID,
+	)
+	return scope
+}
+
+func recordOperationContext(scope commonobs.OperationScope, op *ops.Operation) {
+	if scope.IsZero() || op == nil {
+		return
+	}
+	for key, value := range op.ContextSnapshot(false) {
+		scope.ContextUpdateStrings(key, value)
+	}
+}
+
+func startStartupTelemetryScope(manager *commonobs.SlotOperationTrackerManager, startupOp *ops.Operation) commonobs.OperationScope {
+	return startSteadyStateOperationTelemetryScope(manager, &steadyStateStartupOperationSequence, steadyStateStartupOperationIdentityBase, startupOp)
+}
+
+func startConfigReloadTelemetryScope(manager *commonobs.SlotOperationTrackerManager, reloadOp *ops.Operation) commonobs.OperationScope {
+	return startSteadyStateOperationTelemetryScope(manager, &steadyStateConfigReloadOperationSequence, steadyStateConfigReloadOperationIdentityBase, reloadOp)
+}
+
+func startShutdownTelemetryScope(manager *commonobs.SlotOperationTrackerManager, shutdownOp *ops.Operation, reason string) commonobs.OperationScope {
+	scope := startSteadyStateOperationTelemetryScope(manager, &steadyStateShutdownOperationSequence, steadyStateShutdownOperationIdentityBase, shutdownOp)
+	if scope.IsZero() {
+		return scope
+	}
+	scope.ContextUpdateStrings("_reason", reason)
+	return scope
+}
+
+func emitShutdownSignalTelemetry(manager *commonobs.SlotOperationTrackerManager, drainWorker *server.OperationTrackerDrainWorker, reason, parentID string) {
+	signalOp := ops.New(ops.TypeShutdown, parentID)
+	signalOp.Enrich("_reason", reason)
+	signalOp.Enrich("_scope", "shutdown_signal")
+	signalScope := startShutdownTelemetryScope(manager, signalOp, reason)
+	if signalScope.IsZero() {
+		return
+	}
+	signalScope.ContextUpdateStrings("_scope", "shutdown_signal")
+	signalScope.EventString(string(events.ServerShutdown), command.OperationID, signalOp.ID, "_reason", reason)
+	signalOp.Complete()
+	finishLifecycleTelemetryScope(signalScope, signalOp, commonobs.SlotTerminalFinished, "")
+	if drainWorker != nil {
+		drainWorker.DrainOnce()
+	}
+}
+
+func recordConfigReloadLog(scope commonobs.OperationScope, level apiobs.TelemetryLogLevel, message string, err error) bool {
+	if scope.IsZero() {
+		return false
+	}
+	record := apiobs.NewLogRecordString(scope.Operation(), level, message)
+	record.TimestampUnixNano = time.Now().UnixNano()
+	if err != nil {
+		record.AddFieldString("error", err.Error())
+	}
+	return scope.Record(record)
+}
+
+func recordShutdownLog(scope commonobs.OperationScope, level apiobs.TelemetryLogLevel, message string, fields ...string) bool {
+	if scope.IsZero() {
+		return false
+	}
+	record := apiobs.NewLogRecordString(scope.Operation(), level, message)
+	record.TimestampUnixNano = time.Now().UnixNano()
+	for i := 0; i+1 < len(fields); i += 2 {
+		record.AddFieldString(fields[i], fields[i+1])
+	}
+	return scope.Record(record)
+}
+
+func finishLifecycleTelemetryScope(scope commonobs.OperationScope, op *ops.Operation, terminal commonobs.SlotTerminalStatus, reason string) bool {
+	if scope.IsZero() || op == nil {
+		return false
+	}
+	elapsedNs := uint64(op.Duration().Nanoseconds())
+	status := "completed"
+	if terminal == commonobs.SlotTerminalFailed {
+		status = "failed"
+	}
+	if reason != "" {
+		scope.ContextUpdateStrings(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10), command.ErrorKey, reason)
+	} else {
+		scope.ContextUpdateStrings(command.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+	}
+	scope.OperationFinishString(string(op.Type), elapsedNs,
+		command.OperationID, op.ID,
+		"_operation_type", string(op.Type),
+		"_status", status,
+		command.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+		command.ErrorKey, reason,
+	)
+	return scope.Finish(terminal)
+}
+
+func activeCrashdumpSnapshots(trackers ...*commonobs.SlotOperationTrackerManager) []crashdump.OpSnapshot {
+	var snapshots []crashdump.OpSnapshot
+	for _, tracker := range trackers {
+		if tracker == nil {
+			continue
+		}
+		for _, active := range tracker.ActiveOperationSnapshots() {
+			id := active.Ref.ID.String()
+			if id == "" {
+				id = strconv.FormatInt(int64(active.Operation), 10)
+			}
+			started := time.Time{}
+			if active.StartUnixNano != 0 {
+				started = time.Unix(0, active.StartUnixNano)
+			}
+			snapshots = append(snapshots, crashdump.OpSnapshot{
+				ID:       id,
+				Type:     active.Type,
+				ParentID: active.Ref.ParentID.String(),
+				Started:  started,
+				Context:  apictx.RedactSecrets(active.Context),
+			})
+		}
+	}
+	return snapshots
+}
 
 func main() {
 	// Define CLI flags — all optional; they override config file and env vars
@@ -111,10 +304,10 @@ func main() {
 	crashDir := envOr(envCrashdumpDir, defaultCrashdumpDir)
 	bootStateFile := envOr(envBootState, defaultBootState)
 
-	// Infrastructure hoisted above embedded.BootAll: the tracker is needed
-	// by the top-level crashdump recover (it snapshots Active() into the
-	// dump). Creating it here is cheap — it's a map + mutex.
-	tracker := serverOps.NewTracker()
+	// Telemetry managers are assigned as boot progresses. The top-level
+	// crashdump defer snapshots whichever managers are live at panic time.
+	var startupTracker *commonobs.SlotOperationTrackerManager
+	var steadyStateOperationTracker *commonobs.SlotOperationTrackerManager
 
 	// Top-level crashdump defer — LAST line of defense. Registered first
 	// so it survives for the entire main() call, including BootAll.
@@ -128,10 +321,10 @@ func main() {
 				stage = s.Stage
 			}
 			_, _ = crashdump.WriteFromPanic(r, crashdump.Options{
-				Dir:       crashDir,
-				Version:   version.String(),
-				BootStage: stage,
-				ActiveOps: tracker.Active(),
+				Dir:             crashDir,
+				Version:         version.String(),
+				BootStage:       stage,
+				ActiveSnapshots: activeCrashdumpSnapshots(startupTracker, steadyStateOperationTracker),
 			})
 			panic(r) // re-raise so runtime stacktrace + non-zero exit still happen
 		}
@@ -184,6 +377,35 @@ func main() {
 	logWriter := io.MultiWriter(logPipeW, os.Stderr)
 	logger.InitWithWriter(logWriter, cfg.Server.LogLevel)
 
+	startupTracker = commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   64,
+		CompletedRingPerShard: 1,
+	})
+	startupOperation := apiobs.InternalOperationIdentity(1)
+	startupIdentity, err := (commonobs.UUIDv7Strategy{}).Render(apiobs.OperationIdentityInput{
+		Internal:      startupOperation,
+		StartUnixNano: time.Now().UnixNano(),
+		Sequence:      uint64(startupOperation),
+	})
+	if err != nil {
+		logger.FatalNoCtx().Err(err).Msg("failed to render startup operation identity")
+	}
+	startupRef := startupIdentity.Ref()
+	startupHandle, ok := startupTracker.StartOperationWithMetadata(startupOperation, apiobs.ParentRef{}, 0, commonobs.OperationSnapshotMetadata{
+		Type:          string(ops.TypeStartup),
+		Ref:           startupRef,
+		StartUnixNano: time.Now().UnixNano(),
+	})
+	if !ok {
+		logger.FatalNoCtx().Msg("failed to allocate startup telemetry slot")
+	}
+	startupScope := commonobs.NewOperationScope(startupTracker, startupHandle, startupOperation, startupRef)
+	startupLogs := commonobs.StartupLogMaterializer{}
+
 	// Hand the parsed config to embedded plugins so they can upgrade
 	// env-var-only defaults with YAML-backed values (e.g. lifecycle OTLP endpoint).
 	cfgOp := ops.New(ops.TypeConfigReload, "")
@@ -191,14 +413,23 @@ func main() {
 	embedded.ConfigLoadedAll(ops.WithContext(ctx, cfgOp), cfg)
 	cfgOp.Complete()
 
-	logger.InfoNoCtx().Str("version", version.String()).Msg("starting gocache server")
+	startupRecord := apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelInfo, "starting gocache server")
+	startupRecord.AddFieldString("version", version.String())
+	startupLogs.LogRecord(startupScope, startupRecord)
 	if n := embedded.Count(); n > 0 {
-		logger.InfoNoCtx().Int("count", n).Strs("names", embedded.Names()).Msg("embedded plugins loaded")
+		startupRecord = apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelInfo, "embedded plugins loaded")
+		startupRecord.AddFieldString("count", strconv.Itoa(n))
+		startupRecord.AddFieldString("names", strings.Join(embedded.Names(), ","))
+		startupLogs.LogRecord(startupScope, startupRecord)
 	}
 	if cfgFile := config.ConfigFileUsed(); cfgFile != "" {
-		logger.InfoNoCtx().Str("file", cfgFile).Msg("config loaded")
+		startupRecord = apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelInfo, "config loaded")
+		startupRecord.AddFieldString("file", cfgFile)
+		startupLogs.LogRecord(startupScope, startupRecord)
 	}
-	logger.InfoNoCtx().Str("addr", cfg.Server.GetAddr()).Msg("listening on")
+	startupRecord = apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelInfo, "configured listen address")
+	startupRecord.AddFieldString("addr", cfg.Server.GetAddr())
+	startupLogs.LogRecord(startupScope, startupRecord)
 
 	// Initialize core components (no operations yet — infrastructure setup).
 	_ = bootstate.Write(bootStateFile, stageCoreInit)
@@ -230,7 +461,12 @@ func main() {
 	// Initialize the server (before plugins so we have CoreCommandNames).
 	srv := server.New(cfg.Server.GetAddr(), cacheInstance, engineInstance, cfg.Server.RequirePass, blockingRegistry, watchManager)
 	srv.SetEmitter(eventBus)
-	srv.SetTracker(tracker)
+	// Startup telemetry has its own one-shot tracker; steady-state commands use
+	// this bounded commons manager from the first accepted command onward.
+	steadyStateOperationTracker = newSteadyStateOperationTrackerManager()
+	srv.SetOperationTrackerManager(steadyStateOperationTracker)
+	operationDrainWorker := server.NewOperationTrackerDrainWorker(steadyStateOperationTracker, steadyStateOperationTrackerDrainInterval)
+	operationDrainWorker.SetEmitter(eventBus)
 
 	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---
 	_ = bootstate.Write(bootStateFile, stagePluginLoad)
@@ -241,18 +477,17 @@ func main() {
 		srv.SetCommandMetrics(commandMetrics)
 		pluginManager = pluginmgr.NewManager(cfg.Plugins, srv.CoreCommandNames(), srv)
 		pluginManager.SetLogCollector(logCollector)
-		pluginManager.SetTracker(tracker)
+		pluginManager.SetOperationTrackerManager(steadyStateOperationTracker)
 		pluginManager.SetClientPusher(srv.ConnRegistry())
 		pluginManager.SetEventBus(eventBus)
 		pluginManager.SetCommandMetrics(commandMetrics)
-		pluginmgr.RegisterOperationHandlers(pluginManager.QueryRegistry(), tracker)
 		if err := pluginManager.Start(ctx); err != nil {
-			logger.FatalNoCtx().Err(err).Msg("failed to start plugin manager")
+			finishStartupFatal(startupLogs, startupScope, err, "failed to start plugin manager")
 		}
 		srv.SetPluginRouter(pluginManager.Router())
 		srv.SetHookExecutor(cmdhooks.NewExecutor(pluginManager.HookRegistry(), cfg.Plugins.ShutdownTimeout))
 		opHookExec = ophooks.NewExecutor(pluginManager.OpHookRegistry(), cfg.Plugins.ShutdownTimeout)
-		opHookExec.SetTracker(tracker)
+		opHookExec.SetOperationTrackerManager(steadyStateOperationTracker)
 		opHookExec.SetMinRestartInterval(cfg.Plugins.MinRestartIntervalForReplay)
 		// Replay synthesizes PhaseStart for every active op that started
 		// before an operation-hook plugin joined, so late subscribers can
@@ -262,13 +497,14 @@ func main() {
 	}
 
 	// --- ServerBootstrap operation (after plugins, so operation hooks can enrich) ---
-	bootOp := tracker.Start(ops.TypeStartup, "")
+	bootOp := ops.New(ops.TypeStartup, "")
 	bootOp.Enrich("_version", version.String())
 	bootOp.Enrich("_addr", cfg.Server.GetAddr())
+	bootScope := startStartupTelemetryScope(steadyStateOperationTracker, bootOp)
 	if opHookExec != nil && opHookExec.HasAny() {
 		opHookExec.RunStartHooks(ctx, bootOp)
+		recordOperationContext(bootScope, bootOp)
 	}
-	eventBus.Emit(events.NewOperationStarted(bootOp.ID, string(bootOp.Type), "", bootOp.ContextSnapshot(false)))
 
 	// Build all registered persistence providers generically. Each
 	// blank-imported plugin (plugins/snapshot, plugins/aof, …) called
@@ -284,8 +520,10 @@ func main() {
 		pluginCfg := config.PluginConfigFor(prov.Name())
 		backend, err := prov.Build(pluginCfg, cacheInstance)
 		if err != nil {
-			logger.Error(ctx).Err(err).Str("plugin", prov.Name()).
-				Msg("persistence plugin Build failed; skipping")
+			startupRecord = apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelError, "persistence plugin Build failed; skipping")
+			startupRecord.AddFieldString("plugin", prov.Name())
+			startupRecord.AddFieldString("error", err.Error())
+			startupLogs.LogRecord(startupScope, startupRecord)
 			continue
 		}
 		if backend.Source != nil && primarySource == nil {
@@ -298,7 +536,9 @@ func main() {
 			config.OnPluginReload(prov.Name(), backend.OnReload.OnConfigReload)
 		}
 		backends = append(backends, backend)
-		logger.Info(ctx).Str("plugin", prov.Name()).Msg("persistence backend loaded")
+		startupRecord = apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelInfo, "persistence backend loaded")
+		startupRecord.AddFieldString("plugin", prov.Name())
+		startupLogs.LogRecord(startupScope, startupRecord)
 	}
 
 	coordinator := persistence.New(primarySource, sinks...)
@@ -323,29 +563,30 @@ func main() {
 	// LoadSnapshot operation.
 	_ = bootstate.Write(bootStateFile, stageSnapshotLoad)
 	if cfg.Persistence.LoadOnStartup {
-		snapOp := tracker.Start(ops.TypeSnapshot, bootOp.ID)
+		snapOp := ops.New(ops.TypeSnapshot, bootOp.ID)
 		snapOp.Enrich(command.TriggerKey, "startup")
+		snapScope := startStartupTelemetryScope(steadyStateOperationTracker, snapOp)
 		snapCtx := ops.WithContext(ctx, snapOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(snapCtx, snapOp)
+			recordOperationContext(snapScope, snapOp)
 		}
-		eventBus.Emit(events.NewOperationStarted(snapOp.ID, string(snapOp.Type), bootOp.ID, snapOp.ContextSnapshot(false)))
 		if _, err := coordinator.BootInto(snapCtx); err != nil {
-			logger.Warn(snapCtx).Err(err).Msg("failed to load snapshot")
+			startupRecord = apiobs.NewLogRecordString(startupScope.Operation(), apiobs.TelemetryLogLevelWarn, "failed to load snapshot")
+			startupRecord.AddFieldString("error", err.Error())
+			startupLogs.LogRecord(startupScope, startupRecord)
 			snapOp.Fail(err.Error())
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
 			}
-			eventBus.Emit(events.NewOperationCompleted(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "failed", err.Error(), snapOp.ContextSnapshot(false)))
-			tracker.Fail(snapOp.ID, err.Error())
+			finishLifecycleTelemetryScope(snapScope, snapOp, commonobs.SlotTerminalFailed, err.Error())
 		} else {
-			logger.Info(snapCtx).Msg("snapshot loaded")
+			startupLogs.LogString(startupScope, apiobs.TelemetryLogLevelInfo, "snapshot loaded")
 			snapOp.Complete()
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(snapOp)
 			}
-			eventBus.Emit(events.NewOperationCompleted(snapOp.ID, string(snapOp.Type), uint64(snapOp.Duration().Nanoseconds()), "completed", "", snapOp.ContextSnapshot(false)))
-			tracker.Complete(snapOp.ID)
+			finishLifecycleTelemetryScope(snapScope, snapOp, commonobs.SlotTerminalFinished, "")
 		}
 	}
 
@@ -365,61 +606,52 @@ func main() {
 	cleanupWorker := workers.NewCleanupWorker(cacheInstance, engineInstance, cfg.Workers.CleanupInterval)
 	cleanupWorker.SetPersistenceFeed(coordinator)
 	snapshotWorker.SetPersistenceAPI(coordinator)
-	snapshotWorker.SetTracker(tracker)
-	snapshotWorker.SetEmitter(eventBus)
-	if opHookExec != nil {
-		snapshotWorker.SetOpHookExecutor(opHookExec)
-		cleanupWorker.SetOpHookExecutor(opHookExec)
-	}
-	cleanupWorker.SetTracker(tracker)
-	cleanupWorker.SetEmitter(eventBus)
+	snapshotWorker.SetOperationTrackerManager(steadyStateOperationTracker)
+	cleanupWorker.SetOperationTrackerManager(steadyStateOperationTracker)
 	snapshotWorker.Start(ctx)
 	cleanupWorker.Start(ctx)
+	operationDrainWorker.Start(ctx)
 
 	// Hot reload: server-orchestration knobs only. Plugins subscribe
 	// to config.OnPluginReload independently (per ADR-0008) and handle
 	// their own re-config there. The fsnotify watcher + fan-out
 	// multiplexer are installed inside config.Load.
 	config.OnReload(func() {
-		reloadOp := tracker.Start(ops.TypeConfigReload, "")
+		reloadOp := ops.New(ops.TypeConfigReload, "")
+		reloadScope := startConfigReloadTelemetryScope(steadyStateOperationTracker, reloadOp)
 		reloadCtx := ops.WithContext(context.Background(), reloadOp)
 		if opHookExec != nil && opHookExec.HasAny() {
 			opHookExec.RunStartHooks(reloadCtx, reloadOp)
+			recordOperationContext(reloadScope, reloadOp)
 		}
 
 		newCfg, err := config.Reload()
 		if err != nil {
-			logger.Warn(reloadCtx).Err(err).Msg("failed to parse updated config")
+			recordConfigReloadLog(reloadScope, apiobs.TelemetryLogLevelWarn, "failed to parse updated config", err)
 			reloadOp.Fail(err.Error())
 			if opHookExec != nil {
 				opHookExec.RunCompleteHooks(reloadOp)
 			}
-			eventBus.Emit(events.NewOperationCompleted(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "failed", err.Error(), reloadOp.ContextSnapshot(false)))
-			tracker.Fail(reloadOp.ID, err.Error())
+			finishLifecycleTelemetryScope(reloadScope, reloadOp, commonobs.SlotTerminalFailed, err.Error())
 			return
 		}
-		logger.Info(reloadCtx).Msg("config reloaded")
+		recordConfigReloadLog(reloadScope, apiobs.TelemetryLogLevelInfo, "config reloaded", nil)
 
 		prev := cfgPtr.Load()
 		if newCfg.Server.GetAddr() != prev.Server.GetAddr() {
-			logger.Warn(reloadCtx).Msg("server address/port changes require a restart")
+			recordConfigReloadLog(reloadScope, apiobs.TelemetryLogLevelWarn, "server address/port changes require a restart", nil)
 		}
 
 		snapshotWorker.UpdateInterval(newCfg.Persistence.SnapshotInterval)
 		cleanupWorker.UpdateInterval(newCfg.Workers.CleanupInterval)
-		cacheInstance.SetMemoryLimit(
-			reloadCtx,
-			newCfg.Memory.MaxMemoryMB,
-			cache.ParseEvictionPolicy(newCfg.Memory.EvictionPolicy),
-		)
+		cacheInstance.SetMemoryLimit(reloadScope, newCfg.Memory.MaxMemoryMB, cache.ParseEvictionPolicy(newCfg.Memory.EvictionPolicy))
 
 		cfgPtr.Store(newCfg)
 		reloadOp.Complete()
 		if opHookExec != nil {
 			opHookExec.RunCompleteHooks(reloadOp)
 		}
-		eventBus.Emit(events.NewOperationCompleted(reloadOp.ID, string(reloadOp.Type), uint64(reloadOp.Duration().Nanoseconds()), "completed", "", reloadOp.ContextSnapshot(false)))
-		tracker.Complete(reloadOp.ID)
+		finishLifecycleTelemetryScope(reloadScope, reloadOp, commonobs.SlotTerminalFinished, "")
 	})
 
 	// ServerBootstrap complete.
@@ -427,8 +659,7 @@ func main() {
 	if opHookExec != nil {
 		opHookExec.RunCompleteHooks(bootOp)
 	}
-	eventBus.Emit(events.NewOperationCompleted(bootOp.ID, string(bootOp.Type), uint64(bootOp.Duration().Nanoseconds()), "completed", "", bootOp.ContextSnapshot(false)))
-	tracker.Complete(bootOp.ID)
+	finishLifecycleTelemetryScope(bootScope, bootOp, commonobs.SlotTerminalFinished, "")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
@@ -436,28 +667,42 @@ func main() {
 	// Start server in a goroutine.
 	_ = bootstate.Write(bootStateFile, stageListenerStart)
 	serverErrChan := make(chan error, 1)
+	startupTelemetry := server.StartupTelemetry{
+		Scope: startupScope,
+		Logs:  startupLogs,
+		OnReady: func() {
+			_ = bootstate.Write(bootStateFile, bootstate.StageRunning)
+		},
+	}
 	go func() {
-		logger.InfoNoCtx().Msg("server ready to accept connections")
-		if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := srv.Start(ctx, startupTelemetry); err != nil && !errors.Is(err, context.Canceled) {
 			serverErrChan <- err
 		}
 	}()
-	_ = bootstate.Write(bootStateFile, bootstate.StageRunning)
 
 	// Wait for shutdown signal or server error
 	select {
 	case sig := <-sigChan:
 		logger.InfoNoCtx().Str("signal", sig.String()).Msg("received signal")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, coordinator, sig.String())
+		handleShutdown(srv, snapshotWorker, cleanupWorker, operationDrainWorker, engineInstance, cfgPtr.Load(), blockingRegistry, pluginManager, steadyStateOperationTracker, opHookExec, coordinator, sig.String())
 	case err := <-serverErrChan:
-		logger.ErrorNoCtx().Err(err).Msg("server error")
-		handleShutdown(srv, snapshotWorker, cleanupWorker, engineInstance, cacheInstance, cfgPtr.Load(), blockingRegistry, pluginManager, tracker, eventBus, opHookExec, coordinator, "error: "+err.Error())
+		handleShutdown(srv, snapshotWorker, cleanupWorker, operationDrainWorker, engineInstance, cfgPtr.Load(), blockingRegistry, pluginManager, steadyStateOperationTracker, opHookExec, coordinator, "error: "+err.Error())
 		os.Exit(1)
 	}
 
 	// Close the log pipe so the collector reader gets EOF.
 	logPipeW.Close()
 	logCollector.Wait()
+}
+
+func finishStartupFatal(logs commonobs.StartupLogMaterializer, scope commonobs.OperationScope, err error, message string) {
+	record := apiobs.NewLogRecordString(scope.Operation(), apiobs.TelemetryLogLevelFatal, message)
+	if err != nil {
+		record.AddFieldString("error", err.Error())
+	}
+	logs.LogRecord(scope, record)
+	scope.Finish(commonobs.SlotTerminalFailed)
+	os.Exit(1)
 }
 
 // envOr returns the value of the named env var, or fallback when unset/empty.
@@ -472,54 +717,51 @@ func handleShutdown(
 	srv *server.Server,
 	snapshotWorker workers.Worker,
 	cleanupWorker workers.Worker,
+	operationDrainWorker *server.OperationTrackerDrainWorker,
 	engineInstance *engine.Engine,
-	cacheInstance *cache.Cache,
 	cfg *config.Config,
 	blockingRegistry *blocking.Registry,
 	pluginManager *pluginmgr.Manager,
-	tracker *serverOps.Tracker,
-	eventBus *serverEvents.Bus,
+	steadyStateOperationTracker *commonobs.SlotOperationTrackerManager,
 	opHookExec *ophooks.Executor,
 	coordinator *persistence.Coordinator,
 	reason string,
 ) {
-	// Create shutdown operation — plugins see this via operation hooks
-	// before they are shut down.
-	var shutdownOp *ops.Operation
-	shutdownCtx := context.Background()
-	if tracker != nil {
-		shutdownOp = tracker.Start(ops.TypeShutdown, "")
-		shutdownOp.Enrich("_reason", reason)
-		shutdownCtx = ops.WithContext(shutdownCtx, shutdownOp)
-		if opHookExec != nil && opHookExec.HasAny() {
-			opHookExec.RunStartHooks(shutdownCtx, shutdownOp)
-		}
-		eventBus.Emit(events.NewServerShutdown(reason).WithOperationID(shutdownOp.ID))
+	// Create shutdown operation — plugins see this via operation hooks before they
+	// are shut down, while runtime telemetry is recorded through telemetry records.
+	shutdownOp := ops.New(ops.TypeShutdown, "")
+	shutdownOp.Enrich("_reason", reason)
+	shutdownScope := startShutdownTelemetryScope(steadyStateOperationTracker, shutdownOp, reason)
+	shutdownCtx := ops.WithContext(context.Background(), shutdownOp)
+	if opHookExec != nil && opHookExec.HasAny() {
+		opHookExec.RunStartHooks(shutdownCtx, shutdownOp)
+		recordOperationContext(shutdownScope, shutdownOp)
 	}
 
-	logger.Info(shutdownCtx).Msg("starting graceful shutdown sequence")
+	recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "starting graceful shutdown sequence")
 
 	// Unblock all waiting BLPOP/BRPOP clients first so their connections can close.
 	blockingRegistry.Shutdown()
 
-	logger.Info(shutdownCtx).Str("step", "1/6").Dur("timeout", serverShutdownTimeout).Msg("shutting down server")
+	recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "shutting down server", "step", "1/6", "timeout", serverShutdownTimeout.String())
 	if err := srv.Shutdown(serverShutdownTimeout); err != nil {
-		logger.Warn(shutdownCtx).Err(err).Msg("server shutdown error")
+		recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelWarn, "server shutdown error", "error", err.Error())
 	}
 
 	// Fire operation complete hooks before shutting down plugins so
 	// subscribers can observe the shutdown marker.
-	if shutdownOp != nil && opHookExec != nil {
+	if opHookExec != nil {
 		opHookExec.RunCompleteHooks(shutdownOp)
 	}
+	emitShutdownSignalTelemetry(steadyStateOperationTracker, operationDrainWorker, reason, shutdownOp.ID)
 
 	// Shutdown plugins.
 	if pluginManager != nil {
-		logger.Info(shutdownCtx).Str("step", "2/6").Msg("shutting down plugins")
+		recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "shutting down plugins", "step", "2/6")
 		pluginManager.Shutdown(cfg.Plugins.ShutdownTimeout)
 	}
 
-	logger.Info(shutdownCtx).Str("step", "3/6").Msg("stopping background workers")
+	recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "stopping background workers", "step", "3/6")
 	snapshotWorker.Stop()
 	cleanupWorker.Stop()
 
@@ -529,23 +771,18 @@ func handleShutdown(
 	// sink's flush goroutine drains its buffer and Sink.Close returns.
 	coordinator.Stop(shutdownCtx)
 
-	logger.Info(shutdownCtx).Str("step", "4/6").Msg("saving final snapshot")
+	recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "saving final snapshot", "step", "4/6")
 	if err := coordinator.Snapshot(shutdownCtx); err != nil {
-		logger.Warn(shutdownCtx).Err(err).Msg("failed to save final snapshot")
+		recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelWarn, "failed to save final snapshot", "error", err.Error())
 	} else {
-		logger.Info(shutdownCtx).Msg("final snapshot saved successfully")
+		recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "final snapshot saved successfully")
 	}
 
-	logger.Info(shutdownCtx).Str("step", "5/6").Msg("stopping engine")
+	recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "stopping engine", "step", "5/6")
 	engineInstance.Stop()
 
-	if shutdownOp != nil {
-		shutdownOp.Complete()
-		if eventBus != nil {
-			eventBus.Emit(events.NewOperationCompleted(shutdownOp.ID, string(shutdownOp.Type), uint64(shutdownOp.Duration().Nanoseconds()), "completed", "", shutdownOp.ContextSnapshot(false)))
-		}
-		tracker.Complete(shutdownOp.ID)
-	}
-
-	logger.Info(shutdownCtx).Str("step", "6/6").Msg("shutdown complete")
+	shutdownOp.Complete()
+	recordShutdownLog(shutdownScope, apiobs.TelemetryLogLevelInfo, "shutdown complete", "step", "6/6")
+	finishLifecycleTelemetryScope(shutdownScope, shutdownOp, commonobs.SlotTerminalFinished, "")
+	operationDrainWorker.Stop()
 }
