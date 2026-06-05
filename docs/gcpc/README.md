@@ -2,7 +2,7 @@
 title: GCPC
 description: GoCache Plugin Communication Protocol v1 — Protobuf over Unix domain sockets, the contract IPC plugins implement
 status: stable
-last_updated: 2026-05-31
+last_updated: 2026-06-04
 related:
   - Plugins
   - GCPC-Components-Diagrams
@@ -68,7 +68,7 @@ The correlation ID enables multiplexed dispatch -- multiple commands can be in-f
 
 | Message | Direction | Purpose |
 |---------|-----------|---------|
-| CommandRequest | Server -> Plugin | Dispatch a client command (name, args, request ID, metadata) |
+| CommandRequest | Server -> Plugin | Dispatch a client command (name, args, request ID, metadata, folded operation context) |
 | CommandResponse | Plugin -> Server | Result as a recursive RESP-like value tree |
 
 ### Hooks (field numbers 50-51)
@@ -181,17 +181,20 @@ This prevents plugins from reading each other's private state. To share data acr
 
 `HookRequestV1` carries the filtered context in a `map<string, string> context` field (field 7). `HookResponseV1` carries plugin-written values in a `map<string, string> context_values` field (field 4).
 
-### Dedicated metadata field
+### Dedicated metadata and context fields
 
-In addition to the `shared.rex.*` keys in the hook context, both `CommandRequestV1` and `HookRequestV1` carry a dedicated `map<string, string> metadata` field with bare keys (no `shared.rex.` prefix). This gives plugins cleaner access to REX metadata without parsing prefixed context keys.
+In addition to the `shared.rex.*` keys in command/hook context, both `CommandRequestV1` and `HookRequestV1` carry a dedicated `map<string, string> metadata` field with bare keys (no `shared.rex.` prefix). This gives plugins cleaner access to REX metadata without parsing prefixed context keys.
 
 | Message | Field | Keys | Example |
 |---------|-------|------|---------|
 | CommandRequestV1 | `metadata` (field 4) | Bare keys | `{"traceparent": "00-abc", "tenant": "acme"}` |
+| CommandRequestV1 | `context` (field 5) | Folded visible operation context | `{"shared.rex.traceparent": "00-abc", "shared.rex.tenant": "acme"}` |
 | HookRequestV1 | `metadata` (field 8) | Bare keys | `{"traceparent": "00-abc", "tenant": "acme"}` |
-| HookRequestV1 | `context` (field 7) | Prefixed | `{"shared.rex.traceparent": "00-abc", ...}` |
+| HookRequestV1 | `context` (field 7) | Accumulated hook context | `{"shared.rex.traceparent": "00-abc", ...}` |
 
-The `context` field continues to carry `shared.rex.*` keys for backward compatibility. The `metadata` field is the preferred access path for new plugin code. Both fields are nil/empty when no REX metadata exists (zero wire overhead).
+For plugin command dispatch, the server now folds the current OperationTracker context snapshot and forwards the filtered/redacted result through the existing `CommandRequestV1.context` field. This preserves the GCPC v1 schema while allowing command plugins to see the same visible `shared.*`, server `_` keys, and target-plugin private namespace that hook filtering already permits. The `metadata` field remains the preferred access path for bare REX metadata and may be nil/empty when no REX values exist; `context` can still contain server-injected command fields such as `_operation_id`, `_start_ns`, `_command`, and `_arg_count` whenever a command operation is created.
+
+Command operations are created for accepted command dispatch paths before optional event, hook, or plugin fanout materializes payloads. Existing pre-dispatch exits remain outside that boundary: unresolved commands, core argument-validation failures, and commands queued inside `MULTI` return before command execution is accepted.
 
 ## REX Metadata
 
@@ -205,19 +208,19 @@ Clients opt into REX by negotiating the version in `HELLO`:
 HELLO 3 AUTH user pass SETNAME myclient REXV 1
 ```
 
-When `REXV 1` is negotiated, the server recognizes `META` lines as metadata directives that accumulate into the next command's context. Without negotiation, `META` is treated as an unknown command and REX has zero overhead.
+When `REXV 1` is negotiated, the server recognizes `REX.CMDMETA` as a command-scoped metadata directive that accumulates into the next non-metadata command's context. Without negotiation, `REX.CMDMETA` is treated as an unknown command and REX has zero overhead.
 
 ### Per-command metadata (stateless, preferred)
 
-`META` lines precede a command and carry a single key-value pair each. Each line gets a RESP `+OK` response (RESP-compliant request/response). On the next non-META command, accumulated metadata is attached, flows through pre-hooks and post-hooks, and is discarded.
+`REX.CMDMETA` carries one key-value pair per frame. If a directive is the only frame currently available from the client, the server returns RESP `+OK` and keeps the metadata pending for the next command. If the client sends one or more `REX.CMDMETA` frames and the following command in the same write/read buffer, the directive frames are silent and only the real command produces a client-visible response.
 
 ```
-META traceparent 00-abc123-def456-01
-META authorization Bearer eyJhbG...
+REX.CMDMETA traceparent 00-abc123-def456-01
+REX.CMDMETA authorization Bearer eyJhbG...
 GET mykey
 ```
 
-Values may contain spaces -- in binary RESP mode they're carried as bulk strings; in inline mode, arguments after the key are joined with spaces.
+On the next non-`REX.CMDMETA` command, accumulated metadata is attached, flows through pre-hooks and post-hooks, is used as an OperationTracker command overlay for that operation's start context, and is discarded. Values may contain spaces -- in binary RESP mode they're carried as bulk strings; in inline mode, arguments after the key are joined with spaces.
 
 ### Connection-scoped defaults (sticky)
 
@@ -235,10 +238,10 @@ Defaults are stored in a thread-safe `rex.Store` attached to `ClientContext.RexM
 
 ### Precedence
 
-Per-command `META` values override `REX.META` connection defaults for that single command:
+Per-command `REX.CMDMETA` values override `REX.META` connection defaults for that single command:
 
 ```
-per-command META  >  REX.META connection defaults  >  (absent)
+per-command REX.CMDMETA  >  REX.META connection defaults  >  (absent)
 ```
 
 ### Reserved keys
@@ -262,7 +265,7 @@ All plugins see `shared.rex.*` keys through the existing `shared.` visibility ru
 The logic lives in `pkg/rex/`:
 
 - `rex.Store` -- thread-safe connection-scoped metadata store
-- `rex.ParseMeta(args)` -- parses META command arguments into `(key, value)`
+- `rex.ParseMeta(args)` -- parses `REX.CMDMETA` command arguments into `(key, value)`
 - `rex.InjectIntoHookCtx(hookCtx, store, cmdMeta)` -- merges defaults + per-command metadata into the hook context with the `shared.rex.` prefix
 - `rex.BuildMetadata(store, cmdMeta)` -- merges defaults + per-command metadata into a bare-key map for the GCPC `metadata` field (returns nil when empty)
 - `rex.ValidateKey(key)` -- enforces the reserved-prefix rules
@@ -328,7 +331,7 @@ The full Protobuf schema is at `api/gcpc/v1/gcpc.proto`.
 | Sequence | [Synchronous Reaction Points](design/sequence/sequence_sync_reaction_points.puml) | Difference between hooks/evaluators and async events |
 | Sequence | [Pipelined Event Batching](design/sequence/sequence_pipelined_event_batching.puml) | Pipelined command replies with batched event delivery |
 | Sequence | [Runtime OTLP Export](design/sequence/sequence_runtime_observability_export.puml) | Operation/log/replay-gap flow into OTLP traces and logs |
-| Sequence | [REX Metadata](design/sequence/sequence_rex_metadata.puml) | HELLO REXV negotiation, META accumulation, hook context injection |
+| Sequence | [REX Metadata](design/sequence/sequence_rex_metadata.puml) | HELLO REXV negotiation, REX.CMDMETA accumulation, hook context injection |
 | Sequence | [Scope Registration](design/sequence/sequence_scope_registration.puml) | Scope negotiation during registration |
 | Sequence | [Scope Enforcement](design/sequence/sequence_scope_enforcement.puml) | Runtime scope checks |
 | Sequence | [OpHook Replay on Subscribe](design/sequence/sequence_ophook_replay_on_subscribe.puml) | Synthetic PhaseStart delivery for late subscribers |

@@ -5,7 +5,9 @@ import (
 	"context"
 
 	apicommand "gocache/api/command"
+	apiobs "gocache/api/observability"
 	apipersistence "gocache/api/persistence"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/blocking"
 	"gocache/pkg/cache"
 	"gocache/pkg/clientctx"
@@ -33,12 +35,14 @@ type Handler func(ctx *Context) apicommand.Result
 // Context carries all dependencies needed to execute a command.
 //
 // Context is request-scoped and short-lived: it is constructed per command
-// by the evaluator and discarded when the handler returns. The ambient
-// context.Context is held in an unexported field and exposed via the
-// Context() method, following the http.Request precedent — see
-// (*Context).Context and (*Context).SetContext.
+// by the evaluator and discarded when the handler returns. context.Context is
+// kept only for cancellation/deadlines/shutdown propagation. Operation
+// telemetry travels explicitly through OperationScope instead of the context.
 type Context struct {
-	ctx              context.Context
+	ctx                     context.Context
+	telemetry               commonobs.OperationScope
+	operationTrackerManager *commonobs.SlotOperationTrackerManager
+
 	Client           *clientctx.ClientContext
 	Op               string
 	Args             []string
@@ -95,28 +99,78 @@ type Context struct {
 	Coordinator MutationEmitter
 }
 
-// Context returns the ambient context.Context carrying the current
-// *ops.Operation (retrievable via operations.FromContext). Handlers
-// should pass this down to cache/persistence calls and logger calls so
-// logs stay correlated with the command operation.
-//
-// Do NOT capture the returned context in a goroutine that outlives the
-// handler call: the command operation completes when the handler returns,
-// and a later log would carry a stale (completed) operation.
-//
-// Returns context.Background() if no context was set, so callers never
-// receive nil.
-func (c *Context) Context() context.Context {
+// CancellationContext returns the cancellation/deadline context for the command.
+// Returns context.Background() if no context was set, so callers never receive nil.
+func (c *Context) CancellationContext() context.Context {
 	if c.ctx == nil {
 		return context.Background()
 	}
 	return c.ctx
 }
 
-// SetContext assigns the ambient context.Context. Called by the evaluator
-// when building the Context before handler dispatch.
-func (c *Context) SetContext(ctx context.Context) {
+// SetCancellationContext assigns the cancellation/deadline context for the command.
+func (c *Context) SetCancellationContext(ctx context.Context) {
 	c.ctx = ctx
+}
+
+// Context is a compatibility alias for CancellationContext while downstream
+// pipeline/cache/handler call sites migrate away from context-carried telemetry.
+func (c *Context) Context() context.Context {
+	return c.CancellationContext()
+}
+
+// SetContext is a compatibility alias for SetCancellationContext while
+// downstream call sites migrate to explicit OperationScope telemetry.
+func (c *Context) SetContext(ctx context.Context) {
+	c.SetCancellationContext(ctx)
+}
+
+// SetTelemetry assigns the explicit operation telemetry scope for this command.
+func (c *Context) SetTelemetry(scope commonobs.OperationScope) {
+	c.telemetry = scope
+}
+
+// Telemetry returns the explicit operation telemetry scope for this command.
+func (c *Context) Telemetry() commonobs.OperationScope {
+	return c.telemetry
+}
+
+// SetOperationTrackerManager assigns the connection context-version owner for
+// command handlers that intentionally mutate connection-scoped telemetry state.
+func (c *Context) SetOperationTrackerManager(manager *commonobs.SlotOperationTrackerManager) {
+	c.operationTrackerManager = manager
+}
+
+// UpdateConnectionTelemetryContext creates a new current connection-context
+// version for future operations. The active operation keeps its already pinned
+// start-time version; active-operation projection changes only through telemetry
+// records submitted to that operation.
+func (c *Context) UpdateConnectionTelemetryContext(pairs ...string) bool {
+	if c.operationTrackerManager == nil || c.Client == nil || c.Client.ConnectionIdentity == 0 {
+		return false
+	}
+	version := c.operationTrackerManager.UpdateConnectionContextStrings(c.Client.ConnectionIdentity, pairs...)
+	return !version.IsZero()
+}
+
+// RemoveConnectionTelemetryContext creates a new current connection-context
+// version without keys for future operations.
+func (c *Context) RemoveConnectionTelemetryContext(keys ...string) bool {
+	if c.operationTrackerManager == nil || c.Client == nil || c.Client.ConnectionIdentity == 0 {
+		return false
+	}
+	version := c.operationTrackerManager.RemoveConnectionContextStrings(c.Client.ConnectionIdentity, keys...)
+	return !version.IsZero()
+}
+
+// RecordTelemetry submits a telemetry record through the command scope.
+func (c *Context) RecordTelemetry(record apiobs.TelemetryRecord) bool {
+	return c.telemetry.Record(record)
+}
+
+// Log submits a log-request telemetry record through the command scope.
+func (c *Context) Log(level apiobs.TelemetryLogLevel, message []byte) bool {
+	return c.telemetry.Log(level, message)
 }
 
 // Reset zeroes every field so the *Context can be returned to a sync.Pool
@@ -125,6 +179,8 @@ func (c *Context) SetContext(ctx context.Context) {
 // connection lifetime they were borrowed from.
 func (c *Context) Reset() {
 	c.ctx = nil
+	c.telemetry = commonobs.OperationScope{}
+	c.operationTrackerManager = nil
 	c.Client = nil
 	c.Op = ""
 	c.Args = nil
@@ -147,14 +203,14 @@ func (c *Context) Reset() {
 // Dispatch runs fn under the appropriate locking discipline for the
 // command's sharding shape:
 //
-//   InBatch          — engine lock already held by an outer dispatcher
-//                      (e.g. EXEC), run inline.
-//   MultiKey         — acquire every shard's write lock (Engine.Dispatch-
-//                      WithResult takes Cache bulk lock) and run fn under
-//                      that umbrella.
-//   Shard < 0        — keyless command; no cache touch, run inline.
-//   Shard >= 0       — single-key command; route to that shard's engine
-//                      goroutine via Engine.DispatchToShard.
+//	InBatch          — engine lock already held by an outer dispatcher
+//	                   (e.g. EXEC), run inline.
+//	MultiKey         — acquire every shard's write lock (Engine.Dispatch-
+//	                   WithResult takes Cache bulk lock) and run fn under
+//	                   that umbrella.
+//	Shard < 0        — keyless command; no cache touch, run inline.
+//	Shard >= 0       — single-key command; route to that shard's engine
+//	                   goroutine via Engine.DispatchToShard.
 //
 // Wraps the result into a Result, propagating any error. If the engine
 // is stopped or the command context is cancelled before fn runs, the
@@ -176,22 +232,22 @@ func Dispatch(ctx *Context, fn func() any) apicommand.Result {
 		if len(ctx.TouchedShards) > 0 {
 			// Selective lock — multi-key handler told us which shards it
 			// actually touches; lock only those instead of the bulk lock.
-			res, err := ctx.Engine.DispatchToShards(ctx.Context(), ctx.TouchedShards, fn)
+			res, err := ctx.Engine.DispatchToShards(ctx.CancellationContext(), ctx.TouchedShards, fn)
 			return wrapDispatch(res, err)
 		}
 		// Bulk lock — multi-key handler touches every shard or didn't
 		// pre-compute its set (FLUSHDB, KEYS, SCAN, EXEC, snapshot, …).
-		res, err := ctx.Engine.DispatchWithResult(ctx.Context(), fn)
+		res, err := ctx.Engine.DispatchWithResult(ctx.CancellationContext(), fn)
 		return wrapDispatch(res, err)
 	}
 	if ctx.Shard < 0 {
 		return wrapInline(fn)
 	}
 	if ctx.Spec.ReadOnly {
-		res, err := ctx.Engine.DispatchToShardRO(ctx.Context(), ctx.Shard, fn)
+		res, err := ctx.Engine.DispatchToShardRO(ctx.CancellationContext(), ctx.Shard, fn)
 		return wrapDispatch(res, err)
 	}
-	res, err := ctx.Engine.DispatchToShard(ctx.Context(), ctx.Shard, fn)
+	res, err := ctx.Engine.DispatchToShard(ctx.CancellationContext(), ctx.Shard, fn)
 	return wrapDispatch(res, err)
 }
 

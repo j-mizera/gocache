@@ -29,6 +29,12 @@ const (
 	PluginRegistered Type = "plugin.registered"
 	PluginCrashed    Type = "plugin.crashed"
 	PluginRestarted  Type = "plugin.restarted"
+	PluginStarted    Type = "plugin.started"
+	PluginStopped    Type = "plugin.stopped"
+
+	PluginRegistrationFailed        Type = "plugin.registration_failed"
+	PluginCommandRegistered         Type = "plugin.command.registered"
+	PluginCommandRegistrationFailed Type = "plugin.command.registration_failed"
 
 	ConfigReloaded Type = "config.reloaded"
 
@@ -133,6 +139,51 @@ func NewPluginRestarted(name string, critical bool, restartCount int) Event {
 	e := newEventProto(PluginRestarted)
 	e.Data = &gcpc.EventV1_PluginRestarted{PluginRestarted: &gcpc.PluginRestartedEventV1{
 		Name: name, Critical: critical, RestartCount: int32(restartCount),
+	}}
+	return Event{Proto: e}
+}
+
+// NewPluginStarted creates a plugin.started event.
+func NewPluginStarted(name string, critical bool, pid int) Event {
+	e := newEventProto(PluginStarted)
+	e.Data = &gcpc.EventV1_PluginStarted{PluginStarted: &gcpc.PluginStartedEventV1{
+		Name: name, Critical: critical, Pid: int32(pid),
+	}}
+	return Event{Proto: e}
+}
+
+// NewPluginStopped creates a plugin.stopped event.
+func NewPluginStopped(name string, critical bool, reason string) Event {
+	e := newEventProto(PluginStopped)
+	e.Data = &gcpc.EventV1_PluginStopped{PluginStopped: &gcpc.PluginStoppedEventV1{
+		Name: name, Critical: critical, Reason: reason,
+	}}
+	return Event{Proto: e}
+}
+
+// NewPluginRegistrationFailed creates a plugin.registration_failed event.
+func NewPluginRegistrationFailed(name, version string, critical bool, errStr string) Event {
+	e := newEventProto(PluginRegistrationFailed)
+	e.Data = &gcpc.EventV1_PluginRegistrationFailed{PluginRegistrationFailed: &gcpc.PluginRegistrationFailedEventV1{
+		Name: name, Version: version, Critical: critical, Error: errStr,
+	}}
+	return Event{Proto: e}
+}
+
+// NewPluginCommandRegistered creates a plugin.command.registered event.
+func NewPluginCommandRegistered(name, command string, namespaced, readonly bool) Event {
+	e := newEventProto(PluginCommandRegistered)
+	e.Data = &gcpc.EventV1_PluginCommandRegistered{PluginCommandRegistered: &gcpc.PluginCommandRegisteredEventV1{
+		Name: name, Command: command, Namespaced: namespaced, Readonly: readonly,
+	}}
+	return Event{Proto: e}
+}
+
+// NewPluginCommandRegistrationFailed creates a plugin.command.registration_failed event.
+func NewPluginCommandRegistrationFailed(name, command, errStr string) Event {
+	e := newEventProto(PluginCommandRegistrationFailed)
+	e.Data = &gcpc.EventV1_PluginCommandRegistrationFailed{PluginCommandRegistrationFailed: &gcpc.PluginCommandRegistrationFailedEventV1{
+		Name: name, Command: command, Error: errStr,
 	}}
 	return Event{Proto: e}
 }

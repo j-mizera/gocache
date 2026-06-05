@@ -211,16 +211,21 @@ message EventV1 {
     ConnectionCloseEventV1   connection_close   = 13;
     ServerStartEventV1       server_start       = 14;
     ServerShutdownEventV1    server_shutdown    = 15;
-    PluginRegisteredEventV1  plugin_registered  = 16;
-    PluginCrashedEventV1     plugin_crashed     = 17;
-    PluginRestartedEventV1   plugin_restarted   = 18;
-    ConfigReloadedEventV1    config_reloaded    = 19;
+    PluginRegisteredEventV1                  plugin_registered                  = 16;
+    PluginCrashedEventV1                     plugin_crashed                     = 17;
+    PluginRestartedEventV1                   plugin_restarted                   = 18;
+    ConfigReloadedEventV1                    config_reloaded                    = 19;
     AuthFailedEventV1        auth_failed        = 20;
     CacheEvictionEventV1     cache_eviction     = 21;
     OperationStartEventV1    operation_start    = 23;
     OperationCompleteEventV1 operation_complete = 24;
     ReplayGapEventV1         replay_gap         = 25;
-    RuntimeLogBatchEventV1   runtime_log_batch  = 26;
+    RuntimeLogBatchEventV1                   runtime_log_batch                  = 26;
+    PluginStartedEventV1                     plugin_started                     = 27;
+    PluginStoppedEventV1                     plugin_stopped                     = 28;
+    PluginRegistrationFailedEventV1          plugin_registration_failed         = 29;
+    PluginCommandRegisteredEventV1           plugin_command_registered          = 30;
+    PluginCommandRegistrationFailedEventV1   plugin_command_registration_failed = 31;
   }
 }
 
@@ -275,6 +280,38 @@ message PluginRestartedEventV1 {
   string name          = 1;
   bool   critical      = 2;
   int32  restart_count = 3;
+}
+
+message PluginStartedEventV1 {
+  string name     = 1;
+  bool   critical = 2;
+  int32  pid      = 3;
+}
+
+message PluginStoppedEventV1 {
+  string name     = 1;
+  bool   critical = 2;
+  string reason   = 3;
+}
+
+message PluginRegistrationFailedEventV1 {
+  string name     = 1;
+  string version  = 2;
+  bool   critical = 3;
+  string error    = 4;
+}
+
+message PluginCommandRegisteredEventV1 {
+  string name       = 1;
+  string command    = 2;
+  bool   namespaced = 3;
+  bool   readonly   = 4;
+}
+
+message PluginCommandRegistrationFailedEventV1 {
+  string name    = 1;
+  string command = 2;
+  string error   = 3;
 }
 
 message ConfigReloadedEventV1 {

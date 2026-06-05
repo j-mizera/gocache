@@ -28,7 +28,10 @@ type OperationTracker interface {
 	// FinishCommand submits a command-finish request with the result code.
 	FinishCommand(operation InternalOperationIdentity, resultCode int64) bool
 	// Log submits a request to materialize a log later; it is not itself a log.
-	Log(operation InternalOperationIdentity, level TelemetryLogLevel, message []byte, fields ...[]byte) bool
+	// Field-bearing logs should be built as TelemetryRecord values with
+	// AddFieldBytes and submitted through RecordTelemetry to avoid variadic hot
+	// path APIs.
+	Log(operation InternalOperationIdentity, level TelemetryLogLevel, message []byte) bool
 	// Event submits a request to emit a typed event later; it is not itself an event.
 	Event(operation InternalOperationIdentity, eventName []byte, fields ...[]byte) bool
 	// ContextUpdate submits operation context key/value deltas for worker replay.

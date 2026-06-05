@@ -72,9 +72,8 @@ func Snapshot(reset bool) map[string]string {
 	return data
 }
 
-// RecordPipelineEvaluation records one core command evaluation that reached the
-// evaluator sink decision. Plugin-routed commands are tracked by plugin IPC
-// stats instead.
+// RecordPipelineEvaluation records one core command evaluation. Plugin-routed
+// commands are tracked by plugin IPC stats instead.
 func RecordPipelineEvaluation() {
 	if !Enabled() {
 		return
@@ -82,6 +81,8 @@ func RecordPipelineEvaluation() {
 	global.pipelineEvaluations.Add(1)
 }
 
+// RecordPipelineFastPath is retained for older benchmark snapshots. The command
+// pipeline no longer uses a no-sink telemetry bypass.
 func RecordPipelineFastPath() {
 	if !Enabled() {
 		return
@@ -89,6 +90,8 @@ func RecordPipelineFastPath() {
 	global.pipelineFastPath.Add(1)
 }
 
+// RecordPipelineMetricsOnlyPath is retained for older benchmark snapshots. A
+// command metrics sink no longer suppresses command telemetry capture.
 func RecordPipelineMetricsOnlyPath() {
 	if !Enabled() {
 		return

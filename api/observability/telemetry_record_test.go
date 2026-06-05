@@ -82,3 +82,81 @@ func TestParentRefCopiesInput(t *testing.T) {
 		t.Fatalf("ParentRef = %q, want parent-operation", got)
 	}
 }
+
+func TestNewLogRecordBytesCopiesMessageAndKeepsFlags(t *testing.T) {
+	message := []byte("startup ready")
+	record := NewLogRecordBytes(42, TelemetryLogLevelInfo, message)
+	record.Flags |= TelemetryRecordFlagLocalLogMaterialized
+	copy(message, "mutated")
+
+	if record.Kind != TelemetryRecordLog {
+		t.Fatalf("kind = %v, want log", record.Kind)
+	}
+	if record.Operation != 42 {
+		t.Fatalf("operation = %d, want 42", record.Operation)
+	}
+	if record.Level != TelemetryLogLevelInfo {
+		t.Fatalf("level = %v, want info", record.Level)
+	}
+	if got := string(record.NameBytes()); got != "startup ready" {
+		t.Fatalf("message = %q, want startup ready", got)
+	}
+	if record.Flags&TelemetryRecordFlagLocalLogMaterialized == 0 {
+		t.Fatal("local materialized flag should be retained")
+	}
+}
+
+func TestTelemetryRecordAddFieldBytesCopiesBoundedKV(t *testing.T) {
+	record := NewLogRecordBytes(7, TelemetryLogLevelWarn, []byte("eviction skipped"))
+	key := []byte("reason")
+	value := []byte("memory-limit")
+	if !record.AddFieldBytes(key, value) {
+		t.Fatal("AddFieldBytes should fit")
+	}
+	copy(value, "mutated-value")
+
+	if record.FieldCount != 1 {
+		t.Fatalf("field count = %d, want 1", record.FieldCount)
+	}
+	gotKey, gotValue, ok := record.FieldBytes(0)
+	if !ok {
+		t.Fatal("FieldBytes(0) should return field")
+	}
+	if string(gotKey) != "reason" || string(gotValue) != "memory-limit" {
+		t.Fatalf("field = %q:%q, want reason:memory-limit", gotKey, gotValue)
+	}
+	if _, _, ok := record.FieldBytes(1); ok {
+		t.Fatal("FieldBytes(1) should report no field")
+	}
+}
+
+func TestTelemetryRecordAddFieldBytesDropsWhenPayloadFull(t *testing.T) {
+	record := NewLogRecordBytes(7, TelemetryLogLevelWarn, []byte("overflow"))
+	large := make([]byte, TelemetryPayloadBytes)
+	for i := range large {
+		large[i] = 'x'
+	}
+	if record.AddFieldBytes([]byte("too-large"), large) {
+		t.Fatal("AddFieldBytes should fail when field exceeds payload")
+	}
+	if record.FieldCount != 0 {
+		t.Fatalf("field count = %d, want 0", record.FieldCount)
+	}
+	if record.DroppedFields != 1 {
+		t.Fatalf("dropped fields = %d, want 1", record.DroppedFields)
+	}
+}
+
+func TestTelemetryRecordAddFieldStringAvoidsTemporaryByteSlice(t *testing.T) {
+	record := NewLogRecordString(9, TelemetryLogLevelDebug, "debug message")
+	if !record.AddFieldString("plugin", "aof") {
+		t.Fatal("AddFieldString should fit")
+	}
+	key, value, ok := record.FieldBytes(0)
+	if !ok {
+		t.Fatal("FieldBytes(0) should return field")
+	}
+	if string(record.NameBytes()) != "debug message" || string(key) != "plugin" || string(value) != "aof" {
+		t.Fatalf("record = %q %q=%q, want debug message plugin=aof", record.NameBytes(), key, value)
+	}
+}
