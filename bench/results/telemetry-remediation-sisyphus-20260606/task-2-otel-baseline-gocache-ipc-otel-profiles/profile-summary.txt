@@ -1,0 +1,12 @@
+label=task-2-otel-baseline
+target=gocache-ipc-otel
+profile_window=pipelined_repeats
+profile_window_description=before profiles are captured immediately before the first pipelined repeat; after profiles are captured immediately after the final pipelined repeat
+pprof_endpoint=http://127.0.0.1:6060/debug/pprof
+alloc_before=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/alloc/before.mem
+alloc_after=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/alloc/after.mem
+alloc_objects_top=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/alloc/top20-alloc_objects-diff.txt
+alloc_space_top=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/alloc/top20-alloc_space-diff.txt
+mutex_before=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/mutex/before.prof
+mutex_after=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/mutex/after.prof
+mutex_top=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-20260606/task-2-otel-baseline-gocache-ipc-otel-profiles/mutex/top10-mutex-diff.txt

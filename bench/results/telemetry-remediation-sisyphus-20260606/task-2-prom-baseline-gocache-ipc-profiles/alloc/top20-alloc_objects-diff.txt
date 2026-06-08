@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ca7c34fe39b04444b87e32de1446c98b00e8044c
+Type: alloc_objects
+Time: 2026-06-06 16:15:04 UTC
+Showing nodes accounting for 86701454, 72.64% of 119350252 total
+Dropped 93 nodes (cum <= 596751)
+Showing top 20 nodes out of 48
+      flat  flat%   sum%        cum   cum%
+   1278326  1.07%  1.07%  116832334 97.89%  gocache/pkg/server.(*Server).handleConnection
+   5280953  4.42%  5.50%   92817979 77.77%  gocache/pkg/server.(*Server).runBatch
+   9201956  7.71% 13.21%   87792161 73.56%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 13.21%   74969022 62.81%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+   1165497  0.98% 14.18%   31214211 26.15%  fmt.Sprintf
+         0     0% 14.18%   31214211 26.15%  gocache/pkg/pipeline.resultToHookStrings
+         0     0% 14.18%   30048714 25.18%  fmt.(*pp).doPrintf
+         0     0% 14.18%   30048714 25.18%  fmt.(*pp).printArg
+         0     0% 14.18%   30048714 25.18%  fmt.(*pp).printValue
+         0     0% 14.18%   30048714 25.18%  reflect.Value.Interface (inline)
+  30048714 25.18% 39.36%   30048714 25.18%  reflect.packEface
+         0     0% 39.36%   30048714 25.18%  reflect.valueInterface
+         0     0% 39.36%   20897250 17.51%  gocache/commons/resp.(*Reader).Read
+   4204951  3.52% 42.88%   20195985 16.92%  gocache/commons/resp.(*Reader).readArray
+   7045235  5.90% 48.79%   14319841 12.00%  gocache/commons/resp.(*Reader).readBulkString
+         0     0% 48.79%   12823139 10.74%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+   9797780  8.21% 56.99%    9797780  8.21%  gocache/pkg/pipeline.(*Pipeline).recordCommandStartSignals
+   9633938  8.07% 65.07%    9633938  8.07%  gocache/pkg/pipeline.(*Pipeline).recordCommandFinishSignals
+   9044104  7.58% 72.64%    9044104  7.58%  bufio.(*Reader).ReadBytes
+         0     0% 72.64%    9044104  7.58%  gocache/commons/resp.(*Reader).ReadLine

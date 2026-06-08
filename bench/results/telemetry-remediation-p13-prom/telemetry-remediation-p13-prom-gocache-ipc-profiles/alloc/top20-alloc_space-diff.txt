@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 9a762f3e0c3eccf44c0c5144e7444eae0a9e7156
+Type: alloc_space
+Time: 2026-06-06 18:10:48 UTC
+Showing nodes accounting for 11872.56MB, 87.40% of 13583.58MB total
+Dropped 113 nodes (cum <= 67.92MB)
+Showing top 20 nodes out of 43
+      flat  flat%   sum%        cum   cum%
+  127.54MB  0.94%  0.94%  7202.26MB 53.02%  gocache/pkg/server.(*Server).handleConnection
+ 6407.57MB 47.17% 48.11%  6772.61MB 49.86%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 48.11%  6772.61MB 49.86%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 48.11%  6772.61MB 49.86%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0% 48.11%  6772.61MB 49.86%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+  389.09MB  2.86% 50.97%  5882.70MB 43.31%  gocache/pkg/server.(*Server).runBatch
+  685.55MB  5.05% 56.02%  2764.70MB 20.35%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 56.02%  2409.67MB 17.74%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 56.02%  2288.78MB 16.85%  gocache/pkg/server.(*Server).mapToResp
+       1MB 0.0074% 56.03%  2288.78MB 16.85%  gocache/pkg/server.(*Server).mapValueToResp
+ 2287.78MB 16.84% 72.87%  2287.78MB 16.84%  gocache/commons/resp.StringArray (inline)
+         0     0% 72.87%  1569.10MB 11.55%  gocache/commons/resp.(*Reader).Read
+ 1315.10MB  9.68% 82.55%  1535.10MB 11.30%  gocache/commons/resp.(*Reader).readArray
+         0     0% 82.55%   677.05MB  4.98%  gocache/pkg/command.Dispatch
+         0     0% 82.55%   662.55MB  4.88%  gocache/pkg/command.wrapInline (inline)
+  138.55MB  1.02% 83.57%   611.56MB  4.50%  fmt.Sprintf
+         0     0% 83.57%   611.56MB  4.50%  gocache/pkg/pipeline.resultToHookStrings
+         0     0% 83.57%   520.38MB  3.83%  gocache/pkg/resp/handler.HandleLRange
+  520.38MB  3.83% 87.40%   520.38MB  3.83%  gocache/pkg/resp/handler.HandleLRange.func1
+         0     0% 87.40%   472.01MB  3.47%  fmt.(*pp).doPrintf

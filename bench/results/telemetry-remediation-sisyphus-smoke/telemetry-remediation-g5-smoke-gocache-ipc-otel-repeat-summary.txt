@@ -1,0 +1,10 @@
+label=telemetry-remediation-g5-smoke
+target=gocache-ipc-otel
+repeat_count=1
+claim_grade=iteration-only
+canonical_standard_file=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-smoke/telemetry-remediation-g5-smoke-gocache-ipc-otel.csv
+canonical_pipelined_file=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-smoke/telemetry-remediation-g5-smoke-gocache-ipc-otel-pipelined.csv
+raw_repeat_dir=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-smoke/telemetry-remediation-g5-smoke-gocache-ipc-otel-repeats
+standard_raw_files=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-smoke/telemetry-remediation-g5-smoke-gocache-ipc-otel-repeats/standard/repeat-01.csv
+pipelined_raw_files=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-sisyphus-smoke/telemetry-remediation-g5-smoke-gocache-ipc-otel-repeats/pipelined/repeat-01.csv
+summary=canonical CSVs contain per-command medians in the original numeric columns and matching *_iqr columns; claims are marked claim-ready only when repeat_count >= 3

@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 961eaf3bd5abe534b1d360beec8b97323b1c268b
+Type: alloc_space
+Time: 2026-06-06 15:10:48 UTC
+Showing nodes accounting for 8287.86MB, 29.40% of 28192.45MB total
+Dropped 113 nodes (cum <= 140.96MB)
+Showing top 20 nodes out of 75
+      flat  flat%   sum%        cum   cum%
+  146.54MB  0.52%  0.52%  7310.97MB 25.93%  gocache/pkg/server.(*Server).handleConnection
+  400.58MB  1.42%  1.94%  6005.46MB 21.30%  gocache/pkg/server.(*Server).runBatch
+  145.66MB  0.52%  2.46%  5831.67MB 20.69%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  2.46%  5831.67MB 20.69%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0%  2.46%  5831.67MB 20.69%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0%  2.46%  5831.67MB 20.69%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+     112MB   0.4%  2.85%  5553.82MB 19.70%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0%  2.85%  3617.91MB 12.83%  gocache/pkg/plugin/router.(*PluginConn).writeLoop
+      17MB  0.06%  2.91%  3480.14MB 12.34%  gocache/pkg/plugin/router.(*PluginConn).writeOutboundBatch
+  672.55MB  2.39%  5.30%  2729.19MB  9.68%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0%  5.30%  2581.46MB  9.16%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationFinishedRecord
+ 2461.65MB  8.73% 14.03%  2461.65MB  8.73%  gocache/pkg/server.cloneStringMap (inline)
+         0     0% 14.03%  2390.57MB  8.48%  gocache/pkg/server.(*Server).mapToResp
+    1.50MB 0.0053% 14.04%  2390.57MB  8.48%  gocache/pkg/server.(*Server).mapValueToResp
+         0     0% 14.04%  2389.15MB  8.47%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+ 2389.07MB  8.47% 22.51%  2389.07MB  8.47%  gocache/commons/resp.StringArray (inline)
+         0     0% 22.51%  2280.35MB  8.09%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationStartedRecord
+  636.23MB  2.26% 24.77%  2128.40MB  7.55%  gocache/commons/transport.(*Conn).SendBatch
+         0     0% 24.77%  1578.08MB  5.60%  gocache/commons/resp.(*Reader).Read
+ 1305.07MB  4.63% 29.40%  1543.08MB  5.47%  gocache/commons/resp.(*Reader).readArray

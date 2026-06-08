@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ec63c372ef901c76342bd3d3311101cacb0a1871
+Type: alloc_space
+Time: 2026-06-05 20:44:56 UTC
+Showing nodes accounting for 2086.42MB, 30.03% of 6948.64MB total
+Dropped 100 nodes (cum <= 34.74MB)
+Showing top 20 nodes out of 84
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%  2441.29MB 35.13%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%     0%  2441.29MB 35.13%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0%     0%  2441.29MB 35.13%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0%     0%  2441.29MB 35.13%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainAndReport
+         0     0%     0%  1651.83MB 23.77%  gocache/pkg/plugin/router.(*PluginConn).writeLoop
+   24.51MB  0.35%  0.35%  1650.20MB 23.75%  gocache/pkg/server.(*Server).handleConnection
+       6MB 0.086%  0.44%  1598.24MB 23.00%  gocache/pkg/plugin/router.(*PluginConn).writeOutboundBatch
+      30MB  0.43%  0.87%  1486.75MB 21.40%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+   82.52MB  1.19%  2.06%  1260.34MB 18.14%  gocache/pkg/server.(*Server).runBatch
+ 1126.76MB 16.22% 18.27%  1126.76MB 16.22%  gocache/commons/observability.(*connectionContextStore).cloneVersionsLocked (inline)
+       8MB  0.12% 18.39%  1125.74MB 16.20%  gocache/commons/observability.(*connectionContextStore).reclaimReleased
+         0     0% 18.39%  1125.74MB 16.20%  gocache/commons/observability.(*connectionContextStore).release
+  312.55MB  4.50% 22.89%  1005.63MB 14.47%  gocache/commons/transport.(*Conn).SendBatch
+         0     0% 22.89%   954.53MB 13.74%  gocache/commons/observability.(*SlotOperationTrackerManager).releaseContextVersion
+  127.01MB  1.83% 24.71%   702.23MB 10.11%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 24.71%   693.08MB  9.97%  google.golang.org/protobuf/proto.Marshal
+  272.07MB  3.92% 28.63%   693.08MB  9.97%  google.golang.org/protobuf/proto.MarshalOptions.marshal
+   81.01MB  1.17% 29.80%   586.61MB  8.44%  gocache/pkg/plugin/manager.(*Manager).readLoop.func1.1
+         0     0% 29.80%   586.61MB  8.44%  gocache/pkg/plugin/router.outboundEnvelope.envelope (inline)
+      16MB  0.23% 30.03%   570.10MB  8.20%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationFinishedRecord

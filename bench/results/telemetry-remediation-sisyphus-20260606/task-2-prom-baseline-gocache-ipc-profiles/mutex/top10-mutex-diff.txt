@@ -1,0 +1,18 @@
+File: gocache
+Build ID: ca7c34fe39b04444b87e32de1446c98b00e8044c
+Type: delay
+Time: 2026-06-06 16:15:04 UTC
+Showing nodes accounting for 251.91s, 8044.44% of 3.13s total
+Dropped 184 nodes (cum <= 0.02s)
+Showing top 10 nodes out of 12
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%    251.96s 8046.18%  gocache/pkg/server.(*Server).handleConnection
+   251.91s 8044.44% 8044.44%    251.93s 8045.07%  sync.(*Mutex).Unlock (inline)
+         0     0% 8044.44%    251.91s 8044.44%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 8044.44%    251.90s 8044.32%  sync.(*RWMutex).Unlock
+         0     0% 8044.44%    251.90s 8044.32%  gocache/pkg/cache.(*Shard).Unlock
+         0     0% 8044.44%    206.38s 6590.60%  gocache/pkg/server.(*Server).runBatch
+         0     0% 8044.44%     45.61s 1456.45%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 8044.44%     45.57s 1455.37%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 8044.44%     45.57s 1455.35%  gocache/pkg/resp/handler.HandleMset
+         0     0% 8044.44%     45.57s 1455.08%  gocache/pkg/command.Dispatch

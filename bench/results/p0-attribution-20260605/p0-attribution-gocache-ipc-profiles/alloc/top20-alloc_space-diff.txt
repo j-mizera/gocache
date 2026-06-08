@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ca45fc8213f334b4faa8aa13d4620dd08a4636da
+Type: alloc_space
+Time: 2026-06-05 20:37:14 UTC
+Showing nodes accounting for 1153.95MB, 58.70% of 1966MB total
+Dropped 77 nodes (cum <= 9.83MB)
+Showing top 20 nodes out of 48
+      flat  flat%   sum%        cum   cum%
+   24.01MB  1.22%  1.22%  1478.37MB 75.20%  gocache/pkg/server.(*Server).handleConnection
+   79.02MB  4.02%  5.24%  1150.03MB 58.50%  gocache/pkg/server.(*Server).runBatch
+  150.01MB  7.63% 12.87%   542.97MB 27.62%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+  467.13MB 23.76% 36.63%   467.13MB 23.76%  gocache/commons/resp.StringArray (inline)
+         0     0% 36.63%   467.13MB 23.76%  gocache/pkg/server.(*Server).mapToResp
+         0     0% 36.63%   467.13MB 23.76%  gocache/pkg/server.(*Server).mapValueToResp
+         0     0% 36.63%   462.95MB 23.55%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 36.63%   321.74MB 16.37%  gocache/commons/resp.(*Reader).Read
+  271.74MB 13.82% 50.45%   313.74MB 15.96%  gocache/commons/resp.(*Reader).readArray
+         0     0% 50.45%   240.56MB 12.24%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 50.45%   240.56MB 12.24%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 50.45%   240.56MB 12.24%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 50.45%   240.56MB 12.24%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0% 50.45%   139.93MB  7.12%  gocache/pkg/command.Dispatch
+         0     0% 50.45%   138.53MB  7.05%  gocache/commons/observability.(*SlotOperationTrackerManager).VisitConnectionContextVersion (inline)
+         0     0% 50.45%   138.53MB  7.05%  gocache/commons/observability.(*connectionContextStore).visit
+         0     0% 50.45%   138.53MB  7.05%  gocache/pkg/server.(*OperationTrackerDrainWorker).copyOperationContext
+  138.53MB  7.05% 57.50%   138.53MB  7.05%  gocache/pkg/server.(*OperationTrackerDrainWorker).copyOperationContext.func1
+         0     0% 57.50%   132.43MB  6.74%  gocache/pkg/command.wrapInline (inline)
+   23.51MB  1.20% 58.70%   123.01MB  6.26%  fmt.Sprintf

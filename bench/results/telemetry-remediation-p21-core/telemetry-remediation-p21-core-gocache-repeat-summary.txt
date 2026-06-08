@@ -1,0 +1,10 @@
+label=telemetry-remediation-p21-core
+target=gocache
+repeat_count=3
+claim_grade=claim-ready
+canonical_standard_file=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache.csv
+canonical_pipelined_file=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-pipelined.csv
+raw_repeat_dir=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats
+standard_raw_files=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats/standard/repeat-01.csv /home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats/standard/repeat-02.csv /home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats/standard/repeat-03.csv
+pipelined_raw_files=/home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats/pipelined/repeat-01.csv /home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats/pipelined/repeat-02.csv /home/witherxse/IdeaProjects/gocache/bench/results/telemetry-remediation-p21-core/telemetry-remediation-p21-core-gocache-repeats/pipelined/repeat-03.csv
+summary=canonical CSVs contain per-command medians in the original numeric columns and matching *_iqr columns; claims are marked claim-ready only when repeat_count >= 3
