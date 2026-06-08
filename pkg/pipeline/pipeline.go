@@ -392,15 +392,13 @@ func (b *Pipeline) recordCommandStartSignals(scope commonobs.OperationScope, cmd
 	}
 	operationID := commandOperationID(scope, cmdOp)
 	if !scope.IsZero() {
-		if b.emitter.HasSubscribersFor(events.OperationStarted) {
-			buildStart := benchstats.StartTimer()
-			scope.OperationStartString(string(ops.TypeCommand),
-				apicommand.OperationID, operationID,
-				"_operation_type", string(ops.TypeCommand),
-				"_parent_operation_id", commandParentID(scope, cmdOp),
-			)
-			benchstats.RecordPipelineOperationStartedBuilt(buildStart)
-		}
+		buildStart := benchstats.StartTimer()
+		scope.OperationStartString(string(ops.TypeCommand),
+			apicommand.OperationID, operationID,
+			"_operation_type", string(ops.TypeCommand),
+			"_parent_operation_id", commandParentID(scope, cmdOp),
+		)
+		benchstats.RecordPipelineOperationStartedBuilt(buildStart)
 		if b.emitter.HasSubscribersFor(events.CommandStarted) {
 			buildStart := benchstats.StartTimer()
 			scope.CommandStartString(op, commandEventFields(operationID, op, args, metadata, 0, "", "")...)
@@ -424,17 +422,15 @@ func (b *Pipeline) recordCommandFinishSignals(scope commonobs.OperationScope, cm
 			scope.CommandFinishString(op, elapsedNs, commandEventFields(operationID, op, args, metadata, elapsedNs, resultVal, resultErr)...)
 			benchstats.RecordPipelineCommandCompletedBuilt(buildStart)
 		}
-		if b.emitter.HasSubscribersFor(events.OperationCompleted) {
-			buildStart := benchstats.StartTimer()
-			scope.OperationFinishString(string(ops.TypeCommand), elapsedNs,
-				apicommand.OperationID, operationID,
-				"_operation_type", string(ops.TypeCommand),
-				"_status", "completed",
-				apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
-				apicommand.ErrorKey, resultErr,
-			)
-			benchstats.RecordPipelineOperationCompletedBuilt(buildStart)
-		}
+		buildStart := benchstats.StartTimer()
+		scope.OperationFinishString(string(ops.TypeCommand), elapsedNs,
+			apicommand.OperationID, operationID,
+			"_operation_type", string(ops.TypeCommand),
+			"_status", "completed",
+			apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+			apicommand.ErrorKey, resultErr,
+		)
+		benchstats.RecordPipelineOperationCompletedBuilt(buildStart)
 		return
 	}
 	// Runtime event fanout is sidecar-owned. If no sidecar scope exists, keep

@@ -5,6 +5,7 @@ import (
 	"runtime/metrics"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -20,6 +21,17 @@ const (
 var enabled atomic.Bool
 
 var global counters
+
+type operationTrackerStats interface {
+	SkippedOperations() uint64
+	DroppedRecords() uint64
+	DroppedCompletedOperations() uint64
+}
+
+var operationTracker struct {
+	mu      sync.RWMutex
+	manager operationTrackerStats
+}
 
 func init() {
 	enabled.Store(parseBool(os.Getenv(EnvVar)))
@@ -60,16 +72,40 @@ func Reset() {
 	global.reset()
 }
 
+// SetOperationTrackerManager wires live operation-tracker loss counters into
+// benchmark snapshots. Passing nil clears the tracker.
+func SetOperationTrackerManager(manager operationTrackerStats) {
+	operationTracker.mu.Lock()
+	operationTracker.manager = manager
+	operationTracker.mu.Unlock()
+}
+
 // Snapshot returns benchmark attribution counters plus a small runtime/metrics
 // sample. If reset is true, counters are cleared after the snapshot is built.
 func Snapshot(reset bool) map[string]string {
 	data := global.snapshot()
 	data["enabled"] = strconv.FormatBool(Enabled())
+	addOperationTrackerStats(data)
 	addRuntimeMetrics(data)
 	if reset {
 		Reset()
 	}
 	return data
+}
+
+func addOperationTrackerStats(data map[string]string) {
+	operationTracker.mu.RLock()
+	manager := operationTracker.manager
+	operationTracker.mu.RUnlock()
+	if manager == nil {
+		data["operation_tracker.skipped_operations"] = "0"
+		data["operation_tracker.dropped_records"] = "0"
+		data["operation_tracker.dropped_completed"] = "0"
+		return
+	}
+	data["operation_tracker.skipped_operations"] = formatUint(manager.SkippedOperations())
+	data["operation_tracker.dropped_records"] = formatUint(manager.DroppedRecords())
+	data["operation_tracker.dropped_completed"] = formatUint(manager.DroppedCompletedOperations())
 }
 
 // RecordPipelineEvaluation records one core command evaluation. Plugin-routed

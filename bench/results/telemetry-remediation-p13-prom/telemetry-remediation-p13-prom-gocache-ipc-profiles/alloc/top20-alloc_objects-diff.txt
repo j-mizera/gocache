@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 9a762f3e0c3eccf44c0c5144e7444eae0a9e7156
+Type: alloc_objects
+Time: 2026-06-06 18:10:48 UTC
+Showing nodes accounting for 66405952, 51.33% of 129379406 total
+Dropped 110 nodes (cum <= 646897)
+Showing top 20 nodes out of 46
+      flat  flat%   sum%        cum   cum%
+   1316060  1.02%  1.02%  105381195 81.45%  gocache/pkg/server.(*Server).handleConnection
+   4606727  3.56%  4.58%   84347217 65.19%  gocache/pkg/server.(*Server).runBatch
+   8985670  6.95% 11.52%   79245390 61.25%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 11.52%   68621955 53.04%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+   1268848  0.98% 12.50%   32214259 24.90%  fmt.Sprintf
+         0     0% 12.50%   32214259 24.90%  gocache/pkg/pipeline.resultToHookStrings
+         0     0% 12.50%   30933464 23.91%  fmt.(*pp).doPrintf
+         0     0% 12.50%   30933464 23.91%  fmt.(*pp).printArg
+         0     0% 12.50%   30933464 23.91%  fmt.(*pp).printValue
+         0     0% 12.50%   30933464 23.91%  reflect.Value.Interface (inline)
+  30933464 23.91% 36.41%   30933464 23.91%  reflect.packEface
+         0     0% 36.41%   30933464 23.91%  reflect.valueInterface
+   6488951  5.02% 41.43%   21714915 16.78%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 41.43%   21714915 16.78%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 41.43%   21714915 16.78%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0% 41.43%   21714915 16.78%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+         0     0% 41.43%   18908770 14.61%  gocache/commons/resp.(*Reader).Read
+   4144417  3.20% 44.63%   18017446 13.93%  gocache/commons/resp.(*Reader).readArray
+   7711528  5.96% 50.59%   13119354 10.14%  gocache/commons/resp.(*Reader).readBulkString
+    950287  0.73% 51.33%   12517570  9.68%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation

@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ab7248e24da42ad898fa0b19ff0122b4fdfa4e94
+Type: alloc_objects
+Time: 2026-06-05 21:29:55 UTC
+Showing nodes accounting for 57895025, 32.01% of 180842796 total
+Dropped 104 nodes (cum <= 904213)
+Showing top 20 nodes out of 50
+      flat  flat%   sum%        cum   cum%
+    977196  0.54%  0.54%  113149693 62.57%  gocache/pkg/server.(*Server).handleConnection
+   4469121  2.47%  3.01%   91177605 50.42%  gocache/pkg/server.(*Server).runBatch
+   8651411  4.78%  7.80%   86212889 47.67%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0%  7.80%   74584544 41.24%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+    343238  0.19%  7.99%   47042027 26.01%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  7.99%   47042027 26.01%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0%  7.99%   47042027 26.01%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0%  7.99%   47042027 26.01%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+   1139021  0.63%  8.62%   30634767 16.94%  fmt.Sprintf
+         0     0%  8.62%   30634767 16.94%  gocache/pkg/pipeline.resultToHookStrings
+         0     0%  8.62%   29491650 16.31%  fmt.(*pp).doPrintf
+         0     0%  8.62%   29491650 16.31%  fmt.(*pp).printArg
+         0     0%  8.62%   29491650 16.31%  fmt.(*pp).printValue
+         0     0%  8.62%   29491650 16.31%  reflect.Value.Interface (inline)
+  29491650 16.31% 24.92%   29491650 16.31%  reflect.packEface
+         0     0% 24.92%   29491650 16.31%  reflect.valueInterface
+         0     0% 24.92%   27667563 15.30%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+   7121713  3.94% 28.86%   27667563 15.30%  gocache/pkg/server.(*operationTrackerDrainScratch).recordPairs
+         0     0% 28.86%   27634794 15.28%  gocache/pkg/server.(*OperationTrackerDrainWorker).foldContextUpdate
+   5701675  3.15% 32.01%   23956438 13.25%  gocache/commons/observability.(*connectionContextStore).reclaimReleasedLocked

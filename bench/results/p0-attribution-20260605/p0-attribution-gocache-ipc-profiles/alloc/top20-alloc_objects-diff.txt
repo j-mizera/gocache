@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ca45fc8213f334b4faa8aa13d4620dd08a4636da
+Type: alloc_objects
+Time: 2026-06-05 20:37:14 UTC
+Showing nodes accounting for 15659666, 51.56% of 30369269 total
+Dropped 75 nodes (cum <= 151846)
+Showing top 20 nodes out of 50
+      flat  flat%   sum%        cum   cum%
+    183972  0.61%  0.61%   20428314 67.27%  gocache/pkg/server.(*Server).handleConnection
+    973848  3.21%  3.81%   15941654 52.49%  gocache/pkg/server.(*Server).runBatch
+   1966230  6.47% 10.29%   15241564 50.19%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 10.29%   12877796 42.40%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+    268887  0.89% 11.17%    6789818 22.36%  fmt.Sprintf
+         0     0% 11.17%    6789818 22.36%  gocache/pkg/pipeline.resultToHookStrings
+         0     0% 11.17%    6520931 21.47%  fmt.(*pp).doPrintf
+         0     0% 11.17%    6520931 21.47%  fmt.(*pp).printArg
+         0     0% 11.17%    6520931 21.47%  fmt.(*pp).printValue
+         0     0% 11.17%    6520931 21.47%  reflect.Value.Interface (inline)
+   6520931 21.47% 32.64%    6520931 21.47%  reflect.packEface
+         0     0% 32.64%    6520931 21.47%  reflect.valueInterface
+         0     0% 32.64%    4627988 15.24%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 32.64%    4627988 15.24%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 32.64%    4627988 15.24%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 32.64%    4627988 15.24%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0% 32.64%    3715393 12.23%  gocache/commons/resp.(*Reader).Read
+   3681942 12.12% 44.77%    3681942 12.12%  gocache/pkg/server.foldContextUpdate
+    818652  2.70% 47.46%    3505669 11.54%  gocache/commons/resp.(*Reader).readArray
+   1245204  4.10% 51.56%    2588711  8.52%  gocache/commons/resp.(*Reader).readBulkString

@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ec63c372ef901c76342bd3d3311101cacb0a1871
+Type: alloc_objects
+Time: 2026-06-05 20:44:56 UTC
+Showing nodes accounting for 33374592, 28.76% of 116047264 total
+Dropped 101 nodes (cum <= 580236)
+Showing top 20 nodes out of 83
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%   35653517 30.72%  gocache/pkg/plugin/router.(*PluginConn).writeLoop
+     24582 0.021% 0.021%   35596219 30.67%  gocache/pkg/plugin/router.(*PluginConn).writeOutboundBatch
+         0     0% 0.021%   34944507 30.11%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 0.021%   34944507 30.11%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 0.021%   34944507 30.11%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 0.021%   34944507 30.11%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainAndReport
+   1966111  1.69%  1.72%   30726040 26.48%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+     68780 0.059%  1.77%   28696326 24.73%  gocache/commons/transport.(*Conn).SendBatch
+         0     0%  1.77%   28627546 24.67%  google.golang.org/protobuf/proto.Marshal
+   1036469  0.89%  2.67%   28627546 24.67%  google.golang.org/protobuf/proto.MarshalOptions.marshal
+  27591077 23.78% 26.44%   27591077 23.78%  reflect.copyVal
+    248267  0.21% 26.66%   21627942 18.64%  gocache/pkg/server.(*Server).handleConnection
+    774566  0.67% 27.32%   17297541 14.91%  gocache/pkg/server.(*Server).runBatch
+   1664740  1.43% 28.76%   16355924 14.09%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 28.76%   14024918 12.09%  google.golang.org/protobuf/internal/impl.(*MessageInfo).initOneofFieldCoders.func4
+         0     0% 28.76%   14024918 12.09%  google.golang.org/protobuf/internal/impl.(*MessageInfo).marshal
+         0     0% 28.76%   14024918 12.09%  google.golang.org/protobuf/internal/impl.(*MessageInfo).marshalAppendPointer
+         0     0% 28.76%   14024918 12.09%  google.golang.org/protobuf/internal/impl.appendMap
+         0     0% 28.76%   14024918 12.09%  google.golang.org/protobuf/internal/impl.appendMessageInfo
+         0     0% 28.76%   14024918 12.09%  google.golang.org/protobuf/internal/impl.encoderFuncsForMap.func2

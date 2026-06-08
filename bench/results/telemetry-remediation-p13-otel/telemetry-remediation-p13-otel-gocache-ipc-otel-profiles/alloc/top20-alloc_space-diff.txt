@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 9a762f3e0c3eccf44c0c5144e7444eae0a9e7156
+Type: alloc_space
+Time: 2026-06-06 18:13:15 UTC
+Showing nodes accounting for 8423.68MB, 21.74% of 38743.29MB total
+Dropped 121 nodes (cum <= 193.72MB)
+Showing top 20 nodes out of 78
+      flat  flat%   sum%        cum   cum%
+ 3704.36MB  9.56%  9.56% 11371.35MB 29.35%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  9.56% 11371.35MB 29.35%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0%  9.56% 11371.35MB 29.35%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0%  9.56% 11371.35MB 29.35%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+   78.50MB   0.2%  9.76%  7584.83MB 19.58%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+  114.03MB  0.29% 10.06%  7145.75MB 18.44%  gocache/pkg/server.(*Server).handleConnection
+  420.60MB  1.09% 11.14%  5931.20MB 15.31%  gocache/pkg/server.(*Server).runBatch
+         0     0% 11.14%  3881.27MB 10.02%  gocache/pkg/events.(*Bus).Emit
+         0     0% 11.14%  3789.74MB  9.78%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationFinishedRecord
+         0     0% 11.14%  3356.58MB  8.66%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationStartedRecord
+         0     0% 11.14%  2761.56MB  7.13%  gocache/pkg/events.(*ring).push
+         0     0% 11.14%  2761.56MB  7.13%  gocache/pkg/events.cloneEventForReplay
+ 1027.10MB  2.65% 13.79%  2761.56MB  7.13%  gocache/pkg/events.cloneEventProtoForReplay
+  679.55MB  1.75% 15.55%  2622.44MB  6.77%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 15.55%  2385.53MB  6.16%  gocache/pkg/server.(*Server).mapToResp
+    1.50MB 0.0039% 15.55%  2385.53MB  6.16%  gocache/pkg/server.(*Server).mapValueToResp
+ 2384.03MB  6.15% 21.71%  2384.03MB  6.15%  gocache/commons/resp.StringArray (inline)
+         0     0% 21.71%  2302.42MB  5.94%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 21.71%  2262.39MB  5.84%  gocache/pkg/plugin/router.(*PluginConn).writeLoop
+      14MB 0.036% 21.74%  2140.15MB  5.52%  gocache/pkg/plugin/router.(*PluginConn).writeOutboundBatch

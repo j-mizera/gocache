@@ -1,0 +1,18 @@
+File: gocache
+Build ID: ab7248e24da42ad898fa0b19ff0122b4fdfa4e94
+Type: delay
+Time: 2026-06-05 21:29:55 UTC
+Showing nodes accounting for 478.69s, 3202.36% of 14.95s total
+Dropped 155 nodes (cum <= 0.07s)
+Showing top 10 nodes out of 28
+      flat  flat%   sum%        cum   cum%
+   473.45s 3167.31% 3167.31%    473.51s 3167.69%  sync.(*Mutex).Unlock (partial-inline)
+         0     0% 3167.31%    467.23s 3125.69%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 3167.31%    467.16s 3125.20%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 3167.31%    331.54s 2217.94%  gocache/pkg/server.(*Server).runBatch
+         0     0% 3167.31%    330.19s 2208.92%  gocache/pkg/cache.(*Shard).Unlock
+     5.24s 35.05% 3202.36%    330.19s 2208.92%  sync.(*RWMutex).Unlock
+         0     0% 3202.36%    199.66s 1335.66%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 3202.36%    148.39s 992.69%  gocache/commons/observability.(*connectionContextStore).reclaimReleased
+         0     0% 3202.36%    148.39s 992.69%  gocache/commons/observability.(*connectionContextStore).release
+         0     0% 3202.36%    142.10s 950.63%  gocache/commons/observability.(*SlotOperationTrackerManager).StartOperationForConnectionWithMetadata

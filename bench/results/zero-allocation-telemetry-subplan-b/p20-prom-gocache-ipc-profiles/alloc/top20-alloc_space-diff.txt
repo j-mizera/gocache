@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 1a23bfca1000f5d817b3dae8565f7ff4554a0607
+Type: alloc_space
+Time: 2026-06-06 19:38:37 UTC
+Showing nodes accounting for 338.40MB, 71.62% of 472.48MB total
+Dropped 51 nodes (cum <= 2.36MB)
+Showing top 20 nodes out of 65
+      flat  flat%   sum%        cum   cum%
+       2MB  0.42%  0.42%   211.42MB 44.75%  gocache/pkg/server.(*Server).handleConnection
+  199.24MB 42.17% 42.59%   209.24MB 44.29%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 42.59%   209.24MB 44.29%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 42.59%   209.24MB 44.29%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0% 42.59%   209.24MB 44.29%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+   12.50MB  2.65% 45.24%   140.46MB 29.73%  gocache/pkg/server.(*Server).runBatch
+   19.50MB  4.13% 49.37%    82.75MB 17.51%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 49.37%    58.11MB 12.30%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 49.37%    47.53MB 10.06%  gocache/commons/resp.(*Reader).Read
+   41.53MB  8.79% 58.16%    47.03MB  9.95%  gocache/commons/resp.(*Reader).readArray
+   44.85MB  9.49% 67.65%    44.85MB  9.49%  gocache/commons/resp.StringArray (inline)
+         0     0% 67.65%    44.85MB  9.49%  gocache/pkg/server.(*Server).mapToResp
+         0     0% 67.65%    44.85MB  9.49%  gocache/pkg/server.(*Server).mapValueToResp
+         0     0% 67.65%    26.25MB  5.56%  gocache/pkg/command.Dispatch
+         0     0% 67.65%    24.64MB  5.22%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 67.65%    19.24MB  4.07%  gocache/pkg/command.Dispatch.wrapWithEmission.func1
+   17.77MB  3.76% 71.41%    17.77MB  3.76%  bufio.NewWriterSize (inline)
+         0     0% 71.41%    17.77MB  3.76%  gocache/commons/resp.NewWriter (inline)
+       1MB  0.21% 71.62%    13.64MB  2.89%  gocache/pkg/resp/handler.HandleMset
+         0     0% 71.62%    13.60MB  2.88%  gocache/pkg/command.wrapInline (inline)

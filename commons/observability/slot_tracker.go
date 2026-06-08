@@ -42,6 +42,12 @@ type InternalTrackerHandle struct {
 	slotRef    *operationSlot
 }
 
+// SlotMagazine is the reserved owner-side cache for batched slot allocation.
+// The current implementation still allocates directly from the shard free list;
+// the type exists so call sites can be wired to the future magazine API without
+// changing ownership semantics.
+type SlotMagazine struct{}
+
 // IsZero reports whether h cannot reference an active slot.
 func (h InternalTrackerHandle) IsZero() bool {
 	return h.slotRef == nil || h.segmentRef == nil || h.generation == 0
@@ -329,6 +335,20 @@ func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMeta
 		return InternalTrackerHandle{}, 0, false
 	}
 	return handle, version, true
+}
+
+// StartOperationWithPinnedConnectionContextAndMetadata starts an operation with
+// a version the caller has already pinned. On success the slot owns that pin and
+// releases it during drain/reset; on failure the pin is released before return.
+func (m *SlotOperationTrackerManager) StartOperationWithPinnedConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, version apiobs.ConnectionContextVersion, pairs map[string]string, metadata OperationSnapshotMetadata, magazine *SlotMagazine) (InternalTrackerHandle, bool) {
+	_ = connection
+	_ = magazine
+	handle, ok := m.startOperation(operation, parent, version, pairs, metadata)
+	if !ok {
+		m.ReleaseConnectionContextVersion(version)
+		return InternalTrackerHandle{}, false
+	}
+	return handle, true
 }
 
 // OperationContextSnapshot returns the active operation's materialized context:

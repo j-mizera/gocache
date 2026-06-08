@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ca7c34fe39b04444b87e32de1446c98b00e8044c
+Type: alloc_space
+Time: 2026-06-06 16:15:04 UTC
+Showing nodes accounting for 6047.63MB, 83.39% of 7252.08MB total
+Dropped 94 nodes (cum <= 36.26MB)
+Showing top 20 nodes out of 47
+      flat  flat%   sum%        cum   cum%
+  125.53MB  1.73%  1.73%  7466.80MB 102.96%  gocache/pkg/server.(*Server).handleConnection
+  406.59MB  5.61%  7.34%  6091.79MB 84.00%  gocache/pkg/server.(*Server).runBatch
+  702.05MB  9.68% 17.02%  2892.16MB 39.88%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 17.02%  2498.14MB 34.45%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 17.02%  2372.41MB 32.71%  gocache/pkg/server.(*Server).mapToResp
+    3.50MB 0.048% 17.07%  2372.41MB 32.71%  gocache/pkg/server.(*Server).mapValueToResp
+ 2368.91MB 32.67% 49.73%  2368.91MB 32.67%  gocache/commons/resp.StringArray (inline)
+         0     0% 49.73%  1605.11MB 22.13%  gocache/commons/resp.(*Reader).Read
+ 1323.61MB 18.25% 67.98%  1575.61MB 21.73%  gocache/commons/resp.(*Reader).readArray
+         0     0% 67.98%   671.02MB  9.25%  gocache/pkg/command.Dispatch
+         0     0% 67.98%   657.02MB  9.06%  gocache/pkg/command.wrapInline (inline)
+  134.55MB  1.86% 69.84%   593.05MB  8.18%  fmt.Sprintf
+         0     0% 69.84%   593.05MB  8.18%  gocache/pkg/pipeline.resultToHookStrings
+         0     0% 69.84%   524.38MB  7.23%  gocache/pkg/resp/handler.HandleLRange
+  524.38MB  7.23% 77.07%   524.38MB  7.23%  gocache/pkg/resp/handler.HandleLRange.func1
+         0     0% 77.07%   458.51MB  6.32%  fmt.(*pp).doPrintf
+         0     0% 77.07%   458.51MB  6.32%  fmt.(*pp).printArg
+         0     0% 77.07%   458.51MB  6.32%  fmt.(*pp).printValue
+         0     0% 77.07%   458.51MB  6.32%  reflect.Value.Interface (inline)
+  458.51MB  6.32% 83.39%   458.51MB  6.32%  reflect.packEface

@@ -997,7 +997,7 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 	}
 	switch d := evt.Data.(type) {
 	case *gcpcv1.EventV1_OperationStart:
-		if d.OperationStart == nil || len(d.OperationStart.Context) == 0 {
+		if d.OperationStart == nil || d.OperationStart.Context == nil {
 			return evt
 		}
 		payload := d.OperationStart
@@ -1013,7 +1013,7 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 			}},
 		}
 	case *gcpcv1.EventV1_OperationComplete:
-		if d.OperationComplete == nil || len(d.OperationComplete.Context) == 0 {
+		if d.OperationComplete == nil || d.OperationComplete.Context == nil {
 			return evt
 		}
 		payload := d.OperationComplete
@@ -1031,7 +1031,7 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 			}},
 		}
 	case *gcpcv1.EventV1_CommandPost:
-		if d.CommandPost == nil || len(d.CommandPost.Metadata) == 0 {
+		if d.CommandPost == nil || (len(d.CommandPost.Args) == 0 && d.CommandPost.Metadata == nil) {
 			return evt
 		}
 		payload := d.CommandPost
@@ -1041,7 +1041,7 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 			OperationId: evt.OperationId,
 			Data: &gcpcv1.EventV1_CommandPost{CommandPost: &gcpcv1.CommandPostEventV1{
 				Command:   payload.Command,
-				Args:      payload.Args,
+				Args:      cloneStringSlice(payload.Args),
 				ElapsedNs: payload.ElapsedNs,
 				Result:    payload.Result,
 				Error:     payload.Error,
@@ -1049,7 +1049,7 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 			}},
 		}
 	case *gcpcv1.EventV1_CommandPre:
-		if d.CommandPre == nil || len(d.CommandPre.Metadata) == 0 {
+		if d.CommandPre == nil || (len(d.CommandPre.Args) == 0 && d.CommandPre.Metadata == nil) {
 			return evt
 		}
 		payload := d.CommandPre
@@ -1059,7 +1059,7 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 			OperationId: evt.OperationId,
 			Data: &gcpcv1.EventV1_CommandPre{CommandPre: &gcpcv1.CommandPreEventV1{
 				Command:  payload.Command,
-				Args:     payload.Args,
+				Args:     cloneStringSlice(payload.Args),
 				Metadata: opctx.FilterForPlugin(payload.Metadata, pluginName),
 			}},
 		}
@@ -1094,4 +1094,13 @@ func projectEventForPlugin(evt *gcpcv1.EventV1, pluginName string) *gcpcv1.Event
 	default:
 		return evt
 	}
+}
+
+func cloneStringSlice(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
 }

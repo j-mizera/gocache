@@ -1,0 +1,28 @@
+File: gocache
+Build ID: ab7248e24da42ad898fa0b19ff0122b4fdfa4e94
+Type: alloc_space
+Time: 2026-06-05 21:29:55 UTC
+Showing nodes accounting for 10295.26MB, 77.09% of 13355.24MB total
+Dropped 101 nodes (cum <= 66.78MB)
+Showing top 20 nodes out of 53
+      flat  flat%   sum%        cum   cum%
+  113.03MB  0.85%  0.85%  8223.50MB 61.58%  gocache/pkg/server.(*Server).handleConnection
+  395.59MB  2.96%  3.81%  6368.86MB 47.69%  gocache/pkg/server.(*Server).runBatch
+   43.50MB  0.33%  4.13%  5314.40MB 39.79%  gocache/commons/observability.(*connectionContextStore).reclaimReleasedLocked
+         0     0%  4.13%  5309.89MB 39.76%  gocache/commons/observability.(*connectionContextStore).reclaimReleased
+         0     0%  4.13%  5309.89MB 39.76%  gocache/commons/observability.(*connectionContextStore).release
+ 5276.40MB 39.51% 43.64%  5276.40MB 39.51%  gocache/commons/observability.(*connectionContextStore).cloneVersionsLocked (inline)
+  151.35MB  1.13% 44.78%  4957.96MB 37.12%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 44.78%  4957.96MB 37.12%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0% 44.78%  4957.96MB 37.12%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0% 44.78%  4957.96MB 37.12%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+         0     0% 44.78%  4217.80MB 31.58%  gocache/commons/observability.(*SlotOperationTrackerManager).releaseContextVersion
+  660.05MB  4.94% 49.72%  3783.49MB 28.33%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 49.72%  2854.33MB 21.37%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 49.72%  2288.28MB 17.13%  gocache/pkg/server.(*Server).mapToResp
+       1MB 0.0075% 49.73%  2288.28MB 17.13%  gocache/pkg/server.(*Server).mapValueToResp
+ 2287.28MB 17.13% 66.85%  2287.28MB 17.13%  gocache/commons/resp.StringArray (inline)
+         0     0% 66.85%  1567.56MB 11.74%  gocache/commons/resp.(*Reader).Read
+ 1300.05MB  9.73% 76.59%  1532.56MB 11.48%  gocache/commons/resp.(*Reader).readArray
+      67MB   0.5% 77.09%  1209.60MB  9.06%  gocache/pkg/pipeline.(*Pipeline).startCommandTelemetryScope
+         0     0% 77.09%  1092.10MB  8.18%  gocache/commons/observability.(*SlotOperationTrackerManager).ReleaseConnectionContextVersion (inline)

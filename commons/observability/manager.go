@@ -263,6 +263,17 @@ func (s *connectionContextStore) forget(connection apiobs.ConnectionIdentity) bo
 	return true
 }
 
+func (s *connectionContextStore) reclaim() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureLocked()
+	for version, entry := range s.versions {
+		if entry.refs == 0 && !entry.current {
+			delete(s.versions, version)
+		}
+	}
+}
+
 func (s *connectionContextStore) ensureLocked() {
 	if s.current == nil || s.versions == nil {
 		s.init()

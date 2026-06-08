@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 02615246b8c876ef046059db3b2f1afd14923513
+Type: alloc_objects
+Time: 2026-06-06 17:03:53 UTC
+Showing nodes accounting for 131741336, 21.45% of 614298324 total
+Dropped 111 nodes (cum <= 3071491)
+Showing top 20 nodes out of 80
+      flat  flat%   sum%        cum   cum%
+   2747008  0.45%  0.45%  127689829 20.79%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  0.45%  127689829 20.79%  gocache/pkg/server.(*OperationTrackerDrainWorker).DrainOnce
+         0     0%  0.45%  127689829 20.79%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty (inline)
+         0     0%  0.45%  127689829 20.79%  gocache/pkg/server.(*OperationTrackerDrainWorker).runDrainLoop
+   5374034  0.87%  1.32%  124678287 20.30%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+   1445145  0.24%  1.56%   97942423 15.94%  gocache/pkg/server.(*Server).handleConnection
+   4835603  0.79%  2.34%   78909604 12.85%  gocache/pkg/server.(*Server).runBatch
+   8690736  1.41%  3.76%   69733052 11.35%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0%  3.76%   62870390 10.23%  gocache/pkg/plugin/router.(*PluginConn).writeLoop
+     55309 0.009%  3.77%   62810113 10.22%  gocache/pkg/plugin/router.(*PluginConn).writeOutboundBatch
+         0     0%  3.77%   61110310  9.95%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+    125455  0.02%  3.79%   59123950  9.62%  gocache/commons/transport.(*Conn).SendBatch
+         0     0%  3.79%   58998495  9.60%  google.golang.org/protobuf/proto.Marshal
+   2046844  0.33%  4.12%   58998495  9.60%  google.golang.org/protobuf/proto.MarshalOptions.marshal
+  56951651  9.27% 13.39%   56951651  9.27%  reflect.copyVal
+         0     0% 13.39%   51286957  8.35%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationFinishedRecord
+  16471653  2.68% 16.07%   49469551  8.05%  gocache/pkg/server.(*operationTrackerDrainScratch).recordPairs
+         0     0% 16.07%   45680082  7.44%  gocache/pkg/server.(*OperationTrackerDrainWorker).materializeOperationStartedRecord
+         0     0% 16.07%   38223568  6.22%  gocache/pkg/events.(*Bus).Emit
+  32997898  5.37% 21.45%   32997898  5.37%  gocache/pkg/server.(*operationTrackerDrainScratch).internKeyBytes (inline)
