@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	apiobs "gocache/api/observability"
+	commonobs "gocache/commons/observability"
 	"gocache/pkg/rex"
 )
 
@@ -49,9 +50,10 @@ type ClientContext struct {
 	// and read by HandleExec on this connection's goroutine without that
 	// lock. Atomic access bridges the cross-goroutine boundary.
 	watchDirty         atomic.Bool
-	RexVersion         int                       // 0 = disabled, 1 = META lines enabled
-	RexMeta            *rex.Store                // nil until first REX.META SET/MSET
-	CmdMeta            map[string]string         // transient per-command META, set by server, cleared after eval
+	RexVersion         int               // 0 = disabled, 1 = META lines enabled
+	RexMeta            *rex.Store        // nil until first REX.META SET/MSET
+	CmdMeta            map[string]string // transient per-command META, set by server, cleared after eval
+	ConnectionContext  commonobs.ConnectionContext
 	ConnectionIdentity apiobs.ConnectionIdentity // internal sidecar connection identity, set by server
 	ConnectionID       string                    // stable connection identifier, independent of operations
 	RemoteAddr         string                    // remote peer address, set by server

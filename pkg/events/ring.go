@@ -36,16 +36,17 @@ func (r *ring) push(evt apiEvents.Event) {
 	if !r.enabled() {
 		return
 	}
+	retained := cloneEvent(evt)
 	cap := len(r.buf)
 	if r.size == cap {
 		// Overwrite the oldest slot; advance head.
-		r.buf[r.head] = evt
+		r.buf[r.head] = retained
 		r.head = (r.head + 1) % cap
 		r.dropped++
 		return
 	}
 	tail := (r.head + r.size) % cap
-	r.buf[tail] = evt
+	r.buf[tail] = retained
 	r.size++
 }
 
@@ -59,7 +60,7 @@ func (r *ring) snapshot() ([]apiEvents.Event, uint64) {
 	out := make([]apiEvents.Event, r.size)
 	cap := len(r.buf)
 	for i := range r.size {
-		out[i] = r.buf[(r.head+i)%cap]
+		out[i] = cloneEvent(r.buf[(r.head+i)%cap])
 	}
 	return out, r.dropped
 }
