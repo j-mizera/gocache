@@ -62,13 +62,15 @@ export BENCH_CLIENT_CPUS=4-7
 export BENCH_MEM_LIMIT=2g
 export BENCH_GOCACHE_MAX_MEMORY_MB=1024
 export REBUILD=1
+# Basic matrix (valkey + core + IPC prometheus)
 bench/redis-benchmark/run-matrix.sh magazine-bench
 
+# IPC with pprof and benchstats (for profiles)
 export BENCH_PPROF=1
 export BENCH_STATS=1
 bench/redis-benchmark/run-ipc.sh magazine-bench-pprof --target gocache-ipc
 
-# OTel benchmark
+# IPC with OpenTelemetry (REQUIRED)
 bench/redis-benchmark/run-ipc.sh magazine-bench-otel --target gocache-ipc-otel
 ```
 
