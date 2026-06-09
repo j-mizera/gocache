@@ -50,9 +50,9 @@ const (
 	OperationStarted   Type = "operation.started"
 	OperationCompleted Type = "operation.completed"
 
-	// ReplayGap marks that the event bus's replay ring dropped events before
-	// a subscriber connected. The payload is a dedicated ReplayGapEventV1 so
-	// subscribers do not need to interpret diagnostic logs as control signals.
+	// ReplayGap marks an explicit loss window in replay/runtime telemetry. The
+	// payload is a dedicated ReplayGapEventV1 so subscribers do not need to
+	// interpret diagnostic logs as control signals.
 	ReplayGap Type = "replay.gap"
 )
 
@@ -225,8 +225,22 @@ func NewRuntimeLogBatch(records []*gcpc.RuntimeLogRecordV1) Event {
 	return Event{Proto: e}
 }
 
-// NewReplayGap creates a replay.gap event with a dedicated control payload.
-func NewReplayGap(subscriber string, dropped uint64) Event {
+// NewReplayGap creates a replay.gap event for OperationTracker loss counters.
+func NewReplayGap(skippedOperations, droppedRecords, droppedCompleted, invalidHandles, windowMs uint64) Event {
+	e := newEventProto(ReplayGap)
+	e.Data = &gcpc.EventV1_ReplayGap{ReplayGap: &gcpc.ReplayGapEventV1{
+		SkippedOperations: skippedOperations,
+		DroppedRecords:    droppedRecords,
+		DroppedCompleted:  droppedCompleted,
+		InvalidHandles:    invalidHandles,
+		WindowMs:          windowMs,
+	}}
+	return Event{Proto: e}
+}
+
+// NewReplaySubscriberGap creates a replay.gap event for event-ring history
+// dropped before a late subscriber connected.
+func NewReplaySubscriberGap(subscriber string, dropped uint64) Event {
 	e := newEventProto(ReplayGap)
 	e.Data = &gcpc.EventV1_ReplayGap{ReplayGap: &gcpc.ReplayGapEventV1{
 		Subscriber: subscriber, DroppedCount: dropped,

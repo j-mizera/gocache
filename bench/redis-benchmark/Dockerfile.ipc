@@ -17,12 +17,22 @@ COPY . .
 
 ARG VERSION="dev"
 ARG IPC_PLUGINS="prometheus"
+ARG PPROF="0"
 
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -ldflags="-s -w -X gocache/pkg/version.version=$VERSION" \
-    -o /build/bin/gocache \
-    ./cmd/server
+RUN if [ "$PPROF" = "1" ]; then \
+        CGO_ENABLED=0 GOOS=linux go build \
+            -trimpath \
+            -tags=pprof \
+            -ldflags="-s -w -X gocache/pkg/version.version=$VERSION" \
+            -o /build/bin/gocache \
+            ./cmd/server; \
+    else \
+        CGO_ENABLED=0 GOOS=linux go build \
+            -trimpath \
+            -ldflags="-s -w -X gocache/pkg/version.version=$VERSION" \
+            -o /build/bin/gocache \
+            ./cmd/server; \
+    fi
 
 RUN mkdir -p /build/bin/plugins && \
     for plugin in $IPC_PLUGINS; do \
@@ -48,7 +58,7 @@ COPY --from=builder /build/bin/plugins/ /usr/local/lib/gocache/plugins/
 
 USER gocache
 
-EXPOSE 6379 9100 9200
+EXPOSE 6379 9100 6060
 
 ENV GOCACHE_CRASHDUMP_DIR=/var/lib/gocache/crashes \
     GOCACHE_BOOT_STATE_FILE=/var/lib/gocache/boot.state

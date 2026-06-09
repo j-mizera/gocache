@@ -9,12 +9,14 @@ import (
 	apicommand "gocache/api/command"
 	apictx "gocache/api/context"
 	apievents "gocache/api/events"
+	gcpcv1 "gocache/api/gcpc/v1"
 	apiobs "gocache/api/observability"
 	"gocache/commons/logger"
 	commonobs "gocache/commons/observability"
 )
 
 const defaultOperationTrackerDrainInterval = 10 * time.Millisecond
+const defaultOperationTrackerGapInterval = 100 * time.Millisecond
 
 const operationTrackerDrainParentField = "_parent_operation_id"
 
@@ -23,13 +25,107 @@ const operationTrackerDrainParentField = "_parent_operation_id"
 // after command execution has finished, keeping zerolog formatting and sink I/O
 // off the command goroutine.
 type OperationTrackerDrainWorker struct {
-	manager  *commonobs.SlotOperationTrackerManager
-	interval time.Duration
-	emitter  apievents.Emitter
+	manager     *commonobs.SlotOperationTrackerManager
+	interval    time.Duration
+	gapInterval time.Duration
+	emitter     apievents.Emitter
+	nudgeCh     chan struct{} // buffered 1, non-blocking nudge
+	idleBackoff time.Duration // exponential backoff for idle state
+	drainMu     sync.Mutex
+	scratch     drainWorkerScratch
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
+}
+
+type drainWorkerScratch struct {
+	fields     []kvPair
+	args       []string
+	metadata   []kvPair
+	eventBuf   *gcpcv1.EventV1
+	contextMap map[string]string
+}
+
+type gapJanitor struct {
+	interval       time.Duration
+	lastSkipped    uint64
+	lastDropped    uint64
+	lastCompleted  uint64
+	lastInvalid    uint64
+	lastSampleTime time.Time
+}
+
+type kvPair struct {
+	key   string
+	value string
+}
+
+func (s *drainWorkerScratch) reset() {
+	if s == nil {
+		return
+	}
+	s.fields = s.fields[:0]
+	s.args = s.args[:0]
+	s.metadata = s.metadata[:0]
+	if s.eventBuf != nil {
+		*s.eventBuf = gcpcv1.EventV1{}
+	}
+	for key := range s.contextMap {
+		delete(s.contextMap, key)
+	}
+}
+
+func newGapJanitor(interval time.Duration) *gapJanitor {
+	if interval <= 0 {
+		interval = defaultOperationTrackerGapInterval
+	}
+	return &gapJanitor{
+		interval:       interval,
+		lastSampleTime: time.Now(),
+	}
+}
+
+func (j *gapJanitor) sample(manager *commonobs.SlotOperationTrackerManager, now time.Time) *apievents.Event {
+	if j == nil || manager == nil {
+		return nil
+	}
+	if j.interval <= 0 {
+		j.interval = defaultOperationTrackerGapInterval
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if now.Sub(j.lastSampleTime) < j.interval {
+		return nil
+	}
+
+	skipped := manager.SkippedOperations()
+	dropped := manager.DroppedRecords()
+	completed := manager.DroppedCompletedOperations()
+	invalid := manager.InvalidHandles()
+
+	deltaSkipped := skipped - j.lastSkipped
+	deltaDropped := dropped - j.lastDropped
+	deltaCompleted := completed - j.lastCompleted
+	deltaInvalid := invalid - j.lastInvalid
+
+	j.lastSkipped = skipped
+	j.lastDropped = dropped
+	j.lastCompleted = completed
+	j.lastInvalid = invalid
+	j.lastSampleTime = now
+
+	if deltaSkipped == 0 && deltaDropped == 0 && deltaCompleted == 0 && deltaInvalid == 0 {
+		return nil
+	}
+
+	windowMs := uint64(j.interval.Milliseconds())
+	if windowMs == 0 {
+		windowMs = uint64(defaultOperationTrackerGapInterval.Milliseconds())
+	}
+	event := apievents.NewReplayGap(deltaSkipped, deltaDropped, deltaCompleted, deltaInvalid, windowMs)
+	return &event
 }
 
 // NewOperationTrackerDrainWorker returns a server-side completed-operation
@@ -39,11 +135,28 @@ func NewOperationTrackerDrainWorker(manager *commonobs.SlotOperationTrackerManag
 	if interval <= 0 {
 		interval = defaultOperationTrackerDrainInterval
 	}
-	return &OperationTrackerDrainWorker{
-		manager:  manager,
-		interval: interval,
-		emitter:  apievents.NoopEmitter{},
-		stopCh:   make(chan struct{}),
+	worker := &OperationTrackerDrainWorker{
+		manager:     manager,
+		interval:    interval,
+		gapInterval: defaultOperationTrackerGapInterval,
+		emitter:     apievents.NoopEmitter{},
+		stopCh:      make(chan struct{}),
+		nudgeCh:     make(chan struct{}, 1),
+		idleBackoff: 1 * time.Millisecond,
+	}
+	if manager != nil {
+		manager.SetCompletedNotify(worker.nudge)
+	}
+	return worker
+}
+
+func (w *OperationTrackerDrainWorker) nudge() {
+	if w == nil {
+		return
+	}
+	select {
+	case w.nudgeCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -59,8 +172,20 @@ func (w *OperationTrackerDrainWorker) SetEmitter(emitter apievents.Emitter) {
 	w.emitter = emitter
 }
 
-// Start begins periodic draining until the parent context is cancelled or Stop
-// is called. The context is used only as a lifecycle cancellation signal.
+// SetGapInterval configures how often the worker samples OperationTracker loss
+// counters. Non-positive values reset to the default ~100 ms cadence.
+func (w *OperationTrackerDrainWorker) SetGapInterval(interval time.Duration) {
+	if w == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = defaultOperationTrackerGapInterval
+	}
+	w.gapInterval = interval
+}
+
+// Start begins event-driven draining until the parent context is cancelled or
+// Stop is called. The context is used only as a lifecycle cancellation signal.
 func (w *OperationTrackerDrainWorker) Start(parentCtx context.Context) {
 	if w == nil || w.manager == nil {
 		return
@@ -68,35 +193,65 @@ func (w *OperationTrackerDrainWorker) Start(parentCtx context.Context) {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ticker := time.NewTicker(w.interval)
-	w.wg.Add(1)
+	gapInterval := w.gapInterval
+	if gapInterval <= 0 {
+		gapInterval = defaultOperationTrackerGapInterval
+	}
+	w.wg.Add(2)
 	go func() {
 		defer w.wg.Done()
-		defer ticker.Stop()
-
 		w.DrainOnce()
 		for {
+			if w.drainUntilEmpty() == 0 {
+				select {
+				case <-w.nudgeCh:
+				case <-parentCtx.Done():
+					w.DrainOnce()
+					return
+				case <-w.stopCh:
+					w.DrainOnce()
+					return
+				case <-time.After(w.idleBackoff):
+				}
+				if w.idleBackoff < w.interval {
+					w.idleBackoff *= 2
+					if w.idleBackoff > w.interval {
+						w.idleBackoff = w.interval
+					}
+				}
+			} else {
+				w.idleBackoff = 1 * time.Millisecond
+			}
+		}
+	}()
+	go func() {
+		defer w.wg.Done()
+		janitor := newGapJanitor(gapInterval)
+		ticker := time.NewTicker(janitor.interval)
+		defer ticker.Stop()
+		for {
 			select {
-			case <-ticker.C:
-				w.DrainOnce()
+			case now := <-ticker.C:
+				if evt := janitor.sample(w.manager, now); evt != nil && w.emitter != nil {
+					w.emitter.Emit(*evt)
+				}
 			case <-parentCtx.Done():
-				w.DrainOnce()
 				return
 			case <-w.stopCh:
-				w.DrainOnce()
 				return
 			}
 		}
 	}()
 }
 
-// Stop signals the worker to stop, waits for its goroutine, and performs a final
+// Stop signals the worker to stop, waits for its goroutines, and performs a final
 // drain from inside the worker before it exits. Stop is idempotent.
 func (w *OperationTrackerDrainWorker) Stop() {
 	if w == nil {
 		return
 	}
 	w.stopOnce.Do(func() { close(w.stopCh) })
+	w.nudge()
 	w.wg.Wait()
 }
 
@@ -106,6 +261,8 @@ func (w *OperationTrackerDrainWorker) DrainOnce() int {
 	if w == nil || w.manager == nil {
 		return 0
 	}
+	w.drainMu.Lock()
+	defer w.drainMu.Unlock()
 	drained := 0
 	for shard := 0; shard < w.manager.ShardCount(); shard++ {
 		drained += w.manager.DrainCompletedShard(shard, w.projectCompletedOperation)
@@ -113,9 +270,30 @@ func (w *OperationTrackerDrainWorker) DrainOnce() int {
 	return drained
 }
 
+func (w *OperationTrackerDrainWorker) drainUntilEmpty() int {
+	if w == nil || w.manager == nil {
+		return 0
+	}
+	w.drainMu.Lock()
+	defer w.drainMu.Unlock()
+	total := 0
+	for {
+		drained := 0
+		for shard := 0; shard < w.manager.ShardCount(); shard++ {
+			drained += w.manager.DrainCompletedShard(shard, w.projectCompletedOperation)
+		}
+		if drained == 0 {
+			return total
+		}
+		total += drained
+	}
+}
+
 func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation commonobs.CompletedOperation) {
+	scratch := &w.scratch
 	operationContext := w.copyOperationContext(operation)
 	for i := range operation.Records {
+		scratch.reset()
 		record := operation.Records[i]
 		switch record.Kind {
 		case apiobs.TelemetryRecordContextUpdate:
@@ -123,19 +301,19 @@ func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation common
 		case apiobs.TelemetryRecordContextRemove:
 			foldContextRemove(operationContext, record)
 		case apiobs.TelemetryRecordOperationStart:
-			materializeOperationStartedRecord(operation, record, operationContext, w.emitter)
+			materializeOperationStartedRecord(operation, record, operationContext, w.emitter, scratch)
 		case apiobs.TelemetryRecordOperationFinish:
-			materializeOperationFinishedRecord(operation, record, operationContext, w.emitter)
+			materializeOperationFinishedRecord(operation, record, operationContext, w.emitter, scratch)
 		case apiobs.TelemetryRecordCommandStart:
-			materializeCommandStartedRecord(record, w.emitter)
+			materializeCommandStartedRecord(record, w.emitter, scratch)
 		case apiobs.TelemetryRecordCommandFinish:
-			materializeCommandFinishedRecord(record, w.emitter)
+			materializeCommandFinishedRecord(record, w.emitter, scratch)
 		case apiobs.TelemetryRecordLog:
 			materializeCompletedOperationLog(operation, record, operationContext)
 		case apiobs.TelemetryRecordEvent:
-			materializeCompletedOperationEvent(record, operationContext, w.emitter)
+			materializeCompletedOperationEvent(record, operationContext, w.emitter, scratch)
 		case apiobs.TelemetryRecordDrop:
-			materializeDropRecord(operation, record, operationContext)
+			materializeDropRecord(operation, record, operationContext, scratch)
 		}
 	}
 }
@@ -218,15 +396,15 @@ func foldContextRemove(operationContext map[string]string, record apiobs.Telemet
 	}
 }
 
-func materializeOperationStartedRecord(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string, emitter apievents.Emitter) {
+func materializeOperationStartedRecord(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string, emitter apievents.Emitter, scratch *drainWorkerScratch) {
 	if emitter == nil {
 		return
 	}
-	fields := telemetryRecordStringFields(record)
+	fields := scratchTelemetryRecordFields(record, scratch)
 	operationID := fieldOrDefault(fields, apicommand.OperationID, strconv.FormatInt(int64(operation.Operation), 10))
 	operationType := string(record.NameBytes())
 	if operationType == "" {
-		operationType = fields["_operation_type"]
+		operationType = fieldValue(fields, "_operation_type")
 	}
 	parentID := fieldOrDefault(fields, "_parent_operation_id", operation.Parent.String())
 	event := apievents.NewOperationStarted(operationID, operationType, parentID, cloneStringMap(operationContext))
@@ -234,117 +412,128 @@ func materializeOperationStartedRecord(operation commonobs.CompletedOperation, r
 	emitter.Emit(event)
 }
 
-func materializeOperationFinishedRecord(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string, emitter apievents.Emitter) {
+func materializeOperationFinishedRecord(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string, emitter apievents.Emitter, scratch *drainWorkerScratch) {
 	if emitter == nil {
 		return
 	}
-	fields := telemetryRecordStringFields(record)
+	fields := scratchTelemetryRecordFields(record, scratch)
 	operationID := fieldOrDefault(fields, apicommand.OperationID, strconv.FormatInt(int64(operation.Operation), 10))
 	operationType := string(record.NameBytes())
 	if operationType == "" {
-		operationType = fields["_operation_type"]
+		operationType = fieldValue(fields, "_operation_type")
 	}
 	elapsedNs := uint64(record.Number)
 	if elapsedNs == 0 {
-		elapsedNs, _ = strconv.ParseUint(fields[apicommand.ElapsedNs], 10, 64)
+		elapsedNs, _ = strconv.ParseUint(fieldValue(fields, apicommand.ElapsedNs), 10, 64)
 	}
 	status := fieldOrDefault(fields, "_status", completedStatusString(operation.Status))
-	event := apievents.NewOperationCompleted(operationID, operationType, elapsedNs, status, fields[apicommand.ErrorKey], cloneStringMap(operationContext))
+	event := apievents.NewOperationCompleted(operationID, operationType, elapsedNs, status, fieldValue(fields, apicommand.ErrorKey), cloneStringMap(operationContext))
 	applyRecordTimestamp(&event, record)
 	emitter.Emit(event)
 }
 
-func materializeCommandStartedRecord(record apiobs.TelemetryRecord, emitter apievents.Emitter) {
+func materializeCommandStartedRecord(record apiobs.TelemetryRecord, emitter apievents.Emitter, scratch *drainWorkerScratch) {
 	if emitter == nil {
 		return
 	}
-	fields := telemetryRecordStringFields(record)
-	event := apievents.NewCommandStarted(string(record.NameBytes()), eventArgs(fields), eventMetadata(fields))
-	if operationID := fields[apicommand.OperationID]; operationID != "" {
+	fields := scratchTelemetryRecordFields(record, scratch)
+	event := apievents.NewCommandStarted(
+		string(record.NameBytes()),
+		stableEventArgs(scratchEventArgs(fields, scratch), emitter),
+		stableEventMetadata(scratchEventMetadata(fields, scratch), emitter),
+	)
+	if operationID := fieldValue(fields, apicommand.OperationID); operationID != "" {
 		event = event.WithOperationID(operationID)
 	}
 	applyRecordTimestamp(&event, record)
 	emitter.Emit(event)
 }
 
-func materializeCommandFinishedRecord(record apiobs.TelemetryRecord, emitter apievents.Emitter) {
+func materializeCommandFinishedRecord(record apiobs.TelemetryRecord, emitter apievents.Emitter, scratch *drainWorkerScratch) {
 	if emitter == nil {
 		return
 	}
-	fields := telemetryRecordStringFields(record)
+	fields := scratchTelemetryRecordFields(record, scratch)
 	elapsedNs := uint64(record.Number)
 	if elapsedNs == 0 {
-		elapsedNs, _ = strconv.ParseUint(fields[apicommand.ElapsedNs], 10, 64)
+		elapsedNs, _ = strconv.ParseUint(fieldValue(fields, apicommand.ElapsedNs), 10, 64)
 	}
-	event := apievents.NewCommandCompleted(string(record.NameBytes()), eventArgs(fields), elapsedNs, fields[apicommand.ResultKey], fields[apicommand.ErrorKey], eventMetadata(fields))
-	if operationID := fields[apicommand.OperationID]; operationID != "" {
+	event := apievents.NewCommandCompleted(
+		string(record.NameBytes()),
+		stableEventArgs(scratchEventArgs(fields, scratch), emitter),
+		elapsedNs,
+		fieldValue(fields, apicommand.ResultKey),
+		fieldValue(fields, apicommand.ErrorKey),
+		stableEventMetadata(scratchEventMetadata(fields, scratch), emitter),
+	)
+	if operationID := fieldValue(fields, apicommand.OperationID); operationID != "" {
 		event = event.WithOperationID(operationID)
 	}
 	applyRecordTimestamp(&event, record)
 	emitter.Emit(event)
 }
 
-func materializeCompletedOperationEvent(record apiobs.TelemetryRecord, operationContext map[string]string, emitter apievents.Emitter) {
+func materializeCompletedOperationEvent(record apiobs.TelemetryRecord, operationContext map[string]string, emitter apievents.Emitter, scratch *drainWorkerScratch) {
 	if emitter == nil {
 		return
 	}
-	fields := telemetryRecordStringFields(record)
+	fields := scratchTelemetryRecordFields(record, scratch)
 	eventType := apievents.Type(string(record.NameBytes()))
 	var event apievents.Event
 	switch eventType {
 	case apievents.ConnectionOpen:
-		event = apievents.NewConnectionOpen(fields[apicommand.RemoteAddrKey], fields[apicommand.ConnectionIDKey])
+		event = apievents.NewConnectionOpen(fieldValue(fields, apicommand.RemoteAddrKey), fieldValue(fields, apicommand.ConnectionIDKey))
 	case apievents.ConnectionClose:
-		durationNs, _ := strconv.ParseUint(fields[apicommand.ElapsedNs], 10, 64)
-		event = apievents.NewConnectionClose(fields[apicommand.RemoteAddrKey], durationNs, fields[apicommand.ConnectionIDKey])
+		durationNs, _ := strconv.ParseUint(fieldValue(fields, apicommand.ElapsedNs), 10, 64)
+		event = apievents.NewConnectionClose(fieldValue(fields, apicommand.RemoteAddrKey), durationNs, fieldValue(fields, apicommand.ConnectionIDKey))
 	case apievents.OperationStarted:
-		event = apievents.NewOperationStarted(fields[apicommand.OperationID], fields["_operation_type"], fields["_parent_operation_id"], cloneStringMap(operationContext))
+		event = apievents.NewOperationStarted(fieldValue(fields, apicommand.OperationID), fieldValue(fields, "_operation_type"), fieldValue(fields, "_parent_operation_id"), cloneStringMap(operationContext))
 	case apievents.OperationCompleted:
-		durationNs, _ := strconv.ParseUint(fields[apicommand.ElapsedNs], 10, 64)
-		event = apievents.NewOperationCompleted(fields[apicommand.OperationID], fields["_operation_type"], durationNs, fields["_status"], fields[apicommand.ErrorKey], cloneStringMap(operationContext))
+		durationNs, _ := strconv.ParseUint(fieldValue(fields, apicommand.ElapsedNs), 10, 64)
+		event = apievents.NewOperationCompleted(fieldValue(fields, apicommand.OperationID), fieldValue(fields, "_operation_type"), durationNs, fieldValue(fields, "_status"), fieldValue(fields, apicommand.ErrorKey), cloneStringMap(operationContext))
 	case apievents.CommandStarted:
-		event = apievents.NewCommandStarted(fields[apicommand.CommandKey], eventArgs(fields), eventMetadata(fields))
+		event = apievents.NewCommandStarted(fieldValue(fields, apicommand.CommandKey), stableEventArgs(scratchEventArgs(fields, scratch), emitter), stableEventMetadata(scratchEventMetadata(fields, scratch), emitter))
 	case apievents.CommandCompleted:
-		durationNs, _ := strconv.ParseUint(fields[apicommand.ElapsedNs], 10, 64)
-		event = apievents.NewCommandCompleted(fields[apicommand.CommandKey], eventArgs(fields), durationNs, fields[apicommand.ResultKey], fields[apicommand.ErrorKey], eventMetadata(fields))
+		durationNs, _ := strconv.ParseUint(fieldValue(fields, apicommand.ElapsedNs), 10, 64)
+		event = apievents.NewCommandCompleted(fieldValue(fields, apicommand.CommandKey), stableEventArgs(scratchEventArgs(fields, scratch), emitter), durationNs, fieldValue(fields, apicommand.ResultKey), fieldValue(fields, apicommand.ErrorKey), stableEventMetadata(scratchEventMetadata(fields, scratch), emitter))
 	case apievents.AuthFailed:
-		event = apievents.NewAuthFailed(fields[apicommand.RemoteAddrKey], fields[apicommand.CommandKey])
+		event = apievents.NewAuthFailed(fieldValue(fields, apicommand.RemoteAddrKey), fieldValue(fields, apicommand.CommandKey))
 	case apievents.ServerShutdown:
-		event = apievents.NewServerShutdown(fields["_reason"])
+		event = apievents.NewServerShutdown(fieldValue(fields, "_reason"))
 	case apievents.PluginRegistered:
-		critical, _ := strconv.ParseBool(fields["_critical"])
-		event = apievents.NewPluginRegistered(fields[apicommand.PluginNameKey], fields["_version"], critical)
+		critical, _ := strconv.ParseBool(fieldValue(fields, "_critical"))
+		event = apievents.NewPluginRegistered(fieldValue(fields, apicommand.PluginNameKey), fieldValue(fields, "_version"), critical)
 	case apievents.PluginCrashed:
-		critical, _ := strconv.ParseBool(fields["_critical"])
-		event = apievents.NewPluginCrashed(fields[apicommand.PluginNameKey], critical, fields[apicommand.ErrorKey])
+		critical, _ := strconv.ParseBool(fieldValue(fields, "_critical"))
+		event = apievents.NewPluginCrashed(fieldValue(fields, apicommand.PluginNameKey), critical, fieldValue(fields, apicommand.ErrorKey))
 	case apievents.PluginRestarted:
-		critical, _ := strconv.ParseBool(fields["_critical"])
-		restartCount, _ := strconv.Atoi(fields["_restart_count"])
-		event = apievents.NewPluginRestarted(fields[apicommand.PluginNameKey], critical, restartCount)
+		critical, _ := strconv.ParseBool(fieldValue(fields, "_critical"))
+		restartCount, _ := strconv.Atoi(fieldValue(fields, "_restart_count"))
+		event = apievents.NewPluginRestarted(fieldValue(fields, apicommand.PluginNameKey), critical, restartCount)
 	case apievents.PluginStarted:
-		critical, _ := strconv.ParseBool(fields["_critical"])
-		pid, _ := strconv.Atoi(fields["_pid"])
-		event = apievents.NewPluginStarted(fields[apicommand.PluginNameKey], critical, pid)
+		critical, _ := strconv.ParseBool(fieldValue(fields, "_critical"))
+		pid, _ := strconv.Atoi(fieldValue(fields, "_pid"))
+		event = apievents.NewPluginStarted(fieldValue(fields, apicommand.PluginNameKey), critical, pid)
 	case apievents.PluginStopped:
-		critical, _ := strconv.ParseBool(fields["_critical"])
-		event = apievents.NewPluginStopped(fields[apicommand.PluginNameKey], critical, fields["_reason"])
+		critical, _ := strconv.ParseBool(fieldValue(fields, "_critical"))
+		event = apievents.NewPluginStopped(fieldValue(fields, apicommand.PluginNameKey), critical, fieldValue(fields, "_reason"))
 	case apievents.PluginRegistrationFailed:
-		critical, _ := strconv.ParseBool(fields["_critical"])
-		event = apievents.NewPluginRegistrationFailed(fields[apicommand.PluginNameKey], fields["_version"], critical, fields[apicommand.ErrorKey])
+		critical, _ := strconv.ParseBool(fieldValue(fields, "_critical"))
+		event = apievents.NewPluginRegistrationFailed(fieldValue(fields, apicommand.PluginNameKey), fieldValue(fields, "_version"), critical, fieldValue(fields, apicommand.ErrorKey))
 	case apievents.PluginCommandRegistered:
-		namespaced, _ := strconv.ParseBool(fields["_namespaced"])
-		readonly, _ := strconv.ParseBool(fields["_readonly"])
-		event = apievents.NewPluginCommandRegistered(fields[apicommand.PluginNameKey], fields[apicommand.CommandKey], namespaced, readonly)
+		namespaced, _ := strconv.ParseBool(fieldValue(fields, "_namespaced"))
+		readonly, _ := strconv.ParseBool(fieldValue(fields, "_readonly"))
+		event = apievents.NewPluginCommandRegistered(fieldValue(fields, apicommand.PluginNameKey), fieldValue(fields, apicommand.CommandKey), namespaced, readonly)
 	case apievents.PluginCommandRegistrationFailed:
-		event = apievents.NewPluginCommandRegistrationFailed(fields[apicommand.PluginNameKey], fields[apicommand.CommandKey], fields[apicommand.ErrorKey])
+		event = apievents.NewPluginCommandRegistrationFailed(fieldValue(fields, apicommand.PluginNameKey), fieldValue(fields, apicommand.CommandKey), fieldValue(fields, apicommand.ErrorKey))
 	case apievents.ConfigReloaded:
-		event = apievents.NewConfigReloaded(fields[apicommand.FileKey])
+		event = apievents.NewConfigReloaded(fieldValue(fields, apicommand.FileKey))
 	case apievents.CacheEviction:
-		event = apievents.NewCacheEviction(fields["_key"], fields["_reason"])
+		event = apievents.NewCacheEviction(fieldValue(fields, "_key"), fieldValue(fields, "_reason"))
 	default:
 		return
 	}
-	if operationID := fields[apicommand.OperationID]; operationID != "" {
+	if operationID := fieldValue(fields, apicommand.OperationID); operationID != "" {
 		event = event.WithOperationID(operationID)
 	}
 	if record.TimestampUnixNano > 0 {
@@ -353,61 +542,169 @@ func materializeCompletedOperationEvent(record apiobs.TelemetryRecord, operation
 	emitter.Emit(event)
 }
 
-func telemetryRecordStringFields(record apiobs.TelemetryRecord) map[string]string {
+func decodeTelemetryRecordFields(record apiobs.TelemetryRecord, scratch []kvPair) []kvPair {
+	scratch = scratch[:0]
 	payload := record.PayloadBytes()
 	if len(payload) == 0 {
-		return nil
+		return scratch
 	}
-	fields := make(map[string]string)
 	pos := 1
 	for count := int(payload[0]); count > 0; count-- {
 		if pos >= len(payload) {
-			return fields
+			return scratch
 		}
 		keyLen := int(payload[pos])
 		pos++
 		if pos+keyLen > len(payload) {
-			return fields
+			return scratch
 		}
 		key := string(payload[pos : pos+keyLen])
 		pos += keyLen
 		if pos >= len(payload) {
-			return fields
+			return scratch
 		}
 		valueLen := int(payload[pos])
 		pos++
 		if pos+valueLen > len(payload) {
-			return fields
+			return scratch
 		}
-		fields[key] = string(payload[pos : pos+valueLen])
+		value := string(payload[pos : pos+valueLen])
 		pos += valueLen
+		scratch = append(scratch, kvPair{key: key, value: value})
 	}
-	return fields
+	return scratch
 }
 
-func eventArgs(fields map[string]string) []string {
-	count, _ := strconv.Atoi(fields["_args_count"])
+func scratchTelemetryRecordFields(record apiobs.TelemetryRecord, scratch *drainWorkerScratch) []kvPair {
+	if scratch == nil {
+		return decodeTelemetryRecordFields(record, nil)
+	}
+	scratch.fields = decodeTelemetryRecordFields(record, scratch.fields)
+	return scratch.fields
+}
+
+func fieldFromPairs(pairs []kvPair, key string) (string, bool) {
+	for i := len(pairs) - 1; i >= 0; i-- {
+		if pairs[i].key == key {
+			return pairs[i].value, true
+		}
+	}
+	return "", false
+}
+
+func fieldValue(pairs []kvPair, key string) string {
+	value, _ := fieldFromPairs(pairs, key)
+	return value
+}
+
+func decodeEventArgs(pairs []kvPair, scratch []string) []string {
+	countValue, _ := fieldFromPairs(pairs, "_args_count")
+	count, _ := strconv.Atoi(countValue)
 	if count <= 0 {
+		return scratch[:0]
+	}
+	if cap(scratch) < count {
+		scratch = make([]string, count)
+	} else {
+		scratch = scratch[:count]
+	}
+	for i := range scratch {
+		scratch[i] = ""
+	}
+	const prefix = "_arg."
+	for _, pair := range pairs {
+		if len(pair.key) <= len(prefix) || pair.key[:len(prefix)] != prefix {
+			continue
+		}
+		idx, ok := parseCanonicalArgIndex(pair.key[len(prefix):])
+		if ok && idx < count {
+			scratch[idx] = pair.value
+		}
+	}
+	return scratch
+}
+
+func scratchEventArgs(pairs []kvPair, scratch *drainWorkerScratch) []string {
+	if scratch == nil {
+		return decodeEventArgs(pairs, nil)
+	}
+	scratch.args = decodeEventArgs(pairs, scratch.args)
+	return scratch.args
+}
+
+func parseCanonicalArgIndex(value string) (int, bool) {
+	if value == "" || (len(value) > 1 && value[0] == '0') {
+		return 0, false
+	}
+	idx := 0
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		idx = idx*10 + int(ch-'0')
+		if idx < 0 {
+			return 0, false
+		}
+	}
+	return idx, true
+}
+
+func decodeEventMetadata(pairs []kvPair, scratch []kvPair) []kvPair {
+	scratch = scratch[:0]
+	const prefix = "_metadata."
+	for _, pair := range pairs {
+		if len(pair.key) > len(prefix) && pair.key[:len(prefix)] == prefix {
+			scratch = append(scratch, kvPair{key: pair.key[len(prefix):], value: pair.value})
+		}
+	}
+	return scratch
+}
+
+func scratchEventMetadata(pairs []kvPair, scratch *drainWorkerScratch) []kvPair {
+	if scratch == nil {
+		return decodeEventMetadata(pairs, nil)
+	}
+	scratch.metadata = decodeEventMetadata(pairs, scratch.metadata)
+	return scratch.metadata
+}
+
+func stableEventArgs(args []string, emitter apievents.Emitter) []string {
+	if len(args) == 0 {
 		return nil
 	}
-	args := make([]string, count)
-	for i := 0; i < count; i++ {
-		args[i] = fields["_arg."+strconv.Itoa(i)]
+	if eventPayloadCanUseScratch(emitter) {
+		return args
 	}
-	return args
+	stable := make([]string, len(args))
+	copy(stable, args)
+	return stable
 }
 
-func eventMetadata(fields map[string]string) map[string]string {
-	metadata := make(map[string]string)
-	for key, value := range fields {
-		if len(key) > len("_metadata.") && key[:len("_metadata.")] == "_metadata." {
-			metadata[key[len("_metadata."):]] = value
-		}
+func stableEventMetadata(pairs []kvPair, emitter apievents.Emitter) map[string]string {
+	if len(pairs) == 0 || eventPayloadCanUseScratch(emitter) {
+		return nil
+	}
+	metadata := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		metadata[pair.key] = pair.value
 	}
 	if len(metadata) == 0 {
 		return nil
 	}
 	return metadata
+}
+
+func eventPayloadCanUseScratch(emitter apievents.Emitter) bool {
+	if emitter == nil {
+		return true
+	}
+	switch emitter.(type) {
+	case apievents.NoopEmitter, *apievents.NoopEmitter:
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -420,12 +717,8 @@ func cloneStringMap(values map[string]string) map[string]string {
 	}
 	return cloned
 }
-
-func fieldOrDefault(fields map[string]string, key, fallback string) string {
-	if fields == nil {
-		return fallback
-	}
-	if value := fields[key]; value != "" {
+func fieldOrDefault(fields []kvPair, key, fallback string) string {
+	if value, ok := fieldFromPairs(fields, key); ok && value != "" {
 		return value
 	}
 	return fallback
@@ -453,7 +746,7 @@ func applyRecordTimestamp(event *apievents.Event, record apiobs.TelemetryRecord)
 	event.Proto.Timestamp = uint64(record.TimestampUnixNano)
 }
 
-func materializeDropRecord(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string) {
+func materializeDropRecord(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string, scratch *drainWorkerScratch) {
 	event := logger.TelemetryNoCtx(apiobs.TelemetryLogLevelWarn)
 	if event == nil {
 		return
@@ -467,10 +760,23 @@ func materializeDropRecord(operation commonobs.CompletedOperation, record apiobs
 			event = event.Interface(apicommand.CtxField, redactedContext)
 		}
 	}
-	for key, value := range telemetryRecordStringFields(record) {
-		event = event.Str(key, value)
+	fields := scratchTelemetryRecordFields(record, scratch)
+	for i, pair := range fields {
+		if hasLaterPairWithKey(fields, i, pair.key) {
+			continue
+		}
+		event = event.Str(pair.key, pair.value)
 	}
 	event.Msg(string(record.NameBytes()))
+}
+
+func hasLaterPairWithKey(pairs []kvPair, index int, key string) bool {
+	for i := index + 1; i < len(pairs); i++ {
+		if pairs[i].key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func materializeCompletedOperationLog(operation commonobs.CompletedOperation, record apiobs.TelemetryRecord, operationContext map[string]string) {

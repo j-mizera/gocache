@@ -31,8 +31,7 @@ image unchanged while adding selected plugin binaries to the benchmark image.
 # IPC-plugin overhead run with the Prometheus metrics plugin.
 ./bench/redis-benchmark/run-ipc.sh resp-pool --target gocache-ipc
 
-# Runtime attribution run: adds benchprobe snapshots around startup,
-# standard, and pipelined windows.
+# Optional benchstats run: enables in-process counter collection for IPC consumers.
 BENCH_STATS=1 ./bench/redis-benchmark/run-ipc.sh resp-pool --target gocache-ipc-otel
 
 # Pub/Sub fanout runs. These use real SUBSCRIBE connections and verify every
@@ -59,7 +58,6 @@ Output per run lands under `bench/results/<branch>/` (the script derives `<branc
 - `<label>-<target>-pipelined.csv` — same suite with `-P 10`
 - `<label>-<target>-memory.txt` — container RSS before/after + run metadata
 - `<label>-<target>-config.yaml` — generated only for IPC targets, preserving the exact plugin config used for the capture
-- `<label>-<target>-benchstats-{baseline,standard,pipelined}.json` — generated only when `BENCH_STATS=1`; contains `bench.stats` counters plus `plugin.ipc` queue/write snapshots for the startup, standard, and pipelined windows
 
 Targets now form the benchmark matrix:
 
@@ -100,7 +98,7 @@ Fixed parameters (env-overridable):
 | `BENCH_SUITE`     | (see above) | `-t` suite passed to valkey-benchmark    |
 | `GOCACHE_IPC_IMAGE` | `gocache-bench:local-ipc` | IPC benchmark image tag |
 | `IPC_PLUGINS` | `prometheus` | Space-separated IPC plugin list compiled into the IPC benchmark image |
-| `BENCH_STATS` | `0` | Truthy values (`1`, `true`, `yes`, `on`) add the benchmark-only `benchprobe` IPC plugin, set `GOCACHE_BENCH_STATS=true`, and write baseline/standard/pipelined JSON attribution snapshots |
+| `BENCH_STATS` | `0` | Truthy values (`1`, `true`, `yes`, `on`) set `GOCACHE_BENCH_STATS=true` for in-process benchmark counters |
 | `BENCH_IPC_EVENT_MODE` | `full` | IPC event attribution mode for `run-ipc.sh`: `full`, `events-off`, or `bridge-off`; Prometheus command metrics use `server:query:metrics.commands`, while the event switch remains for attribution and other event consumers |
 | `BENCH_PUBSUB_N` | `10000` | PUBLISH requests per Pub/Sub fanout scenario |
 | `BENCH_PUBSUB_FANOUTS` | `0,1,10` | Comma-separated subscriber counts to verify |

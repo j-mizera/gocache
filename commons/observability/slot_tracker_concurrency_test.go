@@ -1,8 +1,11 @@
 package observability
 
 import (
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	apiobs "gocache/api/observability"
 )
@@ -92,6 +95,99 @@ func TestSlotTrackerConcurrentIndependentOperations(t *testing.T) {
 	}
 	if invalid := manager.InvalidHandles(); invalid != 0 {
 		t.Fatalf("invalid handles = %d, want 0", invalid)
+	}
+}
+
+func TestSlotTrackerConcurrentFinishAndDrain(t *testing.T) {
+	const operations = 512
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            8,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           operations,
+		RecordsPerOperation:   2,
+		CompletedRingPerShard: operations,
+	})
+
+	var drained atomic.Uint64
+	var badRecords atomic.Uint64
+	stopDrain := make(chan struct{})
+	drainStopped := make(chan struct{})
+	go func() {
+		defer close(drainStopped)
+		for {
+			drainedAny := false
+			for shard := 0; shard < manager.ShardCount(); shard++ {
+				if manager.DrainCompletedShard(shard, func(operation CompletedOperation) {
+					if operation.Operation == 0 || len(operation.Records) != 1 {
+						badRecords.Add(1)
+					}
+					drained.Add(1)
+				}) > 0 {
+					drainedAny = true
+				}
+			}
+			select {
+			case <-stopDrain:
+				if !drainedAny {
+					return
+				}
+			default:
+			}
+			if !drainedAny {
+				runtime.Gosched()
+			}
+		}
+	}()
+
+	var startFailures atomic.Uint64
+	var recordFailures atomic.Uint64
+	var finishFailures atomic.Uint64
+	var wg sync.WaitGroup
+	for i := 0; i < operations; i++ {
+		operation := apiobs.InternalOperationIdentity(i + 1)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			handle, ok := manager.StartOperation(operation, apiobs.ParentRef{}, 0)
+			if !ok {
+				startFailures.Add(1)
+				return
+			}
+			if !manager.RecordTelemetry(handle, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, operation)) {
+				recordFailures.Add(1)
+			}
+			if !manager.FinishOperation(handle, SlotTerminalFinished) {
+				finishFailures.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for drained.Load() < operations && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	close(stopDrain)
+	<-drainStopped
+
+	if startFailures.Load() != 0 || recordFailures.Load() != 0 || finishFailures.Load() != 0 {
+		t.Fatalf("failures: start=%d record=%d finish=%d", startFailures.Load(), recordFailures.Load(), finishFailures.Load())
+	}
+	if got := drained.Load(); got != operations {
+		t.Fatalf("drained operations = %d, want %d", got, operations)
+	}
+	if bad := badRecords.Load(); bad != 0 {
+		t.Fatalf("bad completed operations = %d, want 0", bad)
+	}
+	if invalid := manager.InvalidHandles(); invalid != 0 {
+		t.Fatalf("invalid handles = %d, want 0", invalid)
+	}
+	if skipped := manager.SkippedOperations(); skipped != 0 {
+		t.Fatalf("skipped operations = %d, want 0", skipped)
+	}
+	if dropped := manager.DroppedCompletedOperations(); dropped != 0 {
+		t.Fatalf("dropped completed operations = %d, want 0", dropped)
 	}
 }
 

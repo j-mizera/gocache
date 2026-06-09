@@ -1,0 +1,2 @@
+"test","rps","avg_latency_ms","min_latency_ms","p50_latency_ms","p95_latency_ms","p99_latency_ms","max_latency_ms"
+"PING_INLINE","499999.97","0.375","0.040","0.359","0.743","0.807","1.015"

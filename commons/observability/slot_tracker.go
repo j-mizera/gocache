@@ -109,9 +109,10 @@ type SlotShardStats struct {
 // and slot segments. It is the ADR-0034 storage primitive; server projection and
 // GCPC/log/event materialization stay outside this type.
 type SlotOperationTrackerManager struct {
-	shards         []operationSlotShard
-	releaseContext func(apiobs.ConnectionContextVersion) bool
-	contexts       connectionContextStore
+	shards          []operationSlotShard
+	releaseContext  func(apiobs.ConnectionContextVersion) bool
+	contexts        connectionContextStore
+	notifyCompleted func()
 
 	skippedOperations uint64
 	droppedRecords    uint64
@@ -128,12 +129,10 @@ type operationSlotShard struct {
 	segmentSize         int
 	recordsPerOperation int
 
-	free           []slotRef
-	freeCount      int
-	completed      []slotRef
-	completedHead  int
-	completedCount int
-	activeSlots    int
+	free        []slotRef
+	freeCount   int
+	completed   *completedRing
+	activeSlots int
 }
 
 type slotRef struct {
@@ -161,7 +160,7 @@ const (
 
 type operationSlot struct {
 	generation            uint32
-	state                 operationSlotState
+	state                 atomic.Uint32
 	operation             apiobs.InternalOperationIdentity
 	parent                apiobs.ParentRef
 	contextVersion        apiobs.ConnectionContextVersion
@@ -176,6 +175,104 @@ type operationSlot struct {
 	snapshotStartUnixNano int64
 	recordCount           atomic.Uint32
 	droppedRecords        uint64
+}
+
+type completedRing struct {
+	mask     uint64
+	capacity uint64
+	slots    []completedRingSlot
+	_        [cacheLineBytes - 8]byte
+	head     uint64
+	_        [cacheLineBytes - 8]byte
+	tail     uint64
+	_        [cacheLineBytes - 8]byte
+	drops    uint64
+}
+
+type completedRingSlot struct {
+	sequence uint64
+	ref      slotRef
+}
+
+func newCompletedRing(capacity int) *completedRing {
+	if capacity < 1 {
+		capacity = 1
+	}
+	size := 1
+	for size < capacity {
+		size <<= 1
+	}
+	if size < 2 {
+		size = 2
+	}
+	ring := &completedRing{mask: uint64(size - 1), capacity: uint64(capacity), slots: make([]completedRingSlot, size)}
+	for i := range ring.slots {
+		ring.slots[i].sequence = uint64(i)
+	}
+	return ring
+}
+
+func (r *completedRing) push(ref slotRef) bool {
+	pos := atomic.LoadUint64(&r.tail)
+	for {
+		if pos-atomic.LoadUint64(&r.head) >= r.capacity {
+			atomic.AddUint64(&r.drops, 1)
+			return false
+		}
+		slot := &r.slots[pos&r.mask]
+		sequence := atomic.LoadUint64(&slot.sequence)
+		delta := int64(sequence) - int64(pos)
+		if delta == 0 {
+			if atomic.CompareAndSwapUint64(&r.tail, pos, pos+1) {
+				slot.ref = ref
+				atomic.StoreUint64(&slot.sequence, pos+1)
+				return true
+			}
+			pos = atomic.LoadUint64(&r.tail)
+			continue
+		}
+		if delta < 0 {
+			atomic.AddUint64(&r.drops, 1)
+			return false
+		}
+		pos = atomic.LoadUint64(&r.tail)
+	}
+}
+
+func (r *completedRing) pop() (slotRef, bool) {
+	pos := atomic.LoadUint64(&r.head)
+	for {
+		slot := &r.slots[pos&r.mask]
+		sequence := atomic.LoadUint64(&slot.sequence)
+		delta := int64(sequence) - int64(pos+1)
+		if delta == 0 {
+			if atomic.CompareAndSwapUint64(&r.head, pos, pos+1) {
+				ref := slot.ref
+				slot.ref = slotRef{}
+				atomic.StoreUint64(&slot.sequence, pos+r.mask+1)
+				return ref, true
+			}
+			pos = atomic.LoadUint64(&r.head)
+			continue
+		}
+		if delta < 0 {
+			return slotRef{}, false
+		}
+		pos = atomic.LoadUint64(&r.head)
+	}
+}
+
+func (r *completedRing) count() int {
+	head := atomic.LoadUint64(&r.head)
+	tail := atomic.LoadUint64(&r.tail)
+	if tail < head {
+		return 0
+	}
+	count := tail - head
+	if count > r.capacity {
+		return int(r.capacity)
+	}
+	return int(count)
 }
 
 // NewSlotOperationTrackerManager returns preallocated shard-owned operation-slot
@@ -223,7 +320,7 @@ func (s *operationSlotShard) init(config SlotTrackerConfig) {
 	s.recordsPerOperation = config.RecordsPerOperation
 	s.segments = make([]*operationSegment, config.MaxSegmentsPerShard)
 	s.free = make([]slotRef, config.MaxSegmentsPerShard*config.SegmentSize)
-	s.completed = make([]slotRef, config.CompletedRingPerShard)
+	s.completed = newCompletedRing(config.CompletedRingPerShard)
 	for range config.MinSegmentsPerShard {
 		s.addSegmentLocked()
 	}
@@ -234,21 +331,37 @@ func (m *SlotOperationTrackerManager) ShardCount() int {
 	return len(m.shards)
 }
 
+// SetCompletedNotify wires a non-blocking notification hook invoked when a
+// completed operation is successfully queued for worker drain.
+func (m *SlotOperationTrackerManager) SetCompletedNotify(fn func()) {
+	if m == nil {
+		return
+	}
+	m.notifyCompleted = fn
+}
+
 // StartOperation reserves a preallocated operation slot and returns its internal
 // tracker handle. It returns false when the shard has no free slot.
 func (m *SlotOperationTrackerManager) StartOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion) (InternalTrackerHandle, bool) {
-	return m.StartOperationWithMetadata(operation, parent, contextVersion, OperationSnapshotMetadata{})
+	return m.startOperation(operation, parent, 0, contextVersion, nil, OperationSnapshotMetadata{})
 }
 
 // StartOperationWithMetadata reserves a preallocated operation slot and stores
 // fixed replay/crashdump identity metadata with the slot. The metadata is copied
 // into inline storage and does not materialize maps, logs, events, or GCPC data.
 func (m *SlotOperationTrackerManager) StartOperationWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
-	return m.startOperation(operation, parent, contextVersion, nil, metadata)
+	return m.startOperation(operation, parent, 0, contextVersion, nil, metadata)
 }
 
-func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
-	shardIndex := shardIndex(operation, len(m.shards))
+func shardIndexForConnection(connection apiobs.ConnectionIdentity, operation apiobs.InternalOperationIdentity, shardCount int) int {
+	if connection != 0 {
+		return int(uint64(connection) % uint64(shardCount))
+	}
+	return shardIndex(operation, shardCount)
+}
+
+func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
+	shardIndex := shardIndexForConnection(connection, operation, len(m.shards))
 	shard := &m.shards[shardIndex]
 
 	shard.mu.Lock()
@@ -271,7 +384,6 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 	if slot.generation == 0 {
 		slot.generation++
 	}
-	slot.state = operationSlotActive
 	slot.operation = operation
 	slot.parent = parent
 	slot.contextVersion = contextVersion
@@ -280,6 +392,7 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 	slot.setSnapshotMetadata(metadata)
 	slot.recordCount.Store(0)
 	slot.droppedRecords = 0
+	slot.state.Store(uint32(operationSlotActive))
 	segment.active++
 	shard.activeSlots++
 
@@ -304,7 +417,7 @@ func (m *SlotOperationTrackerManager) StartOperationForConnection(operation apio
 // version and reserves an operation slot with fixed replay/crashdump metadata.
 func (m *SlotOperationTrackerManager) StartOperationForConnectionWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, metadata OperationSnapshotMetadata) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
 	version := m.PinCurrentConnectionContextVersion(connection)
-	handle, ok := m.StartOperationWithMetadata(operation, parent, version, metadata)
+	handle, ok := m.startOperation(operation, parent, connection, version, nil, metadata)
 	if !ok {
 		m.ReleaseConnectionContextVersion(version)
 		return InternalTrackerHandle{}, 0, false
@@ -329,7 +442,7 @@ func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMeta
 		return m.StartOperationForConnectionWithMetadata(operation, parent, connection, metadata)
 	}
 	version := m.PinCurrentConnectionContextVersion(connection)
-	handle, ok := m.startOperation(operation, parent, version, pairs, metadata)
+	handle, ok := m.startOperation(operation, parent, connection, version, pairs, metadata)
 	if !ok {
 		m.ReleaseConnectionContextVersion(version)
 		return InternalTrackerHandle{}, 0, false
@@ -341,9 +454,8 @@ func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMeta
 // a version the caller has already pinned. On success the slot owns that pin and
 // releases it during drain/reset; on failure the pin is released before return.
 func (m *SlotOperationTrackerManager) StartOperationWithPinnedConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, version apiobs.ConnectionContextVersion, pairs map[string]string, metadata OperationSnapshotMetadata, magazine *SlotMagazine) (InternalTrackerHandle, bool) {
-	_ = connection
 	_ = magazine
-	handle, ok := m.startOperation(operation, parent, version, pairs, metadata)
+	handle, ok := m.startOperation(operation, parent, connection, version, pairs, metadata)
 	if !ok {
 		m.ReleaseConnectionContextVersion(version)
 		return InternalTrackerHandle{}, false
@@ -421,7 +533,7 @@ func (m *SlotOperationTrackerManager) appendActiveOperationSnapshotInputs(inputs
 		}
 		for slotIndex := range segment.slots {
 			slot := &segment.slots[slotIndex]
-			if slot.state != operationSlotActive {
+			if operationSlotState(slot.state.Load()) != operationSlotActive {
 				continue
 			}
 			start := slotIndex * segment.recordsPerOperation
@@ -688,25 +800,38 @@ func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHand
 		return false
 	}
 	shard := &m.shards[handle.shard]
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	segment, slot, ok := shard.activeSlotLocked(handle)
-	if !ok {
+	segment := handle.segmentRef
+	slot := handle.slotRef
+	if segment == nil || slot == nil || operationSlotState(slot.state.Load()) != operationSlotActive {
+		atomic.AddUint64(&m.invalidHandles, 1)
+		return false
+	}
+	if int(handle.segment) >= len(shard.segments) || shard.segments[handle.segment] != segment {
+		atomic.AddUint64(&m.invalidHandles, 1)
+		return false
+	}
+	if int(handle.slot) >= len(segment.slots) || slot != &segment.slots[handle.slot] || slot.generation != handle.generation {
 		atomic.AddUint64(&m.invalidHandles, 1)
 		return false
 	}
 	if status == SlotTerminalUnknown {
 		status = SlotTerminalFinished
 	}
-	slot.state = operationSlotTerminal
+	if !slot.state.CompareAndSwap(uint32(operationSlotActive), uint32(operationSlotTerminal)) {
+		atomic.AddUint64(&m.invalidHandles, 1)
+		return false
+	}
 	slot.status = status
 	ref := slotRef{segment: int(handle.segment), slot: int(handle.slot)}
-	if !shard.pushCompletedLocked(ref) {
+	if !shard.completed.push(ref) {
 		atomic.AddUint64(&m.droppedCompleted, 1)
 		m.releaseContextVersion(slot.contextVersion)
+		shard.mu.Lock()
 		shard.resetSlotLocked(segment, ref)
+		shard.mu.Unlock()
 		return false
+	} else if m.notifyCompleted != nil {
+		m.notifyCompleted()
 	}
 	return true
 }
@@ -717,35 +842,55 @@ func (m *SlotOperationTrackerManager) DrainCompletedShard(index int, fn func(Com
 		return 0
 	}
 	shard := &m.shards[index]
-	drained := 0
+	var operations []CompletedOperation
+	var refs []slotRef
 	for {
-		shard.mu.Lock()
-		ref, ok := shard.popCompletedLocked()
+		ref, ok := shard.completed.pop()
 		if !ok {
-			shard.mu.Unlock()
-			return drained
+			break
 		}
-		segment := shard.segments[ref.segment]
-		slot := &segment.slots[ref.slot]
-		if slot.state != operationSlotTerminal {
-			shard.mu.Unlock()
+		if ref.segment < 0 || ref.segment >= len(shard.segments) {
 			atomic.AddUint64(&m.invalidHandles, 1)
 			continue
 		}
-		slot.state = operationSlotWorkerOwned
-		operation := completedOperationFromSlot(segment, slot, ref.slot)
-		shard.mu.Unlock()
-
-		if fn != nil {
-			fn(operation)
+		segment := shard.segments[ref.segment]
+		if segment == nil || ref.slot < 0 || ref.slot >= len(segment.slots) {
+			atomic.AddUint64(&m.invalidHandles, 1)
+			continue
 		}
-
-		shard.mu.Lock()
+		slot := &segment.slots[ref.slot]
+		if operationSlotState(slot.state.Load()) != operationSlotTerminal {
+			atomic.AddUint64(&m.invalidHandles, 1)
+			continue
+		}
+		slot.state.Store(uint32(operationSlotWorkerOwned))
+		operations = append(operations, completedOperationFromSlot(segment, slot, ref.slot))
+		refs = append(refs, ref)
+	}
+	if len(operations) == 0 {
+		return 0
+	}
+	for i := range operations {
+		if fn != nil {
+			fn(operations[i])
+		}
+	}
+	shard.mu.Lock()
+	for i := range refs {
+		ref := refs[i]
+		if ref.segment < 0 || ref.segment >= len(shard.segments) {
+			continue
+		}
+		segment := shard.segments[ref.segment]
+		if segment == nil || ref.slot < 0 || ref.slot >= len(segment.slots) {
+			continue
+		}
+		slot := &segment.slots[ref.slot]
 		m.releaseContextVersion(slot.contextVersion)
 		shard.resetSlotLocked(segment, ref)
-		shard.mu.Unlock()
-		drained++
 	}
+	shard.mu.Unlock()
+	return len(operations)
 }
 
 // GrowShard adds one preallocated segment to shard index. It is intended for a
@@ -784,7 +929,7 @@ func (m *SlotOperationTrackerManager) ShardStats(index int) SlotShardStats {
 		Segments:       shard.segmentCountLocked(),
 		FreeSlots:      shard.freeCount,
 		ActiveSlots:    shard.activeSlots,
-		CompletedSlots: shard.completedCount,
+		CompletedSlots: shard.completed.count(),
 	}
 }
 
@@ -877,7 +1022,10 @@ func (m *SlotOperationTrackerManager) activeSlot(handle InternalTrackerHandle) (
 	}
 	segment := handle.segmentRef
 	slot := handle.slotRef
-	if segment == nil || slot == nil || slot.generation != handle.generation || slot.state != operationSlotActive {
+	if segment == nil || slot == nil || operationSlotState(slot.state.Load()) != operationSlotActive {
+		return nil, nil, false
+	}
+	if int(handle.slot) >= len(segment.slots) || slot != &segment.slots[handle.slot] || slot.generation != handle.generation {
 		return nil, nil, false
 	}
 	return segment, slot, true
@@ -931,31 +1079,10 @@ func (s *operationSlotShard) activeSlotLocked(handle InternalTrackerHandle) (*op
 		return nil, nil, false
 	}
 	slot := &segment.slots[handle.slot]
-	if slot != handle.slotRef || slot.generation != handle.generation || slot.state != operationSlotActive {
+	if slot != handle.slotRef || slot.generation != handle.generation || operationSlotState(slot.state.Load()) != operationSlotActive {
 		return nil, nil, false
 	}
 	return segment, slot, true
-}
-
-func (s *operationSlotShard) pushCompletedLocked(ref slotRef) bool {
-	if s.completedCount == len(s.completed) {
-		return false
-	}
-	index := (s.completedHead + s.completedCount) % len(s.completed)
-	s.completed[index] = ref
-	s.completedCount++
-	return true
-}
-
-func (s *operationSlotShard) popCompletedLocked() (slotRef, bool) {
-	if s.completedCount == 0 {
-		return slotRef{}, false
-	}
-	ref := s.completed[s.completedHead]
-	s.completed[s.completedHead] = slotRef{}
-	s.completedHead = (s.completedHead + 1) % len(s.completed)
-	s.completedCount--
-	return ref, true
 }
 
 func completedOperationFromSlot(segment *operationSegment, slot *operationSlot, slotIndex int) CompletedOperation {
@@ -974,7 +1101,6 @@ func completedOperationFromSlot(segment *operationSegment, slot *operationSlot, 
 
 func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slotRef) {
 	slot := &segment.slots[ref.slot]
-	slot.state = operationSlotFree
 	slot.operation = 0
 	slot.parent = apiobs.ParentRef{}
 	slot.contextVersion = 0
@@ -986,6 +1112,7 @@ func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slot
 	slot.snapshotStartUnixNano = 0
 	slot.recordCount.Store(0)
 	slot.droppedRecords = 0
+	slot.state.Store(uint32(operationSlotFree))
 	segment.active--
 	s.activeSlots--
 	if !segment.retiring {

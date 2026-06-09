@@ -111,6 +111,7 @@ type PluginConnStats struct {
 	PluginName                 string
 	QueueCapacity              int
 	QueueDepth                 int
+	QueueHeadroom              int
 	SendAttempts               uint64
 	SendAccepted               uint64
 	SendQueueFull              uint64
@@ -392,6 +393,14 @@ func (pc *PluginConn) SendFireAndForgetLazy(build func() *gcpc.EnvelopeV1) {
 	_ = pc.enqueue(context.Background(), outboundEnvelope{build: build})
 }
 
+// Headroom returns the current available slots in the outbound IPC queue.
+func (pc *PluginConn) Headroom() int {
+	if pc == nil || pc.outbound == nil {
+		return 0
+	}
+	return cap(pc.outbound) - len(pc.outbound)
+}
+
 // Stats returns a point-in-time snapshot of outbound queue and write-loop
 // measurements for this plugin connection.
 func (pc *PluginConn) Stats() PluginConnStats {
@@ -399,6 +408,7 @@ func (pc *PluginConn) Stats() PluginConnStats {
 		PluginName:                 pc.Name,
 		QueueCapacity:              cap(pc.outbound),
 		QueueDepth:                 len(pc.outbound),
+		QueueHeadroom:              pc.Headroom(),
 		SendAttempts:               pc.stats.sendAttempts.Load(),
 		SendAccepted:               pc.stats.sendAccepted.Load(),
 		SendQueueFull:              pc.stats.sendQueueFull.Load(),
