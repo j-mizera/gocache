@@ -148,6 +148,7 @@ type operationSlotShard struct {
 	freeCount   int
 	completed   *completedRing
 	activeSlots atomic.Int32
+	skipped     atomic.Uint64
 }
 
 type slotRef struct {
@@ -462,6 +463,7 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 	}
 
 	atomic.AddUint64(&m.skippedOperations, 1)
+	shard.skipped.Add(1)
 	return InternalTrackerHandle{}, false
 }
 
@@ -1028,6 +1030,42 @@ func (m *SlotOperationTrackerManager) ShardStats(index int) SlotShardStats {
 		ActiveSlots:    int(shard.activeSlots.Load()),
 		CompletedSlots: shard.completed.count(),
 	}
+}
+
+// ShardSkipped returns the skip counter for a shard.
+func (m *SlotOperationTrackerManager) ShardSkipped(index int) uint64 {
+	if index < 0 || index >= len(m.shards) {
+		return 0
+	}
+	return m.shards[index].skipped.Load()
+}
+
+// ShardActiveSlots returns active slot count for a shard.
+func (m *SlotOperationTrackerManager) ShardActiveSlots(index int) int {
+	if index < 0 || index >= len(m.shards) {
+		return 0
+	}
+	return int(m.shards[index].activeSlots.Load())
+}
+
+// ShardFreeSlots returns free slot count for a shard.
+func (m *SlotOperationTrackerManager) ShardFreeSlots(index int) int {
+	if index < 0 || index >= len(m.shards) {
+		return 0
+	}
+	m.shards[index].mu.Lock()
+	defer m.shards[index].mu.Unlock()
+	return m.shards[index].freeCount
+}
+
+// ShardCompletedSlots returns completed slot count for a shard.
+func (m *SlotOperationTrackerManager) ShardCompletedSlots(index int) int {
+	if index < 0 || index >= len(m.shards) {
+		return 0
+	}
+	m.shards[index].mu.Lock()
+	defer m.shards[index].mu.Unlock()
+	return m.shards[index].completed.count()
 }
 
 // UpdateConnectionContext creates a new immutable context version for connection.

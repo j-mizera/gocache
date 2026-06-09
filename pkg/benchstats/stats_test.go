@@ -35,6 +35,7 @@ func TestSnapshotReset(t *testing.T) {
 	RecordPipelineOperationStarted()
 	RecordPipelineOperationCompleted()
 	RecordManagerEventReceived()
+	RecordManagerEventDropped()
 	RecordManagerProjectionBuild()
 	RecordManagerEventEnqueue()
 
@@ -45,6 +46,7 @@ func TestSnapshotReset(t *testing.T) {
 		"pipeline.event.operation_started":   "1",
 		"pipeline.event.operation_completed": "1",
 		"manager.event_received":             "1",
+		"manager.event_dropped":              "1",
 		"manager.event_enqueue_attempts":     "1",
 		"manager.projection_builds":          "1",
 	}

@@ -1,6 +1,7 @@
 package benchstats
 
 import (
+	"fmt"
 	"os"
 	"runtime/metrics"
 	"strconv"
@@ -25,6 +26,14 @@ type operationTrackerStats interface {
 	SkippedOperations() uint64
 	DroppedRecords() uint64
 	DroppedCompletedOperations() uint64
+}
+
+type operationTrackerShardStats interface {
+	ShardCount() int
+	ShardSkipped(index int) uint64
+	ShardActiveSlots(index int) int
+	ShardFreeSlots(index int) int
+	ShardCompletedSlots(index int) int
 }
 
 var operationTracker struct {
@@ -95,6 +104,15 @@ func addOperationTrackerStats(data map[string]string) {
 	data["operation_tracker.skipped_operations"] = formatUint(manager.SkippedOperations())
 	data["operation_tracker.dropped_records"] = formatUint(manager.DroppedRecords())
 	data["operation_tracker.dropped_completed"] = formatUint(manager.DroppedCompletedOperations())
+	if shardStats, ok := manager.(operationTrackerShardStats); ok {
+		for i := 0; i < shardStats.ShardCount(); i++ {
+			prefix := fmt.Sprintf("operation_tracker.shard_%d.", i)
+			data[prefix+"skipped"] = formatUint(shardStats.ShardSkipped(i))
+			data[prefix+"active"] = formatInt(shardStats.ShardActiveSlots(i))
+			data[prefix+"free"] = formatInt(shardStats.ShardFreeSlots(i))
+			data[prefix+"completed"] = formatInt(shardStats.ShardCompletedSlots(i))
+		}
+	}
 }
 
 // RecordPipelineEvaluation records one core command evaluation.
@@ -132,6 +150,15 @@ func RecordManagerEventReceived() {
 	global.managerEventReceived.Add(1)
 }
 
+// RecordManagerEventDropped records one event dropped by benchmark event bridge
+// mode before IPC enqueue.
+func RecordManagerEventDropped() {
+	if !Enabled() {
+		return
+	}
+	global.managerEventDropped.Add(1)
+}
+
 // RecordManagerProjectionBuild records one event projection built for IPC
 // delivery.
 func RecordManagerProjectionBuild() {
@@ -151,11 +178,12 @@ func RecordManagerEventEnqueue() {
 }
 
 type counters struct {
-	pipelineEvaluations        atomic.Uint64
-	pipelineOperationStarted   atomic.Uint64
-	pipelineOperationCompleted atomic.Uint64
-	managerEventReceived       atomic.Uint64
-	managerProjectionBuilds    atomic.Uint64
+	pipelineEvaluations         atomic.Uint64
+	pipelineOperationStarted    atomic.Uint64
+	pipelineOperationCompleted  atomic.Uint64
+	managerEventReceived        atomic.Uint64
+	managerEventDropped         atomic.Uint64
+	managerProjectionBuilds     atomic.Uint64
 	managerEventEnqueueAttempts atomic.Uint64
 }
 
@@ -164,18 +192,20 @@ func (c *counters) reset() {
 	c.pipelineOperationStarted.Store(0)
 	c.pipelineOperationCompleted.Store(0)
 	c.managerEventReceived.Store(0)
+	c.managerEventDropped.Store(0)
 	c.managerProjectionBuilds.Store(0)
 	c.managerEventEnqueueAttempts.Store(0)
 }
 
 func (c *counters) snapshot() map[string]string {
 	return map[string]string{
-		"pipeline.evaluations":                formatUint(c.pipelineEvaluations.Load()),
-		"pipeline.event.operation_started":    formatUint(c.pipelineOperationStarted.Load()),
-		"pipeline.event.operation_completed":  formatUint(c.pipelineOperationCompleted.Load()),
-		"manager.event_received":              formatUint(c.managerEventReceived.Load()),
-		"manager.projection_builds":           formatUint(c.managerProjectionBuilds.Load()),
-		"manager.event_enqueue_attempts":      formatUint(c.managerEventEnqueueAttempts.Load()),
+		"pipeline.evaluations":               formatUint(c.pipelineEvaluations.Load()),
+		"pipeline.event.operation_started":   formatUint(c.pipelineOperationStarted.Load()),
+		"pipeline.event.operation_completed": formatUint(c.pipelineOperationCompleted.Load()),
+		"manager.event_received":             formatUint(c.managerEventReceived.Load()),
+		"manager.event_dropped":              formatUint(c.managerEventDropped.Load()),
+		"manager.projection_builds":          formatUint(c.managerProjectionBuilds.Load()),
+		"manager.event_enqueue_attempts":     formatUint(c.managerEventEnqueueAttempts.Load()),
 	}
 }
 
@@ -213,4 +243,8 @@ func sanitizeMetricName(name string) string {
 
 func formatUint(value uint64) string {
 	return strconv.FormatUint(value, 10)
+}
+
+func formatInt(v int) string {
+	return strconv.Itoa(v)
 }

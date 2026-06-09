@@ -23,6 +23,7 @@ import (
 	"gocache/commons/crashdump"
 	"gocache/commons/logger"
 	commonobs "gocache/commons/observability"
+	"gocache/pkg/benchstats"
 	"gocache/pkg/blocking"
 	"gocache/pkg/bootstate"
 	"gocache/pkg/cache"
@@ -467,6 +468,7 @@ func main() {
 	// this bounded commons manager from the first accepted command onward.
 	steadyStateOperationTracker = newSteadyStateOperationTrackerManager()
 	srv.SetOperationTrackerManager(steadyStateOperationTracker)
+	benchstats.SetOperationTrackerManager(steadyStateOperationTracker)
 	operationDrainWorker := server.NewOperationTrackerDrainWorker(steadyStateOperationTracker, steadyStateOperationTrackerDrainInterval)
 	operationDrainWorker.SetEmitter(eventBus)
 

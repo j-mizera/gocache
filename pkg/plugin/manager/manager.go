@@ -856,6 +856,7 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 			m.eventBus.Subscribe("plugin:"+inst.Name, types, func(evt events.Event) {
 				benchstats.RecordManagerEventReceived()
 				if bridgeMode == eventBridgeModeBridgeOff {
+					benchstats.RecordManagerEventDropped()
 					return
 				}
 				evtProto := evt.Proto
