@@ -199,7 +199,7 @@ Complete benchstats from `magazine-bench-pprof-gocache-ipc` (the only variant ru
 
 1. **Event metrics are zero** because this is a Prometheus-only IPC run (no `instrumentation` plugin). The `manager.event_*` metrics only populate when the `instrumentation` plugin is active, which requires the OTel variant.
 
-2. **Pipelined operations per evaluation (~0.47) is expected.** In pipelined mode, commands are batched (10 per pipeline) and processed as shared batches. The 0.47-0.52 ops/eval range is normal for pipelined workloads — it reflects batch sharing overhead, not dropped operations. Total throughput is still measured via RPS from the benchmark tool.
+2. **No operations were lost in pipelined mode.** `operation_started` equals `operation_completed` (710,257), and all drop metrics (`dropped_completed`, `dropped_records`, `skipped_operations`) are zero. The 0.474 ops/eval ratio is a definitional artifact of the telemetry system: `RecordPipelineOperationStarted` is only emitted when a telemetry scope is successfully allocated, which in pipelined mode under this load averages ~2.1 commands per operation. This reflects how the server-side batch boundaries align with TCP reads, not a completion failure — total throughput is measured via RPS from the benchmark tool.
 
 ### 3.5 Pprof vs Clean Build Comparison
 
