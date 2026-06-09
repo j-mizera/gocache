@@ -1,0 +1,12 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: delay
+Time: 2026-06-09 16:02:29 UTC
+Showing nodes accounting for 8.46s, 99.88% of 8.47s total
+Dropped 27 nodes (cum <= 0.04s)
+      flat  flat%   sum%        cum   cum%
+     8.46s 99.88% 99.88%      8.46s 99.88%  runtime.selectgo
+         0     0% 99.88%      3.10s 36.61%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func2
+         0     0% 99.88%         3s 35.43%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0% 99.88%         3s 35.43%  gocache/pkg/logcollector.New.gowrap1
+         0     0% 99.88%      2.36s 27.83%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1

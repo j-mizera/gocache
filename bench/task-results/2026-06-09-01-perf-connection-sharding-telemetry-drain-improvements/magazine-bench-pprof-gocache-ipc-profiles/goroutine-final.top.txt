@@ -1,0 +1,37 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: goroutine
+Time: 2026-06-09 16:10:46 UTC
+Showing nodes accounting for 19, 82.61% of 23 total
+Showing top 30 nodes out of 81
+      flat  flat%   sum%        cum   cum%
+        19 82.61% 82.61%         19 82.61%  runtime.gopark
+         0     0% 82.61%         11 47.83%  runtime.selectgo
+         0     0% 82.61%          7 30.43%  internal/poll.(*pollDesc).wait
+         0     0% 82.61%          7 30.43%  internal/poll.(*pollDesc).waitRead (inline)
+         0     0% 82.61%          7 30.43%  internal/poll.runtime_pollWait
+         0     0% 82.61%          7 30.43%  runtime.netpollblock
+         0     0% 82.61%          5 21.74%  internal/poll.(*FD).Read
+         0     0% 82.61%          3 13.04%  internal/poll.(*FD).Accept
+         0     0% 82.61%          3 13.04%  net.(*netFD).accept
+         0     0% 82.61%          3 13.04%  os.(*File).Read
+         0     0% 82.61%          3 13.04%  os.(*File).read (inline)
+         0     0% 82.61%          2  8.70%  bufio.(*Scanner).Scan
+         0     0% 82.61%          2  8.70%  gocache/pkg/logcollector.(*Collector).AddSource.func1
+         0     0% 82.61%          2  8.70%  gocache/pkg/logcollector.(*Collector).readSource
+         0     0% 82.61%          2  8.70%  net.(*TCPListener).Accept
+         0     0% 82.61%          2  8.70%  net.(*TCPListener).accept
+         0     0% 82.61%          2  8.70%  net.(*conn).Read
+         0     0% 82.61%          2  8.70%  net.(*netFD).Read
+         0     0% 82.61%          1  4.35%  github.com/fsnotify/fsnotify.(*inotify).readEvents
+         0     0% 82.61%          1  4.35%  github.com/spf13/viper.(*Viper).WatchConfig.func1
+         0     0% 82.61%          1  4.35%  github.com/spf13/viper.(*Viper).WatchConfig.func1.1
+         0     0% 82.61%          1  4.35%  gocache/commons/transport.(*Conn).Recv
+         0     0% 82.61%          1  4.35%  gocache/commons/transport.(*Listener).Accept
+         0     0% 82.61%          1  4.35%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0% 82.61%          1  4.35%  gocache/pkg/plugin/manager.(*Manager).acceptLoop
+         0     0% 82.61%          1  4.35%  gocache/pkg/plugin/manager.(*Manager).acceptLoop.func1
+         0     0% 82.61%          1  4.35%  gocache/pkg/plugin/manager.(*Manager).handleConnection
+         0     0% 82.61%          1  4.35%  gocache/pkg/plugin/manager.(*Manager).handleConnection.func2
+         0     0% 82.61%          1  4.35%  gocache/pkg/plugin/manager.(*Manager).healthLoop
+         0     0% 82.61%          1  4.35%  gocache/pkg/plugin/manager.(*Manager).launchPlugin.func1

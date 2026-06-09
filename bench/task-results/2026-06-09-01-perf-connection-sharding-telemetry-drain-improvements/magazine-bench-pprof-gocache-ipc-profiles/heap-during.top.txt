@@ -1,0 +1,37 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: inuse_space
+Time: 2026-06-09 16:02:29 UTC
+Showing nodes accounting for 42.25MB, 76.77% of 55.03MB total
+Showing top 30 nodes out of 86
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%    40.24MB 73.14%  main.main
+         0     0%     0%    40.24MB 73.14%  runtime.main
+         0     0%     0%    29.33MB 53.30%  gocache/pkg/cache.NewWithShards
+         0     0%     0%    29.33MB 53.30%  gocache/pkg/cache.newCache
+         0     0%     0%    29.33MB 53.30%  gocache/pkg/cache.newShard (inline)
+         0     0%     0%    29.33MB 53.30%  gocache/pkg/cache/slab.(*slabClass).alloc
+    0.50MB  0.91%  0.91%    29.33MB 53.30%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+         0     0%  0.91%    29.33MB 53.30%  gocache/pkg/cache/slab.NewAllocatorWithTargetBytes
+   28.83MB 52.39% 53.30%    28.83MB 52.39%  gocache/pkg/cache/slab.newSlab (inline)
+    1.03MB  1.86% 55.16%    10.92MB 19.84%  gocache/commons/observability.(*operationSlotShard).init
+         0     0% 55.16%    10.92MB 19.84%  gocache/commons/observability.NewSlotOperationTrackerManager
+         0     0% 55.16%    10.92MB 19.84%  main.newSteadyStateOperationTrackerManager (inline)
+         0     0% 55.16%     9.89MB 17.98%  gocache/commons/observability.(*operationSlotShard).addSegmentLocked
+    9.89MB 17.98% 73.14%     9.89MB 17.98%  gocache/commons/observability.newOperationSegment (inline)
+       1MB  1.82% 74.96%        8MB 14.54%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 74.96%        8MB 14.54%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 74.96%     7.50MB 13.63%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+         0     0% 74.96%        7MB 12.72%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0% 74.96%     4.50MB  8.18%  gocache/pkg/events.(*Bus).Emit
+         0     0% 74.96%     4.50MB  8.18%  gocache/pkg/events.(*ring).push
+         0     0% 74.96%     4.50MB  8.18%  gocache/pkg/events.cloneEvent
+         0     0% 74.96%     4.50MB  8.18%  google.golang.org/protobuf/proto.Clone
+         0     0% 74.96%     4.50MB  8.18%  google.golang.org/protobuf/proto.mergeOptions.mergeMessage
+         0     0% 74.96%        4MB  7.27%  google.golang.org/protobuf/internal/impl.(*MessageInfo).initOneofFieldCoders.func5
+         0     0% 74.96%        4MB  7.27%  google.golang.org/protobuf/internal/impl.(*MessageInfo).merge
+         0     0% 74.96%        4MB  7.27%  google.golang.org/protobuf/internal/impl.(*MessageInfo).mergePointer
+         0     0% 74.96%        4MB  7.27%  google.golang.org/protobuf/internal/impl.mergeMessage
+    0.50MB  0.91% 75.87%     3.53MB  6.42%  gocache/pkg/server.(*Server).handleConnection
+    0.50MB  0.91% 76.77%     3.50MB  6.36%  gocache/pkg/server.materializeOperationFinishedRecord
+         0     0% 76.77%        3MB  5.45%  google.golang.org/protobuf/internal/impl.mergeMap

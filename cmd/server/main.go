@@ -123,6 +123,7 @@ func newSteadyStateOperationTrackerManager() *commonobs.SlotOperationTrackerMana
 		MinSegmentsPerShard:   steadyStateOperationTrackerMinSegmentsPerShard,
 		MaxSegmentsPerShard:   steadyStateOperationTrackerMaxSegmentsPerShard,
 		SegmentSize:           steadyStateOperationTrackerSegmentSize,
+		MagazineCapacity:      16,
 		RecordsPerOperation:   steadyStateOperationTrackerRecordsPerOperation,
 		CompletedRingPerShard: steadyStateOperationTrackerCompletedRingPerShard,
 	})
@@ -142,7 +143,7 @@ func startSteadyStateOperationTelemetryScope(manager *commonobs.SlotOperationTra
 		Type:          string(op.Type),
 		Ref:           ref,
 		StartUnixNano: op.StartTime.UnixNano(),
-	})
+	}, nil)
 	if !ok {
 		return commonobs.OperationScope{}
 	}
@@ -382,6 +383,7 @@ func main() {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
+		MagazineCapacity:      16,
 		RecordsPerOperation:   64,
 		CompletedRingPerShard: 1,
 	})
@@ -399,7 +401,7 @@ func main() {
 		Type:          string(ops.TypeStartup),
 		Ref:           startupRef,
 		StartUnixNano: time.Now().UnixNano(),
-	})
+	}, nil)
 	if !ok {
 		logger.FatalNoCtx().Msg("failed to allocate startup telemetry slot")
 	}

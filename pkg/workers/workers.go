@@ -78,7 +78,7 @@ func (w *baseWorker) startOp(parentCtx context.Context, opType ops.Type) workerO
 		Type:          opTypeString,
 		Ref:           ref,
 		StartUnixNano: started.UnixNano(),
-	})
+	}, nil)
 	if !ok {
 		return workerOperation{ctx: parentCtx, opType: opTypeString, start: started}
 	}

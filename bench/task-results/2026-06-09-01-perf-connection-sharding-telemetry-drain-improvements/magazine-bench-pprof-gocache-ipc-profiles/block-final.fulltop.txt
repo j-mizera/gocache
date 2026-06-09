@@ -1,0 +1,102 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: delay
+Time: 2026-06-09 16:10:46 UTC
+Showing nodes accounting for 199086182.36us, 100% of 199086182.36us total
+      flat  flat%   sum%        cum   cum%
+109557841.10us 55.03% 55.03% 109557841.10us 55.03%  sync.(*Mutex).Lock (inline)
+         0     0% 55.03% 109557112.54us 55.03%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 55.03% 109557112.54us 55.03%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 55.03% 109042507.10us 54.77%  sync.(*RWMutex).Lock
+         0     0% 55.03% 109041788.54us 54.77%  gocache/pkg/cache.(*Shard).Lock (inline)
+89361165.17us 44.89% 99.92% 89361165.17us 44.89%  runtime.selectgo
+         0     0% 99.92% 79052611.50us 39.71%  gocache/pkg/server.(*Server).runBatch
+         0     0% 99.92% 79028948.16us 39.70%  gocache/pkg/engine.(*Engine).AcquireShard
+         0     0% 99.92% 30054911.03us 15.10%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 99.92% 30031247.69us 15.08%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 99.92% 30018433.34us 15.08%  gocache/pkg/command.Dispatch
+         0     0% 99.92% 29022519.52us 14.58%  gocache/pkg/engine.(*Engine).DispatchToShards
+         0     0% 99.92% 29022519.52us 14.58%  gocache/pkg/resp/handler.HandleMset
+         0     0% 99.92% 29017444.42us 14.58%  gocache/pkg/cache.(*Cache).LockShards
+         0     0% 99.92% 25001383.41us 12.56%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0% 99.92% 25001383.41us 12.56%  gocache/pkg/logcollector.New.gowrap1
+         0     0% 99.92% 24994904.36us 12.55%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func2
+         0     0% 99.92% 20000855.51us 10.05%  gocache/pkg/plugin/manager.(*Manager).handleConnection.func2
+         0     0% 99.92% 20000855.51us 10.05%  gocache/pkg/plugin/manager.(*Manager).healthLoop
+         0     0% 99.92% 10167087.51us  5.11%  net/http.(*ServeMux).ServeHTTP
+         0     0% 99.92% 10167087.51us  5.11%  net/http.(*Server).Serve.gowrap3
+         0     0% 99.92% 10167087.51us  5.11%  net/http.(*conn).serve
+         0     0% 99.92% 10167087.51us  5.11%  net/http.HandlerFunc.ServeHTTP
+         0     0% 99.92% 10167087.51us  5.11%  net/http.serverHandler.ServeHTTP
+         0     0% 99.92% 10167087.51us  5.11%  net/http/pprof.Profile
+         0     0% 99.92% 10000469.03us  5.02%  net/http/pprof.sleep
+         0     0% 99.92% 9364281.42us  4.70%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 99.92% 995766.40us   0.5%  gocache/pkg/engine.(*Engine).DispatchToShard
+         0     0% 99.92% 425658.88us  0.21%  gocache/commons/observability.(*SlotOperationTrackerManager).UpdateConnectionContextStrings (inline)
+         0     0% 99.92% 425658.88us  0.21%  gocache/commons/observability.(*connectionContextStore).updateStrings
+         0     0% 99.92% 345770.27us  0.17%  gocache/pkg/resp/handler.HandleSpop
+         0     0% 99.92% 228095.56us  0.11%  gocache/pkg/resp/handler.HandleLpush
+         0     0% 99.92% 173731.49us 0.087%  gocache/pkg/resp/handler.HandleSadd
+166628.48us 0.084%   100% 166628.48us 0.084%  runtime.chanrecv1
+         0     0%   100% 166618.48us 0.084%  runtime/pprof.StopCPUProfile
+         0     0%   100% 137454.35us 0.069%  gocache/pkg/server.(*Server).recordConnectionStarted
+         0     0%   100% 121317.82us 0.061%  gocache/pkg/resp/handler.HandleHset
+         0     0%   100% 67777.09us 0.034%  gocache/pkg/resp/handler.HandleRpop
+         0     0%   100% 49911.40us 0.025%  gocache/pkg/resp/handler.HandleRpush
+         0     0%   100% 46862.29us 0.024%  gocache/commons/observability.(*SlotOperationTrackerManager).ForgetConnectionContext
+         0     0%   100% 46862.29us 0.024%  gocache/commons/observability.(*connectionContextStore).forget
+         0     0%   100% 46862.29us 0.024%  gocache/pkg/server.(*Server).handleConnection.func1
+         0     0%   100% 46862.29us 0.024%  runtime.deferreturn
+         0     0%   100% 37209.88us 0.019%  gocache/commons/observability.(*SlotOperationTrackerManager).StartOperationForConnectionWithMetadata
+         0     0%   100% 37209.88us 0.019%  gocache/commons/observability.(*SlotOperationTrackerManager).startOperation
+         0     0%   100% 36477.69us 0.018%  gocache/commons/observability.(*SlotOperationTrackerManager).StartOperationWithConnectionContextAndMetadata
+         0     0%   100% 36477.69us 0.018%  gocache/pkg/pipeline.(*Pipeline).startCommandTelemetryScope
+         0     0%   100% 23663.35us 0.012%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked
+         0     0%   100%  8526.30us 0.0043%  gocache/pkg/resp/handler.HandleLpop
+         0     0%   100%  5592.96us 0.0028%  gocache/pkg/cache.(*Shard).setPackedInternal
+         0     0%   100%  5592.96us 0.0028%  gocache/pkg/cache.newCache.(*Cache).bindShardCallbacks.func1
+         0     0%   100%  5592.96us 0.0028%  gocache/pkg/command.Dispatch.wrapWithEmission.func1
+         0     0%   100%  5592.96us 0.0028%  gocache/pkg/watch.(*Manager).NotifyMutation
+         0     0%   100%  5592.96us 0.0028%  gocache/pkg/watch.(*Manager).NotifyMutation-fm
+         0     0%   100%  5075.10us 0.0025%  gocache/pkg/cache.(*Shard).BulkSetBytes
+         0     0%   100%  5075.10us 0.0025%  gocache/pkg/resp/handler.HandleMset.func2
+         0     0%   100%   732.19us 0.00037%  gocache/pkg/server.(*Server).startConnectionOperationScope
+         0     0%   100%   718.56us 0.00036%  gocache/pkg/events.(*Bus).Emit
+         0     0%   100%   517.86us 0.00026%  gocache/pkg/cache.(*Cache).RawSet
+         0     0%   100%   517.86us 0.00026%  gocache/pkg/cache.(*Shard).rawSet
+         0     0%   100%   517.86us 0.00026%  gocache/pkg/cache.(*Shard).setInternal
+         0     0%   100%   510.91us 0.00026%  gocache/pkg/resp/handler.HandleSet
+         0     0%   100%   477.86us 0.00024%  gocache/pkg/resp/handler.HandleSet.func1
+  451.74us 0.00023%   100%   451.74us 0.00023%  runtime.chansend1
+         0     0%   100%   317.71us 0.00016%  main.main
+         0     0%   100%   317.71us 0.00016%  runtime.main
+         0     0%   100%   272.98us 0.00014%  gocache/pkg/resp/handler.HandleIncr
+         0     0%   100%   239.91us 0.00012%  runtime.ensureSigM.func1
+         0     0%   100%   211.83us 0.00011%  os/signal.Notify
+         0     0%   100%   211.83us 0.00011%  os/signal.Notify.func1
+         0     0%   100%   211.83us 0.00011%  os/signal.enableSignal
+         0     0%   100%   211.83us 0.00011%  os/signal.signal_enable
+         0     0%   100%   211.83us 0.00011%  runtime.sigenable
+         0     0%   100%   147.42us 7.4e-05%  gocache/pkg/command.wrapInline
+         0     0%   100%    95.88us 4.8e-05%  github.com/spf13/viper.(*Viper).WatchConfig
+         0     0%   100%    95.88us 4.8e-05%  gocache/pkg/config.Load
+   95.88us 4.8e-05%   100%    95.88us 4.8e-05%  sync.(*WaitGroup).Wait
+         0     0%   100%    44.41us 2.2e-05%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%   100%    44.41us 2.2e-05%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+         0     0%   100%       40us 2e-05%  gocache/pkg/resp/handler.HandleIncr.func1
+         0     0%   100%       40us 2e-05%  gocache/pkg/resp/handler.incrByDelta
+         0     0%   100%    34.41us 1.7e-05%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0%   100%    34.41us 1.7e-05%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation-fm
+         0     0%   100%    34.41us 1.7e-05%  gocache/pkg/server.materializeOperationStartedRecord
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache.NewWithShards
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache.newCache
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache.newShard
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache/slab.(*slabClass).alloc
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache/slab.NewAllocatorWithTargetBytes
+         0     0%   100%       10us 5e-06%  gocache/pkg/cache/slab.newSlab
+         0     0%   100%       10us 5e-06%  runtime.gcBgMarkStartWorkers
+         0     0%   100%       10us 5e-06%  runtime.gcStart
+         0     0%   100%       10us 5e-06%  runtime.makeslice
+         0     0%   100%       10us 5e-06%  runtime.mallocgc
+         0     0%   100%       10us 5e-06%  runtime.mallocgcLarge

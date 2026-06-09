@@ -1,0 +1,39 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: cpu
+Time: 2026-06-09 16:02:26 UTC
+Duration: 10.17s, Total samples = 16.11s (158.46%)
+Showing nodes accounting for 6.34s, 39.35% of 16.11s total
+Dropped 350 nodes (cum <= 0.08s)
+Showing top 30 nodes out of 197
+      flat  flat%   sum%        cum   cum%
+     0.04s  0.25%  0.25%      7.58s 47.05%  gocache/pkg/server.(*Server).handleConnection
+     5.70s 35.38% 35.63%      5.70s 35.38%  internal/runtime/syscall.Syscall6
+     0.01s 0.062% 35.69%      4.99s 30.97%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 35.69%      4.75s 29.48%  internal/poll.ignoringEINTRIO (inline)
+     0.03s  0.19% 35.88%      4.68s 29.05%  syscall.Syscall
+     0.01s 0.062% 35.94%      4.51s 28.00%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+     0.05s  0.31% 36.25%      4.50s 27.93%  syscall.RawSyscall6
+     0.07s  0.43% 36.69%      4.49s 27.87%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+     0.04s  0.25% 36.93%      4.13s 25.64%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+     0.01s 0.062% 37.00%      3.72s 23.09%  bufio.(*Writer).Flush
+         0     0% 37.00%      3.72s 23.09%  gocache/commons/resp.(*Writer).Flush (inline)
+         0     0% 37.00%      3.72s 23.09%  gocache/pkg/server.(*ConnHandle).Flush
+     0.01s 0.062% 37.06%      3.71s 23.03%  net.(*conn).Write
+     0.02s  0.12% 37.18%      3.70s 22.97%  net.(*netFD).Write
+         0     0% 37.18%      3.67s 22.78%  internal/poll.(*FD).Write
+     0.01s 0.062% 37.24%      3.65s 22.66%  syscall.Write (inline)
+         0     0% 37.24%      3.64s 22.59%  syscall.write
+     0.01s 0.062% 37.31%      2.57s 15.95%  runtime.mcall
+     0.02s  0.12% 37.43%      2.55s 15.83%  runtime.park_m
+     0.02s  0.12% 37.55%      2.49s 15.46%  runtime.schedule
+     0.01s 0.062% 37.62%      2.33s 14.46%  gocache/pkg/events.(*Bus).Emit
+     0.08s   0.5% 38.11%      2.31s 14.34%  runtime.findRunnable
+     0.01s 0.062% 38.18%      2.28s 14.15%  gocache/pkg/events.(*ring).push
+         0     0% 38.18%      2.27s 14.09%  gocache/pkg/events.cloneEvent
+         0     0% 38.18%      2.27s 14.09%  google.golang.org/protobuf/proto.Clone
+     0.01s 0.062% 38.24%      2.09s 12.97%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+     0.05s  0.31% 38.55%      2.08s 12.91%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+     0.04s  0.25% 38.80%      2.07s 12.85%  google.golang.org/protobuf/proto.mergeOptions.mergeMessage
+         0     0% 38.80%      2.03s 12.60%  google.golang.org/protobuf/internal/impl.(*MessageInfo).merge
+     0.09s  0.56% 39.35%      2.03s 12.60%  google.golang.org/protobuf/internal/impl.(*MessageInfo).mergePointer

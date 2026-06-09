@@ -1,0 +1,38 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: delay
+Time: 2026-06-09 16:02:36 UTC
+Showing nodes accounting for 851.73ms, 100% of 851.74ms total
+Dropped 104 nodes (cum <= 4.26ms)
+Showing top 30 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+  706.92ms 83.00% 83.00%   706.92ms 83.00%  runtime.unlock (inline)
+         0     0% 83.00%   325.20ms 38.18%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 83.00%   323.52ms 37.98%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 83.00%   323.52ms 37.98%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 83.00%   229.69ms 26.97%  runtime.mcall
+         0     0% 83.00%   229.60ms 26.96%  runtime.park_m
+         0     0% 83.00%   179.96ms 21.13%  gocache/commons/observability.(*SlotOperationTrackerManager).FinishOperation
+         0     0% 83.00%   179.96ms 21.13%  gocache/commons/observability.OperationScope.Finish
+         0     0% 83.00%   179.96ms 21.13%  gocache/pkg/pipeline.finishCommandTelemetryScope
+         0     0% 83.00%   179.96ms 21.13%  gocache/pkg/server.(*OperationTrackerDrainWorker).nudge
+         0     0% 83.00%   179.96ms 21.13%  runtime.chansend
+         0     0% 83.00%   179.96ms 21.13%  runtime.selectnbsend
+         0     0% 83.00%   164.74ms 19.34%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 83.00%   164.63ms 19.33%  runtime.selectgo
+         0     0% 83.00%   163.43ms 19.19%  runtime.selunlock
+         0     0% 83.00%   159.43ms 18.72%  runtime.send
+         0     0% 83.00%   158.40ms 18.60%  runtime.chansend.func1
+  144.81ms 17.00%   100%   144.81ms 17.00%  sync.(*Mutex).Unlock (partial-inline)
+         0     0%   100%   144.75ms 16.99%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0%   100%   142.45ms 16.72%  gocache/pkg/cache.(*Shard).Unlock
+         0     0%   100%   142.45ms 16.72%  gocache/pkg/command.Dispatch
+         0     0%   100%   142.45ms 16.72%  gocache/pkg/engine.(*Engine).DispatchToShard
+         0     0%   100%   142.45ms 16.72%  sync.(*RWMutex).Unlock
+         0     0%   100%   133.83ms 15.71%  runtime.selparkcommit
+         0     0%   100%   129.99ms 15.26%  runtime.mstart
+         0     0%   100%   129.99ms 15.26%  runtime.mstart0
+         0     0%   100%   129.99ms 15.26%  runtime.mstart1
+         0     0%   100%   129.99ms 15.26%  runtime.sysmon
+         0     0%   100%    96.04ms 11.28%  runtime.schedule
+         0     0%   100%    76.78ms  9.01%  gocache/pkg/resp/handler.HandleSadd

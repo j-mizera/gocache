@@ -262,7 +262,7 @@ if [[ "$BENCH_PPROF_ENABLED" == "1" ]]; then
     done
 fi
 write_bench_snapshot() {
-    if [[ "$BENCH_PPROF_ENABLED" != "1" ]]; then
+    if [[ "$BENCH_STATS_ENABLED" != "1" && "$BENCH_PPROF_ENABLED" != "1" ]]; then
         return 0
     fi
     local file="$1"

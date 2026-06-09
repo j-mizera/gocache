@@ -54,6 +54,7 @@ type ClientContext struct {
 	RexMeta            *rex.Store        // nil until first REX.META SET/MSET
 	CmdMeta            map[string]string // transient per-command META, set by server, cleared after eval
 	ConnectionContext  commonobs.ConnectionContext
+	SlotMagazine       commonobs.SlotMagazine
 	ConnectionIdentity apiobs.ConnectionIdentity // internal sidecar connection identity, set by server
 	ConnectionID       string                    // stable connection identifier, independent of operations
 	RemoteAddr         string                    // remote peer address, set by server

@@ -9,6 +9,8 @@ import (
 	apiobs "gocache/api/observability"
 )
 
+const defaultSlotMagazineCapacity = 16
+
 // SlotTerminalStatus records why an operation slot became terminal.
 type SlotTerminalStatus uint8
 
@@ -26,6 +28,7 @@ type SlotTrackerConfig struct {
 	MinSegmentsPerShard     int
 	MaxSegmentsPerShard     int
 	SegmentSize             int
+	MagazineCapacity        int
 	RecordsPerOperation     int
 	CompletedRingPerShard   int
 	ReleaseContextVersionFn func(apiobs.ConnectionContextVersion) bool
@@ -42,11 +45,22 @@ type InternalTrackerHandle struct {
 	slotRef    *operationSlot
 }
 
-// SlotMagazine is the reserved owner-side cache for batched slot allocation.
-// The current implementation still allocates directly from the shard free list;
-// the type exists so call sites can be wired to the future magazine API without
-// changing ownership semantics.
-type SlotMagazine struct{}
+// SlotMagazine is an owner-side cache for batched slot allocation.
+// The zero value is ready for use by a single connection goroutine.
+type SlotMagazine struct {
+	refs []slotRef
+}
+
+func (m *SlotMagazine) pop() (slotRef, bool) {
+	if m == nil || len(m.refs) == 0 {
+		return slotRef{}, false
+	}
+	last := len(m.refs) - 1
+	ref := m.refs[last]
+	m.refs[last] = slotRef{}
+	m.refs = m.refs[:last]
+	return ref, true
+}
 
 // IsZero reports whether h cannot reference an active slot.
 func (h InternalTrackerHandle) IsZero() bool {
@@ -123,21 +137,23 @@ type SlotOperationTrackerManager struct {
 type operationSlotShard struct {
 	mu sync.Mutex
 
-	segments            []*operationSegment
+	segments            []atomic.Pointer[operationSegment]
 	minSegments         int
 	maxSegments         int
 	segmentSize         int
 	recordsPerOperation int
+	magazineCapacity    int
 
 	free        []slotRef
 	freeCount   int
 	completed   *completedRing
-	activeSlots int
+	activeSlots atomic.Int32
 }
 
 type slotRef struct {
-	segment int
-	slot    int
+	segment    int
+	slot       int
+	segmentRef *operationSegment
 }
 
 type operationSegment struct {
@@ -145,8 +161,8 @@ type operationSegment struct {
 	slots               []operationSlot
 	records             []apiobs.TelemetryRecord
 	recordsPerOperation int
-	active              int
-	retiring            bool
+	active              atomic.Int32
+	retiring            atomic.Bool
 }
 
 type operationSlotState uint8
@@ -304,6 +320,9 @@ func normalizeSlotTrackerConfig(config SlotTrackerConfig) SlotTrackerConfig {
 	if config.SegmentSize < 1 {
 		config.SegmentSize = 1
 	}
+	if config.MagazineCapacity < 1 {
+		config.MagazineCapacity = defaultSlotMagazineCapacity
+	}
 	if config.RecordsPerOperation < 1 {
 		config.RecordsPerOperation = 1
 	}
@@ -318,7 +337,8 @@ func (s *operationSlotShard) init(config SlotTrackerConfig) {
 	s.maxSegments = config.MaxSegmentsPerShard
 	s.segmentSize = config.SegmentSize
 	s.recordsPerOperation = config.RecordsPerOperation
-	s.segments = make([]*operationSegment, config.MaxSegmentsPerShard)
+	s.magazineCapacity = config.MagazineCapacity
+	s.segments = make([]atomic.Pointer[operationSegment], config.MaxSegmentsPerShard)
 	s.free = make([]slotRef, config.MaxSegmentsPerShard*config.SegmentSize)
 	s.completed = newCompletedRing(config.CompletedRingPerShard)
 	for range config.MinSegmentsPerShard {
@@ -329,6 +349,36 @@ func (s *operationSlotShard) init(config SlotTrackerConfig) {
 // ShardCount returns the configured number of slot-storage shards.
 func (m *SlotOperationTrackerManager) ShardCount() int {
 	return len(m.shards)
+}
+
+// FlushMagazine returns any free slots cached by a connection-owned magazine to
+// the selected shard. Nil managers, nil magazines, and invalid shard indexes are
+// ignored so connection teardown can call this unconditionally.
+func (m *SlotOperationTrackerManager) FlushMagazine(shardIndex int, magazine *SlotMagazine) {
+	if m == nil || magazine == nil || shardIndex < 0 || shardIndex >= len(m.shards) {
+		return
+	}
+	magazine.flushToShard(&m.shards[shardIndex])
+}
+
+func (magazine *SlotMagazine) flushToShard(shard *operationSlotShard) {
+	if magazine == nil || shard == nil || len(magazine.refs) == 0 {
+		return
+	}
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	for _, ref := range magazine.refs {
+		if shard.freeCount >= len(shard.free) {
+			break
+		}
+		if !shard.validFreeRefLocked(ref) {
+			continue
+		}
+		shard.free[shard.freeCount] = ref
+		shard.freeCount++
+	}
+	clear(magazine.refs)
+	magazine.refs = magazine.refs[:0]
 }
 
 // SetCompletedNotify wires a non-blocking notification hook invoked when a
@@ -343,14 +393,14 @@ func (m *SlotOperationTrackerManager) SetCompletedNotify(fn func()) {
 // StartOperation reserves a preallocated operation slot and returns its internal
 // tracker handle. It returns false when the shard has no free slot.
 func (m *SlotOperationTrackerManager) StartOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion) (InternalTrackerHandle, bool) {
-	return m.startOperation(operation, parent, 0, contextVersion, nil, OperationSnapshotMetadata{})
+	return m.startOperation(operation, parent, 0, contextVersion, nil, OperationSnapshotMetadata{}, nil)
 }
 
 // StartOperationWithMetadata reserves a preallocated operation slot and stores
 // fixed replay/crashdump identity metadata with the slot. The metadata is copied
 // into inline storage and does not materialize maps, logs, events, or GCPC data.
-func (m *SlotOperationTrackerManager) StartOperationWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
-	return m.startOperation(operation, parent, 0, contextVersion, nil, metadata)
+func (m *SlotOperationTrackerManager) StartOperationWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, metadata OperationSnapshotMetadata, magazines ...*SlotMagazine) (InternalTrackerHandle, bool) {
+	return m.startOperation(operation, parent, 0, contextVersion, nil, metadata, firstSlotMagazine(magazines))
 }
 
 func shardIndexForConnection(connection apiobs.ConnectionIdentity, operation apiobs.InternalOperationIdentity, shardCount int) int {
@@ -360,26 +410,71 @@ func shardIndexForConnection(connection apiobs.ConnectionIdentity, operation api
 	return shardIndex(operation, shardCount)
 }
 
-func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
+func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, metadata OperationSnapshotMetadata, magazine *SlotMagazine) (InternalTrackerHandle, bool) {
 	shardIndex := shardIndexForConnection(connection, operation, len(m.shards))
 	shard := &m.shards[shardIndex]
+
+	if magazine != nil {
+		for {
+			ref, ok := magazine.pop()
+			if !ok {
+				break
+			}
+			if handle, ok := m.initSlotFromRef(shard, shardIndex, ref, operation, parent, contextVersion, contextOverlay, metadata); ok {
+				return handle, true
+			}
+		}
+	}
 
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	if shard.freeCount == 0 {
-		atomic.AddUint64(&m.skippedOperations, 1)
-		return InternalTrackerHandle{}, false
+	if magazine != nil && len(magazine.refs) == 0 && shard.freeCount > 0 {
+		batch := min(shard.magazineCapacity, shard.freeCount)
+		if cap(magazine.refs) < batch {
+			magazine.refs = make([]slotRef, 0, batch)
+		} else {
+			magazine.refs = magazine.refs[:0]
+		}
+		for i := 0; i < batch; i++ {
+			shard.freeCount--
+			magazine.refs = append(magazine.refs, shard.free[shard.freeCount])
+			shard.free[shard.freeCount] = slotRef{}
+		}
+		for {
+			ref, ok := magazine.pop()
+			if !ok {
+				break
+			}
+			if handle, ok := m.initSlotFromRef(shard, shardIndex, ref, operation, parent, contextVersion, contextOverlay, metadata); ok {
+				return handle, true
+			}
+		}
 	}
-	shard.freeCount--
-	ref := shard.free[shard.freeCount]
-	shard.free[shard.freeCount] = slotRef{}
-	segment := shard.segments[ref.segment]
-	if segment == nil || segment.retiring {
-		atomic.AddUint64(&m.skippedOperations, 1)
+
+	for shard.freeCount > 0 {
+		shard.freeCount--
+		ref := shard.free[shard.freeCount]
+		shard.free[shard.freeCount] = slotRef{}
+		if handle, ok := m.initSlotFromRef(shard, shardIndex, ref, operation, parent, contextVersion, contextOverlay, metadata); ok {
+			return handle, true
+		}
+	}
+
+	atomic.AddUint64(&m.skippedOperations, 1)
+	return InternalTrackerHandle{}, false
+}
+
+func (m *SlotOperationTrackerManager) initSlotFromRef(shard *operationSlotShard, shardIndex int, ref slotRef, operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, contextVersion apiobs.ConnectionContextVersion, contextOverlay map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, bool) {
+	segment, ok := shard.reserveSegmentForRef(ref)
+	if !ok {
 		return InternalTrackerHandle{}, false
 	}
 	slot := &segment.slots[ref.slot]
+	if operationSlotState(slot.state.Load()) != operationSlotFree {
+		segment.active.Add(-1)
+		return InternalTrackerHandle{}, false
+	}
 	slot.generation++
 	if slot.generation == 0 {
 		slot.generation++
@@ -393,8 +488,7 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 	slot.recordCount.Store(0)
 	slot.droppedRecords = 0
 	slot.state.Store(uint32(operationSlotActive))
-	segment.active++
-	shard.activeSlots++
+	shard.activeSlots.Add(1)
 
 	return InternalTrackerHandle{
 		shard:      uint16(shardIndex),
@@ -406,18 +500,26 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 	}, true
 }
 
+func firstSlotMagazine(magazines []*SlotMagazine) *SlotMagazine {
+	if len(magazines) == 0 {
+		return nil
+	}
+	return magazines[0]
+}
+
 // StartOperationForConnection pins the current connection-context version and
 // reserves an operation slot. If no slot is available, the pinned version is
 // released before returning.
 func (m *SlotOperationTrackerManager) StartOperationForConnection(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
-	return m.StartOperationForConnectionWithMetadata(operation, parent, connection, OperationSnapshotMetadata{})
+	return m.StartOperationForConnectionWithMetadata(operation, parent, connection, OperationSnapshotMetadata{}, nil)
 }
 
 // StartOperationForConnectionWithMetadata pins the current connection-context
 // version and reserves an operation slot with fixed replay/crashdump metadata.
-func (m *SlotOperationTrackerManager) StartOperationForConnectionWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, metadata OperationSnapshotMetadata) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+func (m *SlotOperationTrackerManager) StartOperationForConnectionWithMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, metadata OperationSnapshotMetadata, magazines ...*SlotMagazine) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
 	version := m.PinCurrentConnectionContextVersion(connection)
-	handle, ok := m.startOperation(operation, parent, connection, version, nil, metadata)
+	magazine := firstSlotMagazine(magazines)
+	handle, ok := m.startOperation(operation, parent, connection, version, nil, metadata, magazine)
 	if !ok {
 		m.ReleaseConnectionContextVersion(version)
 		return InternalTrackerHandle{}, 0, false
@@ -431,18 +533,19 @@ func (m *SlotOperationTrackerManager) StartOperationForConnectionWithMetadata(op
 // only to this operation. Callers must not mutate pairs until the operation is
 // drained.
 func (m *SlotOperationTrackerManager) StartOperationWithConnectionContext(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, pairs map[string]string) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
-	return m.StartOperationWithConnectionContextAndMetadata(operation, parent, connection, pairs, OperationSnapshotMetadata{})
+	return m.StartOperationWithConnectionContextAndMetadata(operation, parent, connection, pairs, OperationSnapshotMetadata{}, nil)
 }
 
 // StartOperationWithConnectionContextAndMetadata pins the current connection
 // context, attaches command-scoped overlay, and stores fixed replay/crashdump
 // metadata with the slot.
-func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, pairs map[string]string, metadata OperationSnapshotMetadata) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, pairs map[string]string, metadata OperationSnapshotMetadata, magazines ...*SlotMagazine) (InternalTrackerHandle, apiobs.ConnectionContextVersion, bool) {
+	magazine := firstSlotMagazine(magazines)
 	if len(pairs) == 0 {
-		return m.StartOperationForConnectionWithMetadata(operation, parent, connection, metadata)
+		return m.StartOperationForConnectionWithMetadata(operation, parent, connection, metadata, magazine)
 	}
 	version := m.PinCurrentConnectionContextVersion(connection)
-	handle, ok := m.startOperation(operation, parent, connection, version, pairs, metadata)
+	handle, ok := m.startOperation(operation, parent, connection, version, pairs, metadata, magazine)
 	if !ok {
 		m.ReleaseConnectionContextVersion(version)
 		return InternalTrackerHandle{}, 0, false
@@ -453,9 +556,9 @@ func (m *SlotOperationTrackerManager) StartOperationWithConnectionContextAndMeta
 // StartOperationWithPinnedConnectionContextAndMetadata starts an operation with
 // a version the caller has already pinned. On success the slot owns that pin and
 // releases it during drain/reset; on failure the pin is released before return.
-func (m *SlotOperationTrackerManager) StartOperationWithPinnedConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, version apiobs.ConnectionContextVersion, pairs map[string]string, metadata OperationSnapshotMetadata, magazine *SlotMagazine) (InternalTrackerHandle, bool) {
-	_ = magazine
-	handle, ok := m.startOperation(operation, parent, connection, version, pairs, metadata)
+func (m *SlotOperationTrackerManager) StartOperationWithPinnedConnectionContextAndMetadata(operation apiobs.InternalOperationIdentity, parent apiobs.ParentRef, connection apiobs.ConnectionIdentity, version apiobs.ConnectionContextVersion, pairs map[string]string, metadata OperationSnapshotMetadata, magazines ...*SlotMagazine) (InternalTrackerHandle, bool) {
+	magazine := firstSlotMagazine(magazines)
+	handle, ok := m.startOperation(operation, parent, connection, version, pairs, metadata, magazine)
 	if !ok {
 		m.ReleaseConnectionContextVersion(version)
 		return InternalTrackerHandle{}, false
@@ -527,7 +630,8 @@ func (m *SlotOperationTrackerManager) appendActiveOperationSnapshotInputs(inputs
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	for _, segment := range shard.segments {
+	for i := range shard.segments {
+		segment := shard.segments[i].Load()
 		if segment == nil {
 			continue
 		}
@@ -806,7 +910,7 @@ func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHand
 		atomic.AddUint64(&m.invalidHandles, 1)
 		return false
 	}
-	if int(handle.segment) >= len(shard.segments) || shard.segments[handle.segment] != segment {
+	if int(handle.segment) >= len(shard.segments) || shard.segments[handle.segment].Load() != segment {
 		atomic.AddUint64(&m.invalidHandles, 1)
 		return false
 	}
@@ -822,7 +926,7 @@ func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHand
 		return false
 	}
 	slot.status = status
-	ref := slotRef{segment: int(handle.segment), slot: int(handle.slot)}
+	ref := slotRef{segment: int(handle.segment), slot: int(handle.slot), segmentRef: segment}
 	if !shard.completed.push(ref) {
 		atomic.AddUint64(&m.droppedCompleted, 1)
 		m.releaseContextVersion(slot.contextVersion)
@@ -849,12 +953,8 @@ func (m *SlotOperationTrackerManager) DrainCompletedShard(index int, fn func(Com
 		if !ok {
 			break
 		}
-		if ref.segment < 0 || ref.segment >= len(shard.segments) {
-			atomic.AddUint64(&m.invalidHandles, 1)
-			continue
-		}
-		segment := shard.segments[ref.segment]
-		if segment == nil || ref.slot < 0 || ref.slot >= len(segment.slots) {
+		segment, ok := shard.segmentForRef(ref)
+		if !ok {
 			atomic.AddUint64(&m.invalidHandles, 1)
 			continue
 		}
@@ -878,11 +978,8 @@ func (m *SlotOperationTrackerManager) DrainCompletedShard(index int, fn func(Com
 	shard.mu.Lock()
 	for i := range refs {
 		ref := refs[i]
-		if ref.segment < 0 || ref.segment >= len(shard.segments) {
-			continue
-		}
-		segment := shard.segments[ref.segment]
-		if segment == nil || ref.slot < 0 || ref.slot >= len(segment.slots) {
+		segment, ok := shard.segmentForRef(ref)
+		if !ok {
 			continue
 		}
 		slot := &segment.slots[ref.slot]
@@ -928,7 +1025,7 @@ func (m *SlotOperationTrackerManager) ShardStats(index int) SlotShardStats {
 	return SlotShardStats{
 		Segments:       shard.segmentCountLocked(),
 		FreeSlots:      shard.freeCount,
-		ActiveSlots:    shard.activeSlots,
+		ActiveSlots:    int(shard.activeSlots.Load()),
 		CompletedSlots: shard.completed.count(),
 	}
 }
@@ -1043,8 +1140,8 @@ func (m *SlotOperationTrackerManager) releaseContextVersion(version apiobs.Conne
 
 func (s *operationSlotShard) addSegmentLocked() bool {
 	index := -1
-	for i, segment := range s.segments {
-		if segment == nil {
+	for i := range s.segments {
+		if s.segments[i].Load() == nil {
 			index = i
 			break
 		}
@@ -1053,9 +1150,9 @@ func (s *operationSlotShard) addSegmentLocked() bool {
 		return false
 	}
 	segment := newOperationSegment(index, s.segmentSize, s.recordsPerOperation)
-	s.segments[index] = segment
+	s.segments[index].Store(segment)
 	for slot := range s.segmentSize {
-		s.free[s.freeCount] = slotRef{segment: index, slot: slot}
+		s.free[s.freeCount] = slotRef{segment: index, slot: slot, segmentRef: segment}
 		s.freeCount++
 	}
 	return true
@@ -1070,11 +1167,57 @@ func newOperationSegment(index, segmentSize, recordsPerOperation int) *operation
 	}
 }
 
+func (s *operationSlotShard) segmentForRef(ref slotRef) (*operationSegment, bool) {
+	if ref.segment < 0 || ref.segment >= len(s.segments) {
+		return nil, false
+	}
+	current := s.segments[ref.segment].Load()
+	segment := ref.segmentRef
+	if segment == nil {
+		segment = current
+	}
+	if segment == nil || current != segment || ref.slot < 0 || ref.slot >= len(segment.slots) {
+		return nil, false
+	}
+	if segment.retiring.Load() || segment.active.Load() < 0 {
+		return nil, false
+	}
+	return segment, true
+}
+
+func (s *operationSlotShard) validFreeRefLocked(ref slotRef) bool {
+	segment, ok := s.segmentForRef(ref)
+	if !ok {
+		return false
+	}
+	return operationSlotState(segment.slots[ref.slot].state.Load()) == operationSlotFree
+}
+
+func (s *operationSlotShard) reserveSegmentForRef(ref slotRef) (*operationSegment, bool) {
+	segment, ok := s.segmentForRef(ref)
+	if !ok {
+		return nil, false
+	}
+	for {
+		active := segment.active.Load()
+		if active < 0 || segment.retiring.Load() {
+			return nil, false
+		}
+		if segment.active.CompareAndSwap(active, active+1) {
+			if s.segments[ref.segment].Load() != segment || segment.retiring.Load() {
+				segment.active.Add(-1)
+				return nil, false
+			}
+			return segment, true
+		}
+	}
+}
+
 func (s *operationSlotShard) activeSlotLocked(handle InternalTrackerHandle) (*operationSegment, *operationSlot, bool) {
 	if handle.IsZero() || int(handle.segment) >= len(s.segments) {
 		return nil, nil, false
 	}
-	segment := s.segments[handle.segment]
+	segment := s.segments[handle.segment].Load()
 	if segment == nil || segment != handle.segmentRef || int(handle.slot) >= len(segment.slots) {
 		return nil, nil, false
 	}
@@ -1113,9 +1256,10 @@ func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slot
 	slot.recordCount.Store(0)
 	slot.droppedRecords = 0
 	slot.state.Store(uint32(operationSlotFree))
-	segment.active--
-	s.activeSlots--
-	if !segment.retiring {
+	segment.active.Add(-1)
+	s.activeSlots.Add(-1)
+	if !segment.retiring.Load() {
+		ref.segmentRef = segment
 		s.free[s.freeCount] = ref
 		s.freeCount++
 	}
@@ -1126,13 +1270,13 @@ func (s *operationSlotShard) retireFreeSegmentLocked() bool {
 		return false
 	}
 	for index := len(s.segments) - 1; index >= 0; index-- {
-		segment := s.segments[index]
-		if segment == nil || segment.active != 0 {
+		segment := s.segments[index].Load()
+		if segment == nil || !segment.active.CompareAndSwap(0, -1) {
 			continue
 		}
-		segment.retiring = true
+		segment.retiring.Store(true)
 		s.removeFreeRefsForSegmentLocked(index)
-		s.segments[index] = nil
+		s.segments[index].Store(nil)
 		return true
 	}
 	return false
@@ -1155,8 +1299,8 @@ func (s *operationSlotShard) removeFreeRefsForSegmentLocked(segmentIndex int) {
 
 func (s *operationSlotShard) segmentCountLocked() int {
 	count := 0
-	for _, segment := range s.segments {
-		if segment != nil {
+	for i := range s.segments {
+		if s.segments[i].Load() != nil {
 			count++
 		}
 	}

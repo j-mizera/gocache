@@ -1,0 +1,37 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: goroutine
+Time: 2026-06-09 16:02:36 UTC
+Showing nodes accounting for 69, 94.52% of 73 total
+Showing top 30 nodes out of 80
+      flat  flat%   sum%        cum   cum%
+        69 94.52% 94.52%         69 94.52%  runtime.gopark
+         0     0% 94.52%         57 78.08%  internal/poll.(*pollDesc).wait
+         0     0% 94.52%         57 78.08%  internal/poll.(*pollDesc).waitRead (inline)
+         0     0% 94.52%         57 78.08%  internal/poll.runtime_pollWait
+         0     0% 94.52%         57 78.08%  runtime.netpollblock
+         0     0% 94.52%         54 73.97%  internal/poll.(*FD).Read
+         0     0% 94.52%         51 69.86%  net.(*conn).Read
+         0     0% 94.52%         51 69.86%  net.(*netFD).Read
+         0     0% 94.52%         50 68.49%  bufio.(*Reader).ReadByte
+         0     0% 94.52%         50 68.49%  bufio.(*Reader).fill
+         0     0% 94.52%         50 68.49%  gocache/commons/resp.(*Reader).Read
+         0     0% 94.52%         50 68.49%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 94.52%         11 15.07%  runtime.selectgo
+         0     0% 94.52%          3  4.11%  internal/poll.(*FD).Accept
+         0     0% 94.52%          3  4.11%  net.(*netFD).accept
+         0     0% 94.52%          3  4.11%  os.(*File).Read
+         0     0% 94.52%          3  4.11%  os.(*File).read (inline)
+         0     0% 94.52%          2  2.74%  bufio.(*Scanner).Scan
+         0     0% 94.52%          2  2.74%  gocache/pkg/logcollector.(*Collector).AddSource.func1
+         0     0% 94.52%          2  2.74%  gocache/pkg/logcollector.(*Collector).readSource
+         0     0% 94.52%          2  2.74%  net.(*TCPListener).Accept
+         0     0% 94.52%          2  2.74%  net.(*TCPListener).accept
+         0     0% 94.52%          1  1.37%  github.com/fsnotify/fsnotify.(*inotify).readEvents
+         0     0% 94.52%          1  1.37%  github.com/spf13/viper.(*Viper).WatchConfig.func1
+         0     0% 94.52%          1  1.37%  github.com/spf13/viper.(*Viper).WatchConfig.func1.1
+         0     0% 94.52%          1  1.37%  gocache/commons/transport.(*Conn).Recv
+         0     0% 94.52%          1  1.37%  gocache/commons/transport.(*Listener).Accept
+         0     0% 94.52%          1  1.37%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0% 94.52%          1  1.37%  gocache/pkg/plugin/manager.(*Manager).acceptLoop
+         0     0% 94.52%          1  1.37%  gocache/pkg/plugin/manager.(*Manager).acceptLoop.func1
