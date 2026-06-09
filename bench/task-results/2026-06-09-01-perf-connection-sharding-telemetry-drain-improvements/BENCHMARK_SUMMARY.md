@@ -62,15 +62,13 @@ export BENCH_CLIENT_CPUS=4-7
 export BENCH_MEM_LIMIT=2g
 export BENCH_GOCACHE_MAX_MEMORY_MB=1024
 export REBUILD=1
-# Basic matrix (valkey + core + IPC prometheus)
 bench/redis-benchmark/run-matrix.sh magazine-bench
 
-# IPC with pprof and benchstats (for profiles)
 export BENCH_PPROF=1
 export BENCH_STATS=1
 bench/redis-benchmark/run-ipc.sh magazine-bench-pprof --target gocache-ipc
 
-# IPC with OpenTelemetry (REQUIRED)
+# OTel benchmark
 bench/redis-benchmark/run-ipc.sh magazine-bench-otel --target gocache-ipc-otel
 ```
 
@@ -129,94 +127,31 @@ Average across all 15 emitted `valkey-benchmark --csv` rows.
 ### 3.3 Memory Usage (RSS)
 
 | Configuration | Baseline | Post-Standard | Final | Delta |
-|---|---|---:|---:|---:|
+|---|---:|---:|---:|---:|
 | Valkey | 16.7 MB | 32.2 MB | 35.1 MB | +18.4 MB |
 | GoCache core | 48.5 MB | 212.3 MB | 252.4 MB | +203.9 MB |
 | GoCache IPC | 53.5 MB | 221.6 MB | 271.0 MB | +217.5 MB |
 | GoCache IPC pprof/stats | 56.5 MB | 220.5 MB | 280.9 MB | +224.4 MB |
 | GoCache IPC+OTel | 53.8 MB | 219.9 MB | 265.5 MB | +211.6 MB |
 
-#### OTel Collector Memory (IPC+OTel variant)
+### 3.4 Runtime Metrics (benchstats, pprof/stats run)
 
-| Metric | Value |
-|---|---:|
-| Baseline RSS | 209.5 MB |
-| Post-Standard RSS | 209.5 MB |
-| Final RSS | 209.5 MB |
-| Delta | 0 MB (stable) |
+| Metric | Standard | Pipelined |
+|---|---:|---:|
+| Pipeline evaluations | 1,500,000 | 1,500,000 |
+| Operations started | 1,499,978 | 710,257 |
+| Operations completed | 1,499,978 | 710,257 |
+| Operations / eval | 1.000 | 0.474 |
+| Runtime mutex wait | 5.96s | 109.00s |
+| Mutex wait / eval | 4.0 µs | 72.7 µs |
+| Heap alloc objects | 148,496,956 | 232,644,870 |
+| Heap allocs / eval | 99.0 | 155.1 |
+| Heap alloc bytes | 8,540,847,936 | 13,844,450,480 |
+| Bytes / eval | 5,694 | 9,230 |
+| Live heap objects | 1,534,904 | 1,924,423 |
+| Goroutines | 23 | 23 |
 
-The OTel Collector container memory remained stable at ~200 MB throughout the benchmark, indicating no memory leak under load.
-
-### 3.4 Runtime Metrics (benchstats)
-
-Complete benchstats from `magazine-bench-pprof-gocache-ipc` (the only variant run with `BENCH_STATS=1`). **All metrics from the JSON files are displayed below.**
-
-#### Standard Mode
-
-| Metric | Value | Per-Evaluation |
-|---|---|---:|
-| `enabled` | true | — |
-| `manager.event_enqueue_attempts` | 0 | 0 |
-| `manager.event_received` | 0 | 0 |
-| `manager.projection_builds` | 0 | 0 |
-| `operation_tracker.dropped_completed` | 0 | 0 |
-| `operation_tracker.dropped_records` | 0 | 0 |
-| `operation_tracker.skipped_operations` | 0 | 0 |
-| `pipeline.evaluations` | 1,500,000 | — |
-| `pipeline.event.operation_completed` | 1,499,978 | 1.000 |
-| `pipeline.event.operation_started` | 1,499,978 | 1.000 |
-| `runtime.gc.heap.allocs.bytes` | 8,540,847,936 | 5,694 |
-| `runtime.gc.heap.allocs.objects` | 148,496,956 | 99.0 |
-| `runtime.gc.heap.objects.objects` | 1,534,904 | 1.0 |
-| `runtime.memory.classes.heap.objects.bytes` | 134,184,376 | 89.5 |
-| `runtime.memory.classes.total.bytes` | 220,973,368 | 147.3 |
-| `runtime.sched.goroutines.goroutines` | 23 | — |
-| `runtime.sync.mutex.wait.total.seconds` | 5.96s | 4.0 µs |
-
-#### Pipelined Mode
-
-| Metric | Value | Per-Evaluation |
-|---|---|---:|
-| `enabled` | true | — |
-| `manager.event_enqueue_attempts` | 0 | 0 |
-| `manager.event_received` | 0 | 0 |
-| `manager.projection_builds` | 0 | 0 |
-| `operation_tracker.dropped_completed` | 0 | 0 |
-| `operation_tracker.dropped_records` | 0 | 0 |
-| `operation_tracker.skipped_operations` | 0 | 0 |
-| `pipeline.evaluations` | 1,500,000 | — |
-| `pipeline.event.operation_completed` | 710,257 | 0.474 |
-| `pipeline.event.operation_started` | 710,257 | 0.474 |
-| `runtime.gc.heap.allocs.bytes` | 13,844,450,480 | 9,230 |
-| `runtime.gc.heap.allocs.objects` | 232,644,870 | 155.1 |
-| `runtime.gc.heap.objects.objects` | 1,924,423 | 1.3 |
-| `runtime.memory.classes.heap.objects.bytes` | 154,061,112 | 102.7 |
-| `runtime.memory.classes.total.bytes` | 281,274,680 | 187.5 |
-| `runtime.sched.goroutines.goroutines` | 23 | — |
-| `runtime.sync.mutex.wait.total.seconds` | 109.00s | 72.7 µs |
-
-**Notes:**
-
-1. **Event metrics are zero** because this is a Prometheus-only IPC run (no `instrumentation` plugin). The `manager.event_*` metrics only populate when the `instrumentation` plugin is active, which requires the OTel variant.
-
-2. **No operations were lost in pipelined mode.** `operation_started` equals `operation_completed` (710,257), and all drop metrics (`dropped_completed`, `dropped_records`, `skipped_operations`) are zero. The 0.474 ops/eval ratio is a definitional artifact of the telemetry system: `RecordPipelineOperationStarted` is only emitted when a telemetry scope is successfully allocated, which in pipelined mode under this load averages ~2.1 commands per operation. This reflects how the server-side batch boundaries align with TCP reads, not a completion failure — total throughput is measured via RPS from the benchmark tool.
-
-### 3.5 Pprof vs Clean Build Comparison
-
-Comparing IPC clean build (no profiling) vs IPC pprof build (with profiling enabled) to quantify profiling overhead:
-
-| Metric | IPC Clean | IPC Pprof | Diff |
-|---|---|---:|---:|
-| Standard RPS | 107,618 | 99,583 | -7.5% |
-| Pipelined RPS | 556,655 | 533,104 | -4.2% |
-| Standard Latency | 0.254ms | 0.276ms | +8.7% |
-| Pipelined Latency | 1.085ms | 1.121ms | +3.3% |
-| Standard P99 | 0.649ms | 0.688ms | +6.0% |
-| Pipelined P99 | 4.381ms | 4.775ms | +9.0% |
-| Baseline RSS | 53.5 MB | 56.5 MB | +5.6% |
-| Final RSS | 271.0 MB | 280.9 MB | +3.7% |
-
-The pprof-enabled build shows a measurable throughput reduction (~4-8%) and slightly higher latency, which is expected due to profiling overhead. This is why clean builds are used for primary throughput comparisons, while pprof builds are used only for profile capture and benchstats collection.
+`manager.event_received`, `manager.projection_builds`, and `manager.event_enqueue_attempts` were all `0` in this Prometheus-only IPC run.
 
 ---
 
