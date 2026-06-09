@@ -791,6 +791,25 @@ func TestPluginConnLazyFireAndForgetSkipsBuildWhenQueueFull(t *testing.T) {
 	}
 }
 
+func TestPluginConnHeadroom(t *testing.T) {
+	pc := &PluginConn{outbound: make(chan outboundEnvelope, 2)}
+	if got := pc.Headroom(); got != 2 {
+		t.Fatalf("Headroom()=%d, want 2", got)
+	}
+	pc.outbound <- outboundEnvelope{env: gcpc.NewHealthCheck()}
+	if got := pc.Headroom(); got != 1 {
+		t.Fatalf("Headroom() after enqueue=%d, want 1", got)
+	}
+	pc.outbound = nil
+	if got := pc.Headroom(); got != 0 {
+		t.Fatalf("Headroom() with nil outbound=%d, want 0", got)
+	}
+	var nilConn *PluginConn
+	if got := nilConn.Headroom(); got != 0 {
+		t.Fatalf("nil Headroom()=%d, want 0", got)
+	}
+}
+
 func TestPluginConnStatsTracksFireAndForgetDrops(t *testing.T) {
 	pc := &PluginConn{
 		outbound: make(chan outboundEnvelope, 1),
@@ -822,6 +841,9 @@ func TestPluginConnStatsTracksFireAndForgetDrops(t *testing.T) {
 	}
 	if stats.QueueDepth != 1 || stats.QueueCapacity != 1 {
 		t.Fatalf("queue depth/capacity=%d/%d, want 1/1", stats.QueueDepth, stats.QueueCapacity)
+	}
+	if stats.QueueHeadroom != 0 {
+		t.Fatalf("QueueHeadroom=%d, want 0", stats.QueueHeadroom)
 	}
 }
 

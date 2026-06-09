@@ -278,7 +278,6 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// payloads below still use narrow interest checks before materializing maps or
 	// fanout objects, but current subscribers must not decide whether the command
 	// operation exists.
-	benchstats.RecordPipelineFullPath()
 
 	metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
 	telemetryScope := b.startCommandTelemetryScope(ctx)
@@ -323,9 +322,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	connInfo := &gcpc.ConnectionInfoV1{Id: ctx.ConnectionID, RemoteAddr: ctx.RemoteAddr}
 	cmdInfo := &gcpc.CommandInfoV1{Name: op, Args: args}
 	if hasHooks {
-		snapshotStart := benchstats.StartTimer()
 		hookCtx = commandProjectionContext(telemetryScope, cmdOp, metadata)
-		benchstats.RecordPipelineContextSnapshot(snapshotStart)
 
 		if pre := b.hookExecutor.RunPreHooks(opCtx, cmdInfo, connInfo, hookCtx); pre != nil {
 			if pre.Denied {
@@ -392,17 +389,14 @@ func (b *Pipeline) recordCommandStartSignals(scope commonobs.OperationScope, cmd
 	}
 	operationID := commandOperationID(scope, cmdOp)
 	if !scope.IsZero() {
-		buildStart := benchstats.StartTimer()
 		scope.OperationStartString(string(ops.TypeCommand),
 			apicommand.OperationID, operationID,
 			"_operation_type", string(ops.TypeCommand),
 			"_parent_operation_id", commandParentID(scope, cmdOp),
 		)
-		benchstats.RecordPipelineOperationStartedBuilt(buildStart)
+		benchstats.RecordPipelineOperationStarted()
 		if b.emitter.HasSubscribersFor(events.CommandStarted) {
-			buildStart := benchstats.StartTimer()
 			scope.CommandStartString(op, commandEventFields(operationID, op, args, metadata, 0, "", "")...)
-			benchstats.RecordPipelineCommandStartedBuilt(buildStart)
 		}
 		return
 	}
@@ -418,11 +412,8 @@ func (b *Pipeline) recordCommandFinishSignals(scope commonobs.OperationScope, cm
 	operationID := commandOperationID(scope, cmdOp)
 	if !scope.IsZero() {
 		if b.emitter.HasSubscribersFor(events.CommandCompleted) {
-			buildStart := benchstats.StartTimer()
 			scope.CommandFinishString(op, elapsedNs, commandEventFields(operationID, op, args, metadata, elapsedNs, resultVal, resultErr)...)
-			benchstats.RecordPipelineCommandCompletedBuilt(buildStart)
 		}
-		buildStart := benchstats.StartTimer()
 		scope.OperationFinishString(string(ops.TypeCommand), elapsedNs,
 			apicommand.OperationID, operationID,
 			"_operation_type", string(ops.TypeCommand),
@@ -430,7 +421,7 @@ func (b *Pipeline) recordCommandFinishSignals(scope commonobs.OperationScope, cm
 			apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
 			apicommand.ErrorKey, resultErr,
 		)
-		benchstats.RecordPipelineOperationCompletedBuilt(buildStart)
+		benchstats.RecordPipelineOperationCompleted()
 		return
 	}
 	// Runtime event fanout is sidecar-owned. If no sidecar scope exists, keep

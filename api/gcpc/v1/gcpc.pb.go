@@ -3298,11 +3298,16 @@ func (x *CacheEvictionEventV1) GetReason() string {
 }
 
 type ReplayGapEventV1 struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Subscriber    string                 `protobuf:"bytes,1,opt,name=subscriber,proto3" json:"subscriber,omitempty"`
-	DroppedCount  uint64                 `protobuf:"varint,2,opt,name=dropped_count,json=droppedCount,proto3" json:"dropped_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Subscriber        string                 `protobuf:"bytes,1,opt,name=subscriber,proto3" json:"subscriber,omitempty"`
+	DroppedCount      uint64                 `protobuf:"varint,2,opt,name=dropped_count,json=droppedCount,proto3" json:"dropped_count,omitempty"`
+	SkippedOperations uint64                 `protobuf:"varint,3,opt,name=skipped_operations,json=skippedOperations,proto3" json:"skipped_operations,omitempty"`
+	DroppedRecords    uint64                 `protobuf:"varint,4,opt,name=dropped_records,json=droppedRecords,proto3" json:"dropped_records,omitempty"`
+	DroppedCompleted  uint64                 `protobuf:"varint,5,opt,name=dropped_completed,json=droppedCompleted,proto3" json:"dropped_completed,omitempty"`
+	InvalidHandles    uint64                 `protobuf:"varint,6,opt,name=invalid_handles,json=invalidHandles,proto3" json:"invalid_handles,omitempty"`
+	WindowMs          uint64                 `protobuf:"varint,7,opt,name=window_ms,json=windowMs,proto3" json:"window_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ReplayGapEventV1) Reset() {
@@ -3345,6 +3350,41 @@ func (x *ReplayGapEventV1) GetSubscriber() string {
 func (x *ReplayGapEventV1) GetDroppedCount() uint64 {
 	if x != nil {
 		return x.DroppedCount
+	}
+	return 0
+}
+
+func (x *ReplayGapEventV1) GetSkippedOperations() uint64 {
+	if x != nil {
+		return x.SkippedOperations
+	}
+	return 0
+}
+
+func (x *ReplayGapEventV1) GetDroppedRecords() uint64 {
+	if x != nil {
+		return x.DroppedRecords
+	}
+	return 0
+}
+
+func (x *ReplayGapEventV1) GetDroppedCompleted() uint64 {
+	if x != nil {
+		return x.DroppedCompleted
+	}
+	return 0
+}
+
+func (x *ReplayGapEventV1) GetInvalidHandles() uint64 {
+	if x != nil {
+		return x.InvalidHandles
+	}
+	return 0
+}
+
+func (x *ReplayGapEventV1) GetWindowMs() uint64 {
+	if x != nil {
+		return x.WindowMs
 	}
 	return 0
 }
@@ -4189,12 +4229,17 @@ const file_api_gcpc_v1_gcpc_proto_rawDesc = "" +
 	"\acommand\x18\x02 \x01(\tR\acommand\"@\n" +
 	"\x14CacheEvictionEventV1\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"W\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xa2\x02\n" +
 	"\x10ReplayGapEventV1\x12\x1e\n" +
 	"\n" +
 	"subscriber\x18\x01 \x01(\tR\n" +
 	"subscriber\x12#\n" +
-	"\rdropped_count\x18\x02 \x01(\x04R\fdroppedCount\"O\n" +
+	"\rdropped_count\x18\x02 \x01(\x04R\fdroppedCount\x12-\n" +
+	"\x12skipped_operations\x18\x03 \x01(\x04R\x11skippedOperations\x12'\n" +
+	"\x0fdropped_records\x18\x04 \x01(\x04R\x0edroppedRecords\x12+\n" +
+	"\x11dropped_completed\x18\x05 \x01(\x04R\x10droppedCompleted\x12'\n" +
+	"\x0finvalid_handles\x18\x06 \x01(\x04R\x0einvalidHandles\x12\x1b\n" +
+	"\twindow_ms\x18\a \x01(\x04R\bwindowMs\"O\n" +
 	"\x16RuntimeLogBatchEventV1\x125\n" +
 	"\arecords\x18\x01 \x03(\v2\x1b.gcpc.v1.RuntimeLogRecordV1R\arecords\"\xb1\x02\n" +
 	"\x12RuntimeLogRecordV1\x12\x1c\n" +

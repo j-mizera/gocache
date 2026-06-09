@@ -1,0 +1,17 @@
+label=valkey-ref
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=93e6d7906032fd4079da3275b08272dd1eca7118
+gocache_branch=perf/telemetry-pipeline
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=16231956
+post_standard_rss_bytes=31415336
+final_rss_bytes=35683041
+delta_rss_bytes=19451085

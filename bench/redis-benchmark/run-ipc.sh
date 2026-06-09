@@ -10,8 +10,7 @@
 # Output shape matches run.sh so compare.sh can compare these captures with
 # valkey and core gocache captures: <label>-<target>.csv,
 # <label>-<target>-pipelined.csv, and <label>-<target>-memory.txt.
-# Set BENCH_STATS=1 to add benchprobe JSON snapshots for startup,
-# standard, and pipelined attribution windows.
+# Set BENCH_STATS=1 to enable in-process benchstats counters.
 
 set -euo pipefail
 
@@ -66,10 +65,11 @@ case "$BENCH_STATS" in
     1|true|TRUE|yes|YES|on|ON) BENCH_STATS_ENABLED=1 ;;
     *) BENCH_STATS_ENABLED=0 ;;
 esac
-if [[ "$BENCH_STATS_ENABLED" == "1" && " $IPC_PLUGINS " != *" benchprobe "* ]]; then
-    IPC_PLUGINS="$IPC_PLUGINS benchprobe"
-fi
-
+BENCH_PPROF="${BENCH_PPROF:-0}"
+case "$BENCH_PPROF" in
+    1|true|TRUE|yes|YES|on|ON) BENCH_PPROF_ENABLED=1 ;;
+    *) BENCH_PPROF_ENABLED=0 ;;
+esac
 REPO_ROOT="$(GIT_MASTER=1 git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 BRANCH="$(GIT_MASTER=1 git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 BRANCH_SAFE="${BRANCH//\//-}"
@@ -93,6 +93,7 @@ if [[ "${REBUILD:-0}" == "1" ]] || ! docker_cmd image inspect "$GOCACHE_IPC_IMAG
     (cd "$REPO_ROOT" && docker_cmd build \
         -f bench/redis-benchmark/Dockerfile.ipc \
         --build-arg IPC_PLUGINS="$IPC_PLUGINS" \
+        --build-arg PPROF="$([ "$BENCH_PPROF_ENABLED" == "1" ] || [ "$BENCH_STATS_ENABLED" == "1" ] && echo 1 || echo 0)" \
         -t "$GOCACHE_IPC_IMAGE" .)
 fi
 
@@ -198,22 +199,13 @@ if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
         disabled: false
 EOF_CFG
 fi
-if [[ "$BENCH_STATS_ENABLED" == "1" ]]; then
-    cat >> "$CONFIG_FILE" <<EOF_CFG
-    benchprobe:
-      failure_policy: "halt_server"
-      priority: 30
-      scopes:
-        - "server:query:health"
-        - "server:query:bench.stats"
-        - "server:query:plugin.ipc"
-EOF_CFG
-fi
-
-# Keep plugin HTTP servers inside the target container for readiness checks and benchmark snapshots.
+# Keep plugin HTTP servers inside the target container for readiness checks.
 TARGET_ENV=(-e PROMETHEUS_PORT=":9100")
-if [[ "$BENCH_STATS_ENABLED" == "1" ]]; then
-    TARGET_ENV+=(-e GOCACHE_BENCH_STATS="true" -e BENCHPROBE_PORT=":9200")
+if [[ "$BENCH_STATS_ENABLED" == "1" || "$BENCH_PPROF_ENABLED" == "1" ]]; then
+    TARGET_ENV+=(-e GOCACHE_BENCH_STATS="true")
+fi
+if [[ "$BENCH_PPROF_ENABLED" == "1" || "$BENCH_STATS_ENABLED" == "1" ]]; then
+    TARGET_ENV+=(-e GOCACHE_PPROF_ADDR="0.0.0.0:6060")
 fi
 if [[ "$BENCH_IPC_EVENT_MODE" == "bridge-off" ]]; then
     TARGET_ENV+=(-e GOCACHE_BENCH_EVENT_BRIDGE_MODE="bridge-off")
@@ -261,20 +253,24 @@ if ! docker_cmd exec "$TARGET_NAME" wget -q -O /dev/null http://127.0.0.1:9100/r
     docker_cmd logs "$TARGET_NAME" >&2 || true
     exit 1
 fi
-if [[ "$BENCH_STATS_ENABLED" == "1" ]]; then
+if [[ "$BENCH_PPROF_ENABLED" == "1" ]]; then
     for _ in $(seq 1 100); do
-        if docker_cmd exec "$TARGET_NAME" wget -q -O /dev/null http://127.0.0.1:9200/readyz >/dev/null 2>&1; then
+        if docker_cmd exec "$TARGET_NAME" wget -q -O /dev/null http://127.0.0.1:6060/debug/pprof/ >/dev/null 2>&1; then
             break
         fi
         sleep 0.1
     done
-    if ! docker_cmd exec "$TARGET_NAME" wget -q -O /dev/null http://127.0.0.1:9200/readyz >/dev/null 2>&1; then
-        echo "error: benchprobe did not become ready. Target logs:" >&2
-        docker_cmd logs "$TARGET_NAME" >&2 || true
-        exit 1
-    fi
 fi
-
+write_bench_snapshot() {
+    if [[ "$BENCH_PPROF_ENABLED" != "1" ]]; then
+        return 0
+    fi
+    local file="$1"
+    local reset="$2"
+    docker_cmd exec "$TARGET_NAME" \
+        wget -q -O - "http://127.0.0.1:6060/debug/benchstats?reset=${reset}" \
+        > "$file"
+}
 read_mem_bytes() {
     local name="$1"
     local raw
@@ -292,17 +288,6 @@ print(int(n*mult))
 ' "$raw"
 }
 
-write_bench_snapshot() {
-    if [[ "$BENCH_STATS_ENABLED" != "1" ]]; then
-        return 0
-    fi
-    local file="$1"
-    local reset="$2"
-    docker_cmd exec "$TARGET_NAME" \
-        wget -q -O - "http://127.0.0.1:9200/snapshot?reset=${reset}&include=all" \
-        > "$file"
-}
-
 BASELINE_MEM_B=$(read_mem_bytes "$TARGET_NAME")
 OTEL_BASELINE_MEM_B=""
 if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
@@ -314,7 +299,7 @@ MEM_FILE="$RESULTS_DIR/$LABEL-$TARGET-memory.txt"
 BENCH_STATS_BASELINE_FILE=""
 BENCH_STATS_STANDARD_FILE=""
 BENCH_STATS_PIPELINED_FILE=""
-if [[ "$BENCH_STATS_ENABLED" == "1" ]]; then
+if [[ "$BENCH_PPROF_ENABLED" == "1" ]]; then
     BENCH_STATS_BASELINE_FILE="$RESULTS_DIR/$LABEL-$TARGET-benchstats-baseline.json"
     BENCH_STATS_STANDARD_FILE="$RESULTS_DIR/$LABEL-$TARGET-benchstats-standard.json"
     BENCH_STATS_PIPELINED_FILE="$RESULTS_DIR/$LABEL-$TARGET-benchstats-pipelined.json"
@@ -334,13 +319,13 @@ docker_cmd run --rm \
         -t "$SUITE" \
         --csv \
     > "$OUT_STD"
+write_bench_snapshot "$BENCH_STATS_STANDARD_FILE" true
 
 POST_STD_MEM_B=$(read_mem_bytes "$TARGET_NAME")
 OTEL_POST_STD_MEM_B=""
 if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
     OTEL_POST_STD_MEM_B=$(read_mem_bytes "$OTEL_NAME")
 fi
-write_bench_snapshot "$BENCH_STATS_STANDARD_FILE" true
 
 echo "Running pipelined suite (P=$PIPELINE)..."
 docker_cmd run --rm \
@@ -356,9 +341,9 @@ docker_cmd run --rm \
         -t "$SUITE" \
         --csv \
     > "$OUT_PIPE"
+write_bench_snapshot "$BENCH_STATS_PIPELINED_FILE" false
 
 FINAL_MEM_B=$(read_mem_bytes "$TARGET_NAME")
-write_bench_snapshot "$BENCH_STATS_PIPELINED_FILE" false
 OTEL_FINAL_MEM_B=""
 OTEL_COLLECTOR_META=""
 OTEL_CONFIG_META=""
@@ -379,6 +364,10 @@ gocache_ipc_image=$GOCACHE_IPC_IMAGE
 ipc_plugins=$IPC_PLUGINS
 otel_collector_image=$OTEL_COLLECTOR_META
 ipc_event_mode=$BENCH_IPC_EVENT_MODE
+bench_stats_enabled=$BENCH_PPROF_ENABLED
+bench_stats_baseline_file=$BENCH_STATS_BASELINE_FILE
+bench_stats_standard_file=$BENCH_STATS_STANDARD_FILE
+bench_stats_pipelined_file=$BENCH_STATS_PIPELINED_FILE
 gocache_commit=$GOCACHE_COMMIT
 gocache_branch=$GOCACHE_BRANCH
 config_file=$CONFIG_FILE
@@ -390,10 +379,6 @@ pipeline=$PIPELINE
 target_cpus=$TARGET_CPUS
 client_cpus=$CLIENT_CPUS
 mem_limit=$MEM_LIMIT
-bench_stats_enabled=$BENCH_STATS_ENABLED
-bench_stats_baseline_file=$BENCH_STATS_BASELINE_FILE
-bench_stats_standard_file=$BENCH_STATS_STANDARD_FILE
-bench_stats_pipelined_file=$BENCH_STATS_PIPELINED_FILE
 baseline_rss_bytes=$BASELINE_MEM_B
 post_standard_rss_bytes=$POST_STD_MEM_B
 final_rss_bytes=$FINAL_MEM_B
@@ -410,13 +395,13 @@ echo "  $OUT_STD"
 echo "  $OUT_PIPE"
 echo "  $MEM_FILE"
 echo "  $CONFIG_FILE"
-if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
-    echo "  $OTEL_CONFIG_FILE"
-fi
-if [[ "$BENCH_STATS_ENABLED" == "1" ]]; then
+if [[ "$BENCH_PPROF_ENABLED" == "1" ]]; then
     echo "  $BENCH_STATS_BASELINE_FILE"
     echo "  $BENCH_STATS_STANDARD_FILE"
     echo "  $BENCH_STATS_PIPELINED_FILE"
+fi
+if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
+    echo "  $OTEL_CONFIG_FILE"
 fi
 printf '  target memory: baseline=%d  post-standard=%d  final=%d  delta=%+d bytes\n' \
     "$BASELINE_MEM_B" "$POST_STD_MEM_B" "$FINAL_MEM_B" "$((FINAL_MEM_B - BASELINE_MEM_B))"

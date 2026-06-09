@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -99,7 +100,14 @@ type Manager struct {
 
 	pluginConns             sync.Map // map[pluginName]*router.PluginConn
 	commandMetricsConsumers sync.Map // map[pluginName]struct{}
+	stats                   managerStats
 	wg                      sync.WaitGroup
+}
+
+type managerStats struct {
+	eventInterestChecks atomic.Uint64
+	eventInterestHits   atomic.Uint64
+	eventCreditDrops    atomic.Uint64
 }
 
 // NewManager creates a plugin manager with the given configuration.
@@ -846,25 +854,23 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("benchmark event bridge mode active: dropping events before IPC enqueue")
 			}
 			m.eventBus.Subscribe("plugin:"+inst.Name, types, func(evt events.Event) {
-				bridgeStart := benchstats.StartTimer()
-				defer benchstats.RecordManagerBridgeHandler(bridgeStart)
 				benchstats.RecordManagerEventReceived()
 				if bridgeMode == eventBridgeModeBridgeOff {
-					benchstats.RecordManagerBridgeOffDrop()
 					return
 				}
 				evtProto := evt.Proto
-				enqueueStart := benchstats.StartTimer()
+				if !m.admitEventForPlugin(pluginName, evtProto, pluginConn) {
+					return
+				}
 				pluginConn.SendFireAndForgetLazy(func() *gcpcv1.EnvelopeV1 {
-					projectionStart := benchstats.StartTimer()
 					projected := projectEventForPlugin(evtProto, pluginName)
-					benchstats.RecordManagerProjection(projectionStart)
+					benchstats.RecordManagerProjectionBuild()
 					return &gcpcv1.EnvelopeV1{
 						Version: gcpcv1.ProtocolVersion,
 						Payload: &gcpcv1.EnvelopeV1_Event{Event: projected},
 					}
 				})
-				benchstats.RecordManagerEventEnqueue(enqueueStart)
+				benchstats.RecordManagerEventEnqueue()
 			})
 		case *gcpcv1.EnvelopeV1_ServerQuery:
 			query := env.GetServerQuery()
@@ -936,6 +942,23 @@ func (m *Manager) enableCommandMetricsForPlugin(name string) {
 	if _, loaded := m.commandMetricsConsumers.LoadOrStore(name, struct{}{}); !loaded {
 		m.commandMetrics.AddConsumer()
 	}
+}
+
+func (m *Manager) admitEventForPlugin(pluginName string, evt *gcpcv1.EventV1, conn *router.PluginConn) bool {
+	if m.eventBus != nil && evt != nil {
+		m.stats.eventInterestChecks.Add(1)
+		if !m.eventBus.HasSubscribersFor(events.Type(evt.Type)) {
+			return false
+		}
+		m.stats.eventInterestHits.Add(1)
+	}
+
+	if conn != nil && conn.Headroom() <= 0 {
+		m.stats.eventCreditDrops.Add(1)
+		return false
+	}
+
+	return true
 }
 
 func (m *Manager) disableCommandMetricsForPlugin(name string) {

@@ -122,11 +122,8 @@ func TestEvaluate_TelemetryScopeSaturationDoesNotBuildBenchStartedCompleted(t *t
 	stats := benchstats.Snapshot(false)
 	checks := map[string]string{
 		"pipeline.evaluations":                 "1",
-		"pipeline.path.full":                   "1",
 		"pipeline.event.operation_started":     "0",
 		"pipeline.event.operation_completed":   "0",
-		"pipeline.event.command_started":       "0",
-		"pipeline.event.command_completed":     "0",
 		"operation_tracker.skipped_operations": "1",
 		"operation_tracker.dropped_records":    "0",
 		"operation_tracker.dropped_completed":  "0",
@@ -175,8 +172,6 @@ func TestEvaluate_TelemetryScopeRecordsOperationLifecycleWithoutEventSubscribers
 		"pipeline.evaluations":               "1",
 		"pipeline.event.operation_started":   "1",
 		"pipeline.event.operation_completed": "1",
-		"pipeline.event.command_started":     "0",
-		"pipeline.event.command_completed":   "0",
 	}
 	for key, want := range checks {
 		if got := stats[key]; got != want {

@@ -293,6 +293,39 @@ func TestSlotTrackerGrowsAndRetiresFreeSegments(t *testing.T) {
 	}
 }
 
+func TestSlotTrackerShardsByConnection(t *testing.T) {
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            4,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           4,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 4,
+	})
+	conn1 := apiobs.ConnectionIdentity(1)
+	conn2 := apiobs.ConnectionIdentity(2)
+
+	h1, _, ok := manager.StartOperationForConnection(1, apiobs.ParentRef{}, conn1)
+	if !ok {
+		t.Fatal("first conn1 op should start")
+	}
+	h2, _, ok := manager.StartOperationForConnection(2, apiobs.ParentRef{}, conn1)
+	if !ok {
+		t.Fatal("second conn1 op should start")
+	}
+	h3, _, ok := manager.StartOperationForConnection(3, apiobs.ParentRef{}, conn2)
+	if !ok {
+		t.Fatal("conn2 op should start")
+	}
+
+	if h1.shard != h2.shard {
+		t.Fatalf("conn1 ops on different shards: %d vs %d", h1.shard, h2.shard)
+	}
+	if h1.shard == h3.shard {
+		t.Fatalf("conn1 and conn2 on same shard: %d", h1.shard)
+	}
+}
+
 func TestSlotTrackerStartOperationForConnectionPinsInitialContextVersion(t *testing.T) {
 	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
 		ShardCount:            1,

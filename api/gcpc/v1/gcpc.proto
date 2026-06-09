@@ -331,6 +331,11 @@ message CacheEvictionEventV1 {
 message ReplayGapEventV1 {
   string subscriber    = 1;
   uint64 dropped_count = 2;
+  uint64 skipped_operations = 3;
+  uint64 dropped_records = 4;
+  uint64 dropped_completed = 5;
+  uint64 invalid_handles = 6;
+  uint64 window_ms = 7;
 }
 
 // RuntimeLogBatchEventV1 carries diagnostic runtime logs through the normal

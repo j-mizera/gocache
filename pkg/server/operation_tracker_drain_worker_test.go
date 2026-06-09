@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	apicommand "gocache/api/command"
 	apievents "gocache/api/events"
+	gcpcv1 "gocache/api/gcpc/v1"
 	apiobs "gocache/api/observability"
 	"gocache/commons/logger"
 	commonobs "gocache/commons/observability"
@@ -457,13 +459,142 @@ func TestOperationTrackerDrainWorkerStopPerformsFinalDrain(t *testing.T) {
 	}
 }
 
+func TestDrainWorkerParkWake(t *testing.T) {
+	manager := newTestSlotOperationTrackerManager(t, 2, 1)
+	sentinel, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("StartOperation should allocate sentinel slot")
+	}
+	if !manager.FinishOperation(sentinel, commonobs.SlotTerminalFinished) {
+		t.Fatal("FinishOperation should enqueue sentinel")
+	}
+
+	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	// Keep the safety timeout beyond the test deadline so the second operation is
+	// drained because FinishOperation nudges the parked worker, not due to polling.
+	worker.idleBackoff = time.Hour
+	worker.Start(context.Background())
+	defer worker.Stop()
+
+	waitForShardFreeSlots(t, manager, 2)
+	time.Sleep(5 * time.Millisecond)
+
+	handle, ok := manager.StartOperation(2, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("StartOperation should allocate post-park slot")
+	}
+	if !manager.FinishOperation(handle, commonobs.SlotTerminalFinished) {
+		t.Fatal("FinishOperation should nudge the parked drain worker")
+	}
+
+	waitForShardFreeSlots(t, manager, 2)
+	if stats := manager.ShardStats(0); stats.CompletedSlots != 0 || stats.ActiveSlots != 0 {
+		t.Fatalf("stats after park/wake drain = %+v, want no active or completed slots", stats)
+	}
+}
+
+func TestGapJanitorSampleEmitsPositiveDeltas(t *testing.T) {
+	manager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           2,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+
+	first, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("first operation should fit")
+	}
+	second, ok := manager.StartOperation(2, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("second operation should fit")
+	}
+	if _, ok := manager.StartOperation(3, apiobs.ParentRef{}, 0); ok {
+		t.Fatal("third operation should skip with no free slots")
+	}
+	if !manager.RecordTelemetry(first, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 1)) {
+		t.Fatal("first telemetry record should fit")
+	}
+	if manager.RecordTelemetry(first, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)) {
+		t.Fatal("second telemetry record should drop when operation record storage is full")
+	}
+	if !manager.FinishOperation(first, commonobs.SlotTerminalFinished) {
+		t.Fatal("first finish should enqueue")
+	}
+	if manager.FinishOperation(second, commonobs.SlotTerminalFailed) {
+		t.Fatal("second finish should drop when completed ring is full")
+	}
+	if manager.RecordTelemetry(second, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordLog, 2)) {
+		t.Fatal("dropped completed handle should be invalid after reset")
+	}
+
+	janitor := newGapJanitor(time.Millisecond)
+	if event := janitor.sample(manager, janitor.lastSampleTime.Add(time.Millisecond-time.Nanosecond)); event != nil {
+		t.Fatalf("sample before interval emitted %q", event.Proto.Type)
+	}
+	event := janitor.sample(manager, janitor.lastSampleTime.Add(time.Millisecond))
+	if event == nil {
+		t.Fatal("sample after interval should emit replay.gap")
+	}
+	if event.Proto.Type != string(apievents.ReplayGap) {
+		t.Fatalf("event type = %q, want %q", event.Proto.Type, apievents.ReplayGap)
+	}
+	gap := event.Proto.GetReplayGap()
+	if gap == nil {
+		t.Fatal("replay gap payload missing")
+	}
+	if gap.SkippedOperations != 1 || gap.DroppedRecords != 1 || gap.DroppedCompleted != 1 || gap.InvalidHandles != 1 || gap.WindowMs != 1 {
+		t.Fatalf("gap payload = %+v, want all deltas=1 window_ms=1", gap)
+	}
+	if event := janitor.sample(manager, janitor.lastSampleTime.Add(time.Millisecond)); event != nil {
+		t.Fatalf("zero-delta sample emitted %+v", event.Proto.GetReplayGap())
+	}
+}
+
+func TestOperationTrackerDrainWorkerGapJanitorEmitsReplayGap(t *testing.T) {
+	manager := newTestSlotOperationTrackerManager(t, 1, 1)
+	active, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("active operation should fit")
+	}
+	if _, ok := manager.StartOperation(2, apiobs.ParentRef{}, 0); ok {
+		t.Fatal("second operation should skip with no free slots")
+	}
+
+	emitter := &recordingEmitter{subscribed: true}
+	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(emitter)
+	worker.SetGapInterval(time.Millisecond)
+	worker.Start(context.Background())
+
+	gap := waitForReplayGap(t, emitter)
+	if gap.SkippedOperations != 1 || gap.WindowMs != 1 {
+		t.Fatalf("gap payload = %+v, want skipped_operations=1 window_ms=1", gap)
+	}
+	worker.Stop()
+	if !manager.FinishOperation(active, commonobs.SlotTerminalFinished) {
+		t.Fatal("active operation should still be finishable after janitor stop")
+	}
+}
+
 type recordingEmitter struct {
+	mu         sync.Mutex
 	subscribed bool
 	events     []apievents.Event
 }
 
 func (r *recordingEmitter) Emit(event apievents.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.events = append(r.events, event)
+}
+
+func (r *recordingEmitter) snapshot() []apievents.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]apievents.Event(nil), r.events...)
 }
 
 func (r *recordingEmitter) HasSubscribers() bool { return r.subscribed }
@@ -506,6 +637,23 @@ func waitForWorkerExit(t *testing.T, worker *OperationTrackerDrainWorker) {
 	case <-time.After(time.Second):
 		t.Fatal("worker did not exit after lifecycle context cancellation")
 	}
+}
+
+func waitForReplayGap(t *testing.T, emitter *recordingEmitter) *gcpcv1.ReplayGapEventV1 {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, event := range emitter.snapshot() {
+			if event.Proto != nil && event.Proto.Type == string(apievents.ReplayGap) {
+				if gap := event.Proto.GetReplayGap(); gap != nil {
+					return gap
+				}
+			}
+		}
+		runtime.Gosched()
+	}
+	t.Fatal("replay.gap event was not emitted before deadline")
+	return nil
 }
 
 func decodeSingleLogEntry(t *testing.T, line string) map[string]any {

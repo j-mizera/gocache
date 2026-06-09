@@ -389,6 +389,11 @@ func (p *plugin) handleReplayGap(ctx context.Context, timestamp uint64, payload 
 	record.AddAttributes(
 		otellog.String("subscriber", payload.Subscriber),
 		otellog.Int64("dropped_count", int64(payload.DroppedCount)),
+		otellog.Int64("skipped_operations", int64(payload.SkippedOperations)),
+		otellog.Int64("dropped_records", int64(payload.DroppedRecords)),
+		otellog.Int64("dropped_completed", int64(payload.DroppedCompleted)),
+		otellog.Int64("invalid_handles", int64(payload.InvalidHandles)),
+		otellog.Int64("window_ms", int64(payload.WindowMs)),
 	)
 	logger.Emit(ctx, record)
 }

@@ -3,12 +3,14 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	_ "net/http/pprof" // registers /debug/pprof/* handlers
 	"os"
 	"runtime"
 
 	"gocache/commons/logger"
+	"gocache/pkg/benchstats"
 )
 
 // Build-tag-gated pprof endpoint. Compiled in only when the `pprof` build
@@ -30,8 +32,17 @@ func init() {
 		addr = "0.0.0.0:6060"
 	}
 	// Match Go-bench profile rates (see #38's bench/profiles/run-profiles.sh).
-	runtime.SetBlockProfileRate(10000)   // sample one in every 10000 ns of blocking
-	runtime.SetMutexProfileFraction(10)  // 1-in-10 mutex contention events
+	runtime.SetBlockProfileRate(10000)  // sample one in every 10000 ns of blocking
+	runtime.SetMutexProfileFraction(10) // 1-in-10 mutex contention events
+
+	// Register benchstats snapshot endpoint alongside pprof.
+	http.HandleFunc("/debug/benchstats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		reset := r.URL.Query().Get("reset") == "true"
+		data := benchstats.Snapshot(reset)
+		_ = json.NewEncoder(w).Encode(data)
+	})
+
 	go func() {
 		logger.InfoNoCtx().Str("addr", addr).Msg("pprof endpoint starting")
 		if err := http.ListenAndServe(addr, nil); err != nil {

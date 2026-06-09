@@ -189,11 +189,12 @@ func parseQueryBool(value string) bool {
 func pluginIPCHandler(ipcStats PluginIPCStatsProvider) QueryHandlerFunc {
 	return func(_ map[string]string) (map[string]string, error) {
 		stats := ipcStats()
-		data := make(map[string]string, len(stats)*24)
+		data := make(map[string]string, len(stats)*25)
 		for _, st := range stats {
 			prefix := st.PluginName + "."
 			data[prefix+"queue_capacity"] = strconv.Itoa(st.QueueCapacity)
 			data[prefix+"queue_depth"] = strconv.Itoa(st.QueueDepth)
+			data[prefix+"queue_headroom"] = strconv.Itoa(st.QueueHeadroom)
 			data[prefix+"send_attempts"] = strconv.FormatUint(st.SendAttempts, 10)
 			data[prefix+"send_accepted"] = strconv.FormatUint(st.SendAccepted, 10)
 			data[prefix+"send_queue_full"] = strconv.FormatUint(st.SendQueueFull, 10)

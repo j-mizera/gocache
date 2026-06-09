@@ -274,6 +274,7 @@ func TestPluginIPCHandler(t *testing.T) {
 				PluginName:                 "prometheus",
 				QueueCapacity:              1024,
 				QueueDepth:                 7,
+				QueueHeadroom:              1017,
 				SendAttempts:               11,
 				SendAccepted:               10,
 				SendQueueFull:              1,
@@ -305,6 +306,7 @@ func TestPluginIPCHandler(t *testing.T) {
 	checks := map[string]string{
 		"prometheus.queue_capacity":                 "1024",
 		"prometheus.queue_depth":                    "7",
+		"prometheus.queue_headroom":                 "1017",
 		"prometheus.send_attempts":                  "11",
 		"prometheus.send_accepted":                  "10",
 		"prometheus.send_queue_full":                "1",
