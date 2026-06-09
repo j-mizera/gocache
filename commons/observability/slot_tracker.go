@@ -62,6 +62,14 @@ func (m *SlotMagazine) pop() (slotRef, bool) {
 	return ref, true
 }
 
+func (m *SlotMagazine) push(ref slotRef) bool {
+	if m == nil {
+		return false
+	}
+	m.refs = append(m.refs, ref)
+	return true
+}
+
 // IsZero reports whether h cannot reference an active slot.
 func (h InternalTrackerHandle) IsZero() bool {
 	return h.slotRef == nil || h.segmentRef == nil || h.generation == 0
