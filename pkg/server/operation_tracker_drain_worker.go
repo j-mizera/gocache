@@ -232,8 +232,19 @@ func (w *OperationTrackerDrainWorker) Start(parentCtx context.Context) {
 		for {
 			select {
 			case now := <-ticker.C:
-				if evt := janitor.sample(w.manager, now); evt != nil && w.emitter != nil {
-					w.emitter.Emit(*evt)
+				if evt := janitor.sample(w.manager, now); evt != nil {
+					if w.emitter != nil {
+						w.emitter.Emit(*evt)
+					}
+					// Production-visible signal: log when telemetry loss is detected
+					gap := evt.Proto.GetReplayGap()
+					logger.WarnNoCtx().
+						Uint64("skipped", gap.SkippedOperations).
+						Uint64("dropped_records", gap.DroppedRecords).
+						Uint64("dropped_completed", gap.DroppedCompleted).
+						Uint64("invalid_handles", gap.InvalidHandles).
+						Uint64("window_ms", gap.WindowMs).
+						Msg("telemetry gap detected: operation tracker loss counters increased")
 				}
 			case <-parentCtx.Done():
 				return
