@@ -1,0 +1,23 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: delay
+Time: 2026-06-09 16:10:46 UTC
+Showing nodes accounting for 96.83s, 100% of 96.83s total
+Dropped 185 nodes (cum <= 0.48s)
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     96.24s 99.39%  gocache/pkg/server.(*Server).handleConnection
+    95.94s 99.08% 99.08%     95.96s 99.10%  sync.(*Mutex).Unlock (partial-inline)
+         0     0% 99.08%     95.94s 99.08%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 99.08%     95.42s 98.55%  gocache/pkg/cache.(*Shard).Unlock (partial-inline)
+         0     0% 99.08%     95.42s 98.55%  sync.(*RWMutex).Unlock
+         0     0% 99.08%     66.35s 68.52%  gocache/pkg/server.(*Server).runBatch
+         0     0% 99.08%     29.36s 30.32%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 99.08%     29.36s 30.32%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 99.08%     29.08s 30.03%  gocache/pkg/command.Dispatch
+         0     0% 99.08%     27.95s 28.87%  gocache/pkg/engine.(*Engine).DispatchToShards
+         0     0% 99.08%     27.95s 28.87%  gocache/pkg/resp/handler.HandleMset
+         0     0% 99.08%     27.95s 28.86%  gocache/pkg/cache.(*Cache).LockShards.func2
+         0     0% 99.08%      1.12s  1.16%  gocache/pkg/engine.(*Engine).DispatchToShard
+     0.89s  0.92%   100%      0.89s  0.92%  runtime.unlock (inline)
+         0     0%   100%      0.49s  0.51%  gocache/commons/observability.(*SlotOperationTrackerManager).UpdateConnectionContextStrings (inline)
+         0     0%   100%      0.49s  0.51%  gocache/commons/observability.(*connectionContextStore).updateStrings

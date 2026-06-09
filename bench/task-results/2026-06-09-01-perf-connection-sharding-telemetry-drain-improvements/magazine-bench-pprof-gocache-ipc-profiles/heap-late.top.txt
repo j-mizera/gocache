@@ -1,0 +1,37 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: inuse_space
+Time: 2026-06-09 16:02:36 UTC
+Showing nodes accounting for 49.37MB, 63.57% of 77.67MB total
+Showing top 30 nodes out of 106
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%    40.24MB 51.82%  main.main
+         0     0%     0%    40.24MB 51.82%  runtime.main
+         0     0%     0%    30.90MB 39.78%  gocache/pkg/cache/slab.(*slabClass).alloc
+    0.50MB  0.64%  0.64%    30.90MB 39.78%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+   30.40MB 39.14% 39.78%    30.40MB 39.14%  gocache/pkg/cache/slab.newSlab (inline)
+         0     0% 39.78%    29.33MB 37.76%  gocache/pkg/cache.NewWithShards
+         0     0% 39.78%    29.33MB 37.76%  gocache/pkg/cache.newCache
+         0     0% 39.78%    29.33MB 37.76%  gocache/pkg/cache.newShard (inline)
+         0     0% 39.78%    29.33MB 37.76%  gocache/pkg/cache/slab.NewAllocatorWithTargetBytes
+         0     0% 39.78%    23.68MB 30.48%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 39.78%    20.18MB 25.98%  gocache/pkg/command.Dispatch
+         0     0% 39.78%    20.18MB 25.98%  gocache/pkg/command.Dispatch.wrapWithEmission.func1
+         0     0% 39.78%    20.18MB 25.98%  gocache/pkg/engine.(*Engine).DispatchToShard
+         0     0% 39.78%    20.18MB 25.98%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 39.78%    20.18MB 25.98%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+   17.45MB 22.46% 62.25%    19.02MB 24.49%  gocache/pkg/cache.(*Shard).setPackedInternal
+         0     0% 62.25%    17.45MB 22.46%  gocache/pkg/cache.(*Cache).RawSet
+         0     0% 62.25%    17.45MB 22.46%  gocache/pkg/cache.(*Shard).rawSet
+         0     0% 62.25%    17.45MB 22.46%  gocache/pkg/cache.(*Shard).setInternal
+         0     0% 62.25%    17.45MB 22.46%  gocache/pkg/resp/handler.HandleIncr
+         0     0% 62.25%    17.45MB 22.46%  gocache/pkg/resp/handler.HandleIncr.func1
+         0     0% 62.25%    17.45MB 22.46%  gocache/pkg/resp/handler.incrByDelta
+    1.03MB  1.32% 63.57%    10.92MB 14.06%  gocache/commons/observability.(*operationSlotShard).init
+         0     0% 63.57%    10.92MB 14.06%  gocache/commons/observability.NewSlotOperationTrackerManager
+         0     0% 63.57%    10.92MB 14.06%  main.newSteadyStateOperationTrackerManager (inline)
+         0     0% 63.57%    10.50MB 13.52%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0% 63.57%    10.50MB 13.52%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 63.57%    10.50MB 13.52%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0% 63.57%       10MB 12.88%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+         0     0% 63.57%     9.89MB 12.74%  gocache/commons/observability.(*operationSlotShard).addSegmentLocked

@@ -1,0 +1,17 @@
+label=magazine-bench
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=545b5f61b28b26ec46f89a0a96b85c1c6e722a71
+gocache_branch=perf/connection-sharding-telemetry-drain-improvements
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=17521704
+post_standard_rss_bytes=33722204
+final_rss_bytes=36846960
+delta_rss_bytes=19325256

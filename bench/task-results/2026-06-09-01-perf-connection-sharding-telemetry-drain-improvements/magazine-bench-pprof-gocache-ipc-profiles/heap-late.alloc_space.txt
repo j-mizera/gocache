@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: alloc_space
+Time: 2026-06-09 16:02:36 UTC
+Showing nodes accounting for 1.40GB, 34.87% of 4.01GB total
+Dropped 137 nodes (cum <= 0.02GB)
+Showing top 20 nodes out of 69
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     3.43GB 85.45%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+    0.15GB  3.67%  3.67%     3.31GB 82.52%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  3.67%     3.31GB 82.51%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+         0     0%  3.67%     3.16GB 78.85%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+    0.02GB   0.4%  4.07%     1.47GB 36.54%  gocache/pkg/server.materializeOperationFinishedRecord
+         0     0%  4.07%     1.43GB 35.76%  gocache/pkg/events.(*Bus).Emit
+         0     0%  4.07%     1.43GB 35.76%  gocache/pkg/events.(*ring).push
+         0     0%  4.07%     1.43GB 35.76%  gocache/pkg/events.cloneEvent
+         0     0%  4.07%     1.43GB 35.76%  google.golang.org/protobuf/proto.Clone
+         0     0%  4.07%     1.27GB 31.67%  google.golang.org/protobuf/proto.mergeOptions.mergeMessage
+         0     0%  4.07%     1.27GB 31.65%  google.golang.org/protobuf/internal/impl.(*MessageInfo).initOneofFieldCoders.func5
+         0     0%  4.07%     1.27GB 31.65%  google.golang.org/protobuf/internal/impl.(*MessageInfo).merge
+         0     0%  4.07%     1.27GB 31.65%  google.golang.org/protobuf/internal/impl.(*MessageInfo).mergePointer
+         0     0%  4.07%     1.25GB 31.26%  google.golang.org/protobuf/internal/impl.mergeMessage
+    0.01GB  0.34%  4.41%     1.14GB 28.32%  gocache/pkg/server.materializeOperationStartedRecord
+         0     0%  4.41%     1.07GB 26.73%  google.golang.org/protobuf/internal/impl.mergeMap
+    0.62GB 15.35% 19.76%     0.62GB 15.35%  gocache/pkg/server.cloneStringMap (inline)
+         0     0% 19.76%     0.61GB 15.12%  reflect.Value.SetMapIndex
+         0     0% 19.76%     0.61GB 15.12%  reflect.mapassign_faststr
+    0.61GB 15.12% 34.87%     0.61GB 15.12%  reflect.mapassign_faststr0

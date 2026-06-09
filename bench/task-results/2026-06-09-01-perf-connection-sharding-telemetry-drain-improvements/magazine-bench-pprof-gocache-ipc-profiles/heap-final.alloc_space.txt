@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: alloc_space
+Time: 2026-06-09 16:10:46 UTC
+Showing nodes accounting for 1.29GB, 10.04% of 12.80GB total
+Dropped 154 nodes (cum <= 0.06GB)
+Showing top 20 nodes out of 75
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%     8.11GB 63.35%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+    0.50GB  3.94%  3.94%     7.88GB 61.58%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  3.94%     7.88GB 61.58%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+         0     0%  3.94%     7.38GB 57.64%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+    0.12GB  0.97%  4.91%     4.64GB 36.27%  gocache/pkg/server.(*Server).handleConnection
+    0.03GB  0.27%  5.18%     3.44GB 26.88%  gocache/pkg/server.materializeOperationFinishedRecord
+         0     0%  5.18%     3.42GB 26.75%  gocache/pkg/events.(*Bus).Emit
+         0     0%  5.18%     3.42GB 26.75%  gocache/pkg/events.(*ring).push
+         0     0%  5.18%     3.42GB 26.75%  gocache/pkg/events.cloneEvent
+         0     0%  5.18%     3.42GB 26.75%  google.golang.org/protobuf/proto.Clone
+         0     0%  5.18%     3.02GB 23.61%  google.golang.org/protobuf/internal/impl.(*MessageInfo).initOneofFieldCoders.func5
+         0     0%  5.18%     3.02GB 23.61%  google.golang.org/protobuf/internal/impl.(*MessageInfo).merge
+         0     0%  5.18%     3.02GB 23.61%  google.golang.org/protobuf/internal/impl.(*MessageInfo).mergePointer
+         0     0%  5.18%     3.02GB 23.61%  google.golang.org/protobuf/proto.mergeOptions.mergeMessage
+         0     0%  5.18%     2.99GB 23.36%  google.golang.org/protobuf/internal/impl.mergeMessage
+    0.03GB  0.24%  5.42%     2.78GB 21.69%  gocache/pkg/server.materializeOperationStartedRecord
+         0     0%  5.42%     2.52GB 19.72%  google.golang.org/protobuf/internal/impl.mergeMap
+    0.14GB  1.06%  6.48%     1.90GB 14.88%  gocache/pkg/server.(*Server).runBatch
+    0.46GB  3.57% 10.04%     1.78GB 13.89%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 10.04%     1.50GB 11.68%  gocache/pkg/server.(*Server).mapToResp

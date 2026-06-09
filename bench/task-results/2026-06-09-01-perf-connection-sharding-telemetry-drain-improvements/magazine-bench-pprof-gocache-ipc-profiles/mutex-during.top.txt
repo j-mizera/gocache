@@ -1,0 +1,37 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: delay
+Time: 2026-06-09 16:02:29 UTC
+Showing nodes accounting for 47.99ms, 100% of 47.99ms total
+Dropped 35 nodes (cum <= 0.24ms)
+      flat  flat%   sum%        cum   cum%
+   46.87ms 97.67% 97.67%    46.87ms 97.67%  runtime.unlock (inline)
+         0     0% 97.67%    18.60ms 38.76%  runtime.mcall
+         0     0% 97.67%    18.60ms 38.76%  runtime.park_m
+         0     0% 97.67%    18.37ms 38.27%  runtime.selparkcommit
+         0     0% 97.67%    16.32ms 34.00%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 97.67%    16.32ms 34.00%  runtime.selectgo
+         0     0% 97.67%    16.32ms 34.00%  runtime.selunlock
+         0     0% 97.67%    12.68ms 26.42%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 97.67%    12.48ms 26.00%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 97.67%    12.48ms 26.00%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 97.67%    11.37ms 23.70%  gocache/commons/observability.(*SlotOperationTrackerManager).FinishOperation
+         0     0% 97.67%    11.37ms 23.70%  gocache/commons/observability.OperationScope.Finish
+         0     0% 97.67%    11.37ms 23.70%  gocache/pkg/pipeline.finishCommandTelemetryScope
+         0     0% 97.67%    11.37ms 23.70%  gocache/pkg/server.(*OperationTrackerDrainWorker).nudge
+         0     0% 97.67%    11.37ms 23.70%  runtime.chansend
+         0     0% 97.67%    11.37ms 23.70%  runtime.selectnbsend
+         0     0% 97.67%    10.14ms 21.13%  runtime.chansend.func1
+         0     0% 97.67%    10.14ms 21.13%  runtime.send
+         0     0% 97.67%     1.12ms  2.33%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+    1.12ms  2.33%   100%     1.12ms  2.33%  sync.(*Mutex).Unlock
+         0     0%   100%     1.11ms  2.31%  sync.(*Pool).Get
+         0     0%   100%     1.11ms  2.31%  sync.(*Pool).pin
+         0     0%   100%     1.11ms  2.31%  sync.(*Pool).pinSlow
+         0     0%   100%     0.48ms  1.00%  runtime.findRunnable
+         0     0%   100%     0.48ms  1.00%  runtime.schedule
+         0     0%   100%     0.25ms  0.51%  runtime.gcstopm
+         0     0%   100%     0.25ms  0.51%  runtime.gopreempt_m (inline)
+         0     0%   100%     0.25ms  0.51%  runtime.goschedImpl
+         0     0%   100%     0.25ms  0.51%  runtime.morestack
+         0     0%   100%     0.25ms  0.51%  runtime.newstack

@@ -1,0 +1,37 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: goroutine
+Time: 2026-06-09 16:02:29 UTC
+Showing nodes accounting for 72, 94.74% of 76 total
+Showing top 30 nodes out of 95
+      flat  flat%   sum%        cum   cum%
+        70 92.11% 92.11%         70 92.11%  runtime.gopark
+         0     0% 92.11%         57 75.00%  internal/poll.(*pollDesc).wait
+         0     0% 92.11%         57 75.00%  internal/poll.(*pollDesc).waitRead (inline)
+         0     0% 92.11%         57 75.00%  internal/poll.runtime_pollWait
+         0     0% 92.11%         57 75.00%  runtime.netpollblock
+         0     0% 92.11%         56 73.68%  internal/poll.(*FD).Read
+         0     0% 92.11%         53 69.74%  net.(*conn).Read
+         0     0% 92.11%         53 69.74%  net.(*netFD).Read
+         0     0% 92.11%         50 65.79%  bufio.(*Reader).ReadByte
+         0     0% 92.11%         50 65.79%  bufio.(*Reader).fill
+         0     0% 92.11%         50 65.79%  gocache/commons/resp.(*Reader).Read
+         0     0% 92.11%         50 65.79%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 92.11%         11 14.47%  runtime.selectgo
+         0     0% 92.11%          3  3.95%  internal/poll.(*FD).Accept
+         0     0% 92.11%          3  3.95%  net.(*netFD).accept
+         0     0% 92.11%          3  3.95%  os.(*File).Read
+         0     0% 92.11%          3  3.95%  os.(*File).read (inline)
+         0     0% 92.11%          2  2.63%  bufio.(*Scanner).Scan
+         0     0% 92.11%          2  2.63%  gocache/pkg/logcollector.(*Collector).AddSource.func1
+         0     0% 92.11%          2  2.63%  gocache/pkg/logcollector.(*Collector).readSource
+         0     0% 92.11%          2  2.63%  internal/poll.ignoringEINTRIO (inline)
+         0     0% 92.11%          2  2.63%  net.(*TCPListener).Accept
+         0     0% 92.11%          2  2.63%  net.(*TCPListener).accept
+         0     0% 92.11%          2  2.63%  net/http.(*ServeMux).ServeHTTP
+         0     0% 92.11%          2  2.63%  net/http.(*conn).serve
+         0     0% 92.11%          2  2.63%  net/http.(*connReader).backgroundRead
+         0     0% 92.11%          2  2.63%  net/http.HandlerFunc.ServeHTTP
+         0     0% 92.11%          2  2.63%  net/http.serverHandler.ServeHTTP
+         0     0% 92.11%          2  2.63%  syscall.Read (inline)
+         2  2.63% 94.74%          2  2.63%  syscall.Syscall

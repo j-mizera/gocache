@@ -1,0 +1,35 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: delay
+Time: 2026-06-09 16:10:46 UTC
+Showing nodes accounting for 198.92s, 99.92% of 199.09s total
+Dropped 68 nodes (cum <= 1s)
+      flat  flat%   sum%        cum   cum%
+   109.56s 55.03% 55.03%    109.56s 55.03%  sync.(*Mutex).Lock (inline)
+         0     0% 55.03%    109.56s 55.03%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0% 55.03%    109.56s 55.03%  gocache/pkg/server.(*Server).handleConnection
+         0     0% 55.03%    109.04s 54.77%  sync.(*RWMutex).Lock
+         0     0% 55.03%    109.04s 54.77%  gocache/pkg/cache.(*Shard).Lock (inline)
+    89.36s 44.89% 99.92%     89.36s 44.89%  runtime.selectgo
+         0     0% 99.92%     79.05s 39.71%  gocache/pkg/server.(*Server).runBatch
+         0     0% 99.92%     79.03s 39.70%  gocache/pkg/engine.(*Engine).AcquireShard
+         0     0% 99.92%     30.05s 15.10%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 99.92%     30.03s 15.08%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 99.92%     30.02s 15.08%  gocache/pkg/command.Dispatch
+         0     0% 99.92%     29.02s 14.58%  gocache/pkg/engine.(*Engine).DispatchToShards
+         0     0% 99.92%     29.02s 14.58%  gocache/pkg/resp/handler.HandleMset
+         0     0% 99.92%     29.02s 14.58%  gocache/pkg/cache.(*Cache).LockShards
+         0     0% 99.92%        25s 12.56%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0% 99.92%        25s 12.56%  gocache/pkg/logcollector.New.gowrap1
+         0     0% 99.92%     24.99s 12.55%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func2
+         0     0% 99.92%        20s 10.05%  gocache/pkg/plugin/manager.(*Manager).handleConnection.func2
+         0     0% 99.92%        20s 10.05%  gocache/pkg/plugin/manager.(*Manager).healthLoop
+         0     0% 99.92%     10.17s  5.11%  net/http.(*ServeMux).ServeHTTP
+         0     0% 99.92%     10.17s  5.11%  net/http.(*Server).Serve.gowrap3
+         0     0% 99.92%     10.17s  5.11%  net/http.(*conn).serve
+         0     0% 99.92%     10.17s  5.11%  net/http.HandlerFunc.ServeHTTP
+         0     0% 99.92%     10.17s  5.11%  net/http.serverHandler.ServeHTTP
+         0     0% 99.92%     10.17s  5.11%  net/http/pprof.Profile
+         0     0% 99.92%        10s  5.02%  net/http/pprof.sleep
+         0     0% 99.92%      9.36s  4.70%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 99.92%         1s   0.5%  gocache/pkg/engine.(*Engine).DispatchToShard

@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 7d6f7b0401669da96be43c8951fce4eda2e07b01
+Type: alloc_objects
+Time: 2026-06-09 16:10:46 UTC
+Showing nodes accounting for 78399783, 33.46% of 234289048 total
+Dropped 158 nodes (cum <= 1171445)
+Showing top 20 nodes out of 71
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%  168762976 72.03%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+   1764473  0.75%  0.75%  165737167 70.74%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+         0     0%  0.75%  165737167 70.74%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainUntilEmpty
+         0     0%  0.75%  163972694 69.99%  gocache/pkg/server.(*OperationTrackerDrainWorker).projectCompletedOperation
+         0     0%  0.75%   87333405 37.28%  gocache/pkg/events.(*Bus).Emit
+         0     0%  0.75%   87333405 37.28%  gocache/pkg/events.(*ring).push
+         0     0%  0.75%   87333405 37.28%  gocache/pkg/events.cloneEvent
+         0     0%  0.75%   87333405 37.28%  google.golang.org/protobuf/proto.Clone
+         0     0%  0.75%   82838317 35.36%  google.golang.org/protobuf/internal/impl.(*MessageInfo).initOneofFieldCoders.func5
+         0     0%  0.75%   82838317 35.36%  google.golang.org/protobuf/internal/impl.(*MessageInfo).merge
+         0     0%  0.75%   82838317 35.36%  google.golang.org/protobuf/internal/impl.(*MessageInfo).mergePointer
+         0     0%  0.75%   82838317 35.36%  google.golang.org/protobuf/proto.mergeOptions.mergeMessage
+         0     0%  0.75%   78512909 33.51%  google.golang.org/protobuf/internal/impl.mergeMessage
+   2293795  0.98%  1.73%   78128344 33.35%  gocache/pkg/server.materializeOperationFinishedRecord
+         0     0%  1.73%   74051889 31.61%  google.golang.org/protobuf/internal/impl.mergeMap
+   2053834  0.88%  2.61%   65488697 27.95%  gocache/pkg/server.(*Server).handleConnection
+  64062416 27.34% 29.95%   64062416 27.34%  reflect.copyVal
+   2097184   0.9% 30.85%   63026622 26.90%  gocache/pkg/server.materializeOperationStartedRecord
+   6128081  2.62% 33.46%   49161152 20.98%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0% 33.46%   32309740 13.79%  reflect.(*MapIter).Key
