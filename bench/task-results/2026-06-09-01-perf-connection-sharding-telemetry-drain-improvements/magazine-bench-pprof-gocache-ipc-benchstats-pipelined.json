@@ -1,1 +1,19 @@
-{"enabled":"true","manager.event_enqueue_attempts":"0","manager.event_received":"0","manager.projection_builds":"0","operation_tracker.dropped_completed":"0","operation_tracker.dropped_records":"0","operation_tracker.skipped_operations":"0","pipeline.evaluations":"1500000","pipeline.event.operation_completed":"710257","pipeline.event.operation_started":"710257","runtime.gc.heap.allocs.bytes":"13844450480","runtime.gc.heap.allocs.objects":"232644870","runtime.gc.heap.objects.objects":"1924423","runtime.memory.classes.heap.objects.bytes":"154061112","runtime.memory.classes.total.bytes":"281274680","runtime.sched.goroutines.goroutines":"23","runtime.sync.mutex.wait.total.seconds":"108.998182064"}
+{
+  "enabled": "true",
+  "manager.event_enqueue_attempts": "0",
+  "manager.event_received": "0",
+  "manager.projection_builds": "0",
+  "operation_tracker.dropped_completed": "0",
+  "operation_tracker.dropped_records": "0",
+  "operation_tracker.skipped_operations": "0",
+  "pipeline.evaluations": "1500000",
+  "pipeline.event.operation_completed": "710257",
+  "pipeline.event.operation_started": "710257",
+  "runtime.gc.heap.allocs.bytes": "13844450480",
+  "runtime.gc.heap.allocs.objects": "232644870",
+  "runtime.gc.heap.objects.objects": "1924423",
+  "runtime.memory.classes.heap.objects.bytes": "154061112",
+  "runtime.memory.classes.total.bytes": "281274680",
+  "runtime.sched.goroutines.goroutines": "23",
+  "runtime.sync.mutex.wait.total.seconds": "108.998182064"
+}
