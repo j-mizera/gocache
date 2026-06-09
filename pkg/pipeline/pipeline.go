@@ -507,7 +507,7 @@ func (b *Pipeline) startCommandTelemetryScope(ctx *clientctx.ClientContext) comm
 		Type:          string(ops.TypeCommand),
 		Ref:           ref,
 		StartUnixNano: time.Now().UnixNano(),
-	})
+	}, &ctx.SlotMagazine)
 	if !ok {
 		return commonobs.OperationScope{}
 	}

@@ -292,7 +292,7 @@ func (srv *Server) Shutdown(timeout time.Duration) error {
 	return err
 }
 
-func (srv *Server) startConnectionOperationScope(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, operationType string) commonobs.OperationScope {
+func (srv *Server) startConnectionOperationScope(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, operationType string, magazine *commonobs.SlotMagazine) commonobs.OperationScope {
 	if manager == nil {
 		return commonobs.OperationScope{}
 	}
@@ -307,7 +307,7 @@ func (srv *Server) startConnectionOperationScope(manager *commonobs.SlotOperatio
 		Type:          operationType,
 		Ref:           ref,
 		StartUnixNano: time.Now().UnixNano(),
-	})
+	}, magazine)
 	if !ok {
 		return commonobs.OperationScope{}
 	}
@@ -316,16 +316,20 @@ func (srv *Server) startConnectionOperationScope(manager *commonobs.SlotOperatio
 	return scope
 }
 
-func (srv *Server) recordConnectionStarted(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, connID, remoteAddr string) {
+func (srv *Server) recordConnectionStarted(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, connID, remoteAddr string, magazines ...*commonobs.SlotMagazine) {
 	if manager == nil {
 		return
+	}
+	var magazine *commonobs.SlotMagazine
+	if len(magazines) > 0 {
+		magazine = magazines[0]
 	}
 	manager.UpdateConnectionContextStrings(
 		connIdentity,
 		apicommand.RemoteAddrKey, remoteAddr,
 		apicommand.ConnectionIDKey, connID,
 	)
-	scope := srv.startConnectionOperationScope(manager, connIdentity, "connection.started")
+	scope := srv.startConnectionOperationScope(manager, connIdentity, "connection.started", magazine)
 	if scope.IsZero() {
 		return
 	}
@@ -342,11 +346,15 @@ func (srv *Server) recordConnectionStarted(manager *commonobs.SlotOperationTrack
 	scope.Finish(commonobs.SlotTerminalFinished)
 }
 
-func (srv *Server) recordConnectionClosed(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, connID, remoteAddr string, elapsedNs uint64) {
+func (srv *Server) recordConnectionClosed(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, connID, remoteAddr string, elapsedNs uint64, magazines ...*commonobs.SlotMagazine) {
 	if manager == nil {
 		return
 	}
-	scope := srv.startConnectionOperationScope(manager, connIdentity, "connection.closed")
+	var magazine *commonobs.SlotMagazine
+	if len(magazines) > 0 {
+		magazine = magazines[0]
+	}
+	scope := srv.startConnectionOperationScope(manager, connIdentity, "connection.closed", magazine)
 	if scope.IsZero() {
 		return
 	}
@@ -365,7 +373,7 @@ func (srv *Server) recordConnectionClosed(manager *commonobs.SlotOperationTracke
 	scope.Finish(commonobs.SlotTerminalFinished)
 }
 
-func (srv *Server) startRuntimeOperationScope(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, operationType string) commonobs.OperationScope {
+func (srv *Server) startRuntimeOperationScope(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, operationType string, magazine *commonobs.SlotMagazine) commonobs.OperationScope {
 	if manager == nil {
 		return commonobs.OperationScope{}
 	}
@@ -386,9 +394,9 @@ func (srv *Server) startRuntimeOperationScope(manager *commonobs.SlotOperationTr
 		ok     bool
 	)
 	if connIdentity != 0 {
-		handle, _, ok = manager.StartOperationForConnectionWithMetadata(operation, apiobs.ParentRef{}, connIdentity, metadata)
+		handle, _, ok = manager.StartOperationForConnectionWithMetadata(operation, apiobs.ParentRef{}, connIdentity, metadata, magazine)
 	} else {
-		handle, ok = manager.StartOperationWithMetadata(operation, apiobs.ParentRef{}, 0, metadata)
+		handle, ok = manager.StartOperationWithMetadata(operation, apiobs.ParentRef{}, 0, metadata, nil)
 	}
 	if !ok {
 		return commonobs.OperationScope{}
@@ -399,7 +407,11 @@ func (srv *Server) startRuntimeOperationScope(manager *commonobs.SlotOperationTr
 }
 
 func (srv *Server) recordRuntimeLog(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, level apiobs.TelemetryLogLevel, message string, fields ...string) bool {
-	scope := srv.startRuntimeOperationScope(manager, connIdentity, "runtime.log")
+	return srv.recordRuntimeLogWithMagazine(manager, connIdentity, nil, level, message, fields...)
+}
+
+func (srv *Server) recordRuntimeLogWithMagazine(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, magazine *commonobs.SlotMagazine, level apiobs.TelemetryLogLevel, message string, fields ...string) bool {
+	scope := srv.startRuntimeOperationScope(manager, connIdentity, "runtime.log", magazine)
 	if scope.IsZero() {
 		return false
 	}
@@ -417,7 +429,11 @@ func (srv *Server) recordRuntimeLog(manager *commonobs.SlotOperationTrackerManag
 }
 
 func (srv *Server) recordAuthFailed(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, remoteAddr, command string) bool {
-	scope := srv.startRuntimeOperationScope(manager, connIdentity, string(events.AuthFailed))
+	return srv.recordAuthFailedWithMagazine(manager, connIdentity, nil, remoteAddr, command)
+}
+
+func (srv *Server) recordAuthFailedWithMagazine(manager *commonobs.SlotOperationTrackerManager, connIdentity apiobs.ConnectionIdentity, magazine *commonobs.SlotMagazine, remoteAddr, command string) bool {
+	scope := srv.startRuntimeOperationScope(manager, connIdentity, string(events.AuthFailed), magazine)
 	if scope.IsZero() {
 		return false
 	}
@@ -445,6 +461,10 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	connIdentity := clientctx.NextConnectionIdentity()
 	connID := clientctx.ConnectionIDForIdentity(connIdentity)
 	operationTrackerManager := srv.operationTrackerManager.Load()
+	ctx := clientctx.New()
+	ctx.ConnectionIdentity = connIdentity
+	ctx.ConnectionID = connID
+	ctx.RemoteAddr = remoteAddr
 	if operationTrackerManager != nil {
 		operationTrackerManager.UpdateConnectionContextStrings(
 			connIdentity,
@@ -459,23 +479,20 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	// stall at ~1k rps. Errors are non-fatal.
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		if err := tcpConn.SetNoDelay(true); err != nil {
-			srv.recordRuntimeLog(operationTrackerManager, connIdentity, apiobs.TelemetryLogLevelWarn, "set TCP_NODELAY failed", "error", err.Error())
+			srv.recordRuntimeLogWithMagazine(operationTrackerManager, connIdentity, &ctx.SlotMagazine, apiobs.TelemetryLogLevelWarn, "set TCP_NODELAY failed", "error", err.Error())
 		}
 	}
 
-	ctx := clientctx.New()
-	ctx.ConnectionIdentity = connIdentity
-	ctx.ConnectionID = connID
-	ctx.RemoteAddr = remoteAddr
-
 	defer func() {
 		durationNs := uint64(time.Since(connStart).Nanoseconds())
-		srv.recordConnectionClosed(operationTrackerManager, connIdentity, connID, remoteAddr, durationNs)
+		srv.recordConnectionClosed(operationTrackerManager, connIdentity, connID, remoteAddr, durationNs, &ctx.SlotMagazine)
 		srv.connRegistry.Unregister(connID)
 		if srv.watchManager != nil {
 			srv.watchManager.Unwatch(ctx)
 		}
 		if operationTrackerManager != nil {
+			shardIndex := int(uint64(connIdentity) % uint64(operationTrackerManager.ShardCount()))
+			operationTrackerManager.FlushMagazine(shardIndex, &ctx.SlotMagazine)
 			operationTrackerManager.ForgetConnectionContext(connIdentity)
 		}
 		conn.Close()
@@ -485,10 +502,10 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	reader := resp.NewReader(conn)
 	writer := resp.NewWriter(conn)
 	connHandle := srv.connRegistry.Register(connID, writer)
-	srv.recordConnectionStarted(operationTrackerManager, connIdentity, connID, remoteAddr)
+	srv.recordConnectionStarted(operationTrackerManager, connIdentity, connID, remoteAddr, &ctx.SlotMagazine)
 	defer func() {
 		if err := connHandle.Flush(); err != nil {
-			srv.recordRuntimeLog(operationTrackerManager, connIdentity, apiobs.TelemetryLogLevelDebug, "final flush on connection close", "error", err.Error())
+			srv.recordRuntimeLogWithMagazine(operationTrackerManager, connIdentity, &ctx.SlotMagazine, apiobs.TelemetryLogLevelDebug, "final flush on connection close", "error", err.Error())
 		}
 	}()
 
@@ -500,7 +517,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 	for {
 		if srv.isShuttingDown.Load() {
 			if err := connHandle.WriteValue(resp.MarshalError("ERR Server is shutting down")); err != nil {
-				srv.recordRuntimeLog(operationTrackerManager, connIdentity, apiobs.TelemetryLogLevelDebug, "write shutdown notice failed", "error", err.Error())
+				srv.recordRuntimeLogWithMagazine(operationTrackerManager, connIdentity, &ctx.SlotMagazine, apiobs.TelemetryLogLevelDebug, "write shutdown notice failed", "error", err.Error())
 			}
 			return
 		}
@@ -516,7 +533,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 			val, err := reader.Read()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
-					srv.recordRuntimeLog(operationTrackerManager, connIdentity, apiobs.TelemetryLogLevelDebug, "connection read error", "error", err.Error())
+					srv.recordRuntimeLogWithMagazine(operationTrackerManager, connIdentity, &ctx.SlotMagazine, apiobs.TelemetryLogLevelDebug, "connection read error", "error", err.Error())
 				}
 				return
 			}
@@ -580,7 +597,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 
 		if op == "QUIT" {
 			if err := connHandle.WriteValue(resp.OK()); err != nil {
-				srv.recordRuntimeLog(operationTrackerManager, connIdentity, apiobs.TelemetryLogLevelDebug, "write QUIT ack failed", "error", err.Error())
+				srv.recordRuntimeLogWithMagazine(operationTrackerManager, connIdentity, &ctx.SlotMagazine, apiobs.TelemetryLogLevelDebug, "write QUIT ack failed", "error", err.Error())
 			}
 			return
 		}
@@ -588,7 +605,7 @@ func (srv *Server) handleConnection(serverCtx context.Context, conn net.Conn) {
 		// Auth gate: block commands until authenticated
 		if srv.requirePass != "" && !ctx.Authenticated {
 			if op != "AUTH" && op != "HELLO" {
-				srv.recordAuthFailed(operationTrackerManager, connIdentity, remoteAddr, op)
+				srv.recordAuthFailedWithMagazine(operationTrackerManager, connIdentity, &ctx.SlotMagazine, remoteAddr, op)
 				if err := connHandle.WriteValue(resp.MarshalError("NOAUTH Authentication required.")); err != nil {
 					return
 				}

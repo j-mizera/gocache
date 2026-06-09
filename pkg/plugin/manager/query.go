@@ -282,7 +282,7 @@ func (t *TelemetryOperationTracker) Start(opType ops.Type, parentID string) *ops
 		Type:          string(op.Type),
 		Ref:           ref,
 		StartUnixNano: op.StartTime.UnixNano(),
-	})
+	}, nil)
 	if !ok {
 		return op
 	}
