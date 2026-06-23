@@ -73,7 +73,11 @@ Skip counters remained roughly unchanged at ~53% despite the 5× operation-count
 
 Memory stayed comparable to the pre-fix shape: IPC `delta_rss=232MB` (61MB -> 293MB) and OTel `delta_rss=205MB` (63MB -> 268MB), versus the pre-fix ~+204MB profile. T-GATE's partial cut reduced some per-command work, but `copyOperationContext` still runs, so RSS did not materially drop.
 
-Conclusion: standard mode is solved, but pipelined telemetry still needs T-PARALLEL (per-shard drain workers, bounded to 2–4) because the single sequential drain worker remains the bottleneck.
+T-PARALLEL (per-shard drain workers, `workerCount=2`) was then implemented and stress-tested. The mechanics were correct: serial parity held, concurrent dispatch did not double-drain, and 138 tests passed under `-race`. But the benchmark result was negative in the thesis sense: pipelined `skipped_operations` only moved from `165,551` pre-T-PARALLEL to `162,532` after it, so the skip rate stayed effectively unchanged at ~54%. Throughput stayed comparable — `SET` 793K pipelined vs 854K pre, `GET` 980K vs 934K — so the change did not hurt the fast path, but it also did not reduce telemetry loss.
+
+Root cause: on the 4-pinned-core target, the drain is CPU-bound. Adding drain workers splits the same saturated CPU budget across more goroutines; it does not create more recycling capacity. The bottleneck is per-op drain cost (`copyOperationContext` still always runs because the T-GATE hoisted check was removed for replay retention) plus CPU contention with serving goroutines.
+
+Conclusion: parallelizing the drain is architecturally sound — correct, tested, and serial-parity preserving — but insufficient on a CPU-saturated target. The telemetry loss is now bounded, counted, and visible (FR-001), which is the architectural achievement. Zero-drop pipelined telemetry would require either more CPU cores or a cheaper per-op drain path, likely by recovering the `copyOperationContext` skip via a replay-safe interest gate.
 
 ## Audits
 

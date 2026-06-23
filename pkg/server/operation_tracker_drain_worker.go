@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	apicommand "gocache/api/command"
@@ -17,6 +18,7 @@ import (
 
 const defaultOperationTrackerDrainInterval = 10 * time.Millisecond
 const defaultOperationTrackerGapInterval = 100 * time.Millisecond
+const maxOperationTrackerDrainWorkerCount = 4
 
 const operationTrackerDrainParentField = "_parent_operation_id"
 
@@ -25,18 +27,26 @@ const operationTrackerDrainParentField = "_parent_operation_id"
 // after command execution has finished, keeping zerolog formatting and sink I/O
 // off the command goroutine.
 type OperationTrackerDrainWorker struct {
-	manager     *commonobs.SlotOperationTrackerManager
-	interval    time.Duration
-	gapInterval time.Duration
-	emitter     apievents.Emitter
-	nudgeCh     chan struct{} // buffered 1, non-blocking nudge
-	idleBackoff time.Duration // exponential backoff for idle state
-	drainMu     sync.Mutex
-	scratch     drainWorkerScratch
+	manager      *commonobs.SlotOperationTrackerManager
+	interval     time.Duration
+	gapInterval  time.Duration
+	emitter      apievents.Emitter
+	idleBackoff  time.Duration // exponential backoff for idle state
+	workerCount  int
+	rangeWorkers []shardRangeWorker
+	started      atomic.Bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
+}
+
+type shardRangeWorker struct {
+	shardStart int
+	shardEnd   int // exclusive
+	drainMu    sync.Mutex
+	nudgeCh    chan struct{} // buffered 1
+	scratch    drainWorkerScratch
 }
 
 type drainWorkerScratch struct {
@@ -141,22 +151,74 @@ func NewOperationTrackerDrainWorker(manager *commonobs.SlotOperationTrackerManag
 		gapInterval: defaultOperationTrackerGapInterval,
 		emitter:     apievents.NoopEmitter{},
 		stopCh:      make(chan struct{}),
-		nudgeCh:     make(chan struct{}, 1),
 		idleBackoff: 1 * time.Millisecond,
 	}
+	worker.SetWorkerCount(1)
 	if manager != nil {
 		manager.SetCompletedNotify(worker.nudge)
 	}
 	return worker
 }
 
-func (w *OperationTrackerDrainWorker) nudge() {
+// SetWorkerCount configures how many disjoint shard ranges drain completed
+// operations. Calls after Start are ignored to keep worker lifecycle ownership
+// stable.
+func (w *OperationTrackerDrainWorker) SetWorkerCount(n int) {
 	if w == nil {
 		return
 	}
-	select {
-	case w.nudgeCh <- struct{}{}:
-	default:
+	if w.started.Load() {
+		logger.WarnNoCtx().Int("requested_worker_count", n).Msg("operation tracker drain worker count change ignored after start")
+		return
+	}
+	w.workerCount = clampDrainWorkerCount(n)
+	w.rangeWorkers = w.makeShardRangeWorkers(w.workerCount)
+}
+
+func clampDrainWorkerCount(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > maxOperationTrackerDrainWorkerCount {
+		return maxOperationTrackerDrainWorkerCount
+	}
+	return n
+}
+
+func (w *OperationTrackerDrainWorker) makeShardRangeWorkers(workerCount int) []shardRangeWorker {
+	if w == nil || w.manager == nil {
+		return nil
+	}
+	shardCount := w.manager.ShardCount()
+	if shardCount <= 0 {
+		return nil
+	}
+	workerCount = clampDrainWorkerCount(workerCount)
+	rangeWorkers := make([]shardRangeWorker, workerCount)
+	for workerIndex := range rangeWorkers {
+		shardStart := workerIndex * shardCount / workerCount
+		shardEnd := (workerIndex + 1) * shardCount / workerCount
+		rangeWorkers[workerIndex].shardStart = shardStart
+		rangeWorkers[workerIndex].shardEnd = shardEnd
+		rangeWorkers[workerIndex].nudgeCh = make(chan struct{}, 1)
+	}
+	return rangeWorkers
+}
+
+func (w *OperationTrackerDrainWorker) nudge(shard int) {
+	if w == nil {
+		return
+	}
+	for workerIndex := range w.rangeWorkers {
+		rangeWorker := &w.rangeWorkers[workerIndex]
+		if shard < rangeWorker.shardStart || shard >= rangeWorker.shardEnd {
+			continue
+		}
+		select {
+		case rangeWorker.nudgeCh <- struct{}{}:
+		default:
+		}
+		return
 	}
 }
 
@@ -197,33 +259,41 @@ func (w *OperationTrackerDrainWorker) Start(parentCtx context.Context) {
 	if gapInterval <= 0 {
 		gapInterval = defaultOperationTrackerGapInterval
 	}
-	w.wg.Add(2)
-	go func() {
-		defer w.wg.Done()
-		w.DrainOnce()
-		for {
-			if w.drainUntilEmpty() == 0 {
-				select {
-				case <-w.nudgeCh:
-				case <-parentCtx.Done():
-					w.DrainOnce()
-					return
-				case <-w.stopCh:
-					w.DrainOnce()
-					return
-				case <-time.After(w.idleBackoff):
-				}
-				if w.idleBackoff < w.interval {
-					w.idleBackoff *= 2
-					if w.idleBackoff > w.interval {
-						w.idleBackoff = w.interval
-					}
-				}
-			} else {
-				w.idleBackoff = 1 * time.Millisecond
+	w.ensureRangeWorkers()
+	w.started.Store(true)
+	w.wg.Add(len(w.rangeWorkers) + 1)
+	for workerIndex := range w.rangeWorkers {
+		rangeWorker := &w.rangeWorkers[workerIndex]
+		go func(activeRangeWorker *shardRangeWorker) {
+			defer w.wg.Done()
+			idleBackoff := w.idleBackoff
+			if idleBackoff <= 0 {
+				idleBackoff = 1 * time.Millisecond
 			}
-		}
-	}()
+			for {
+				if w.drainRangeUntilEmpty(activeRangeWorker) == 0 {
+					select {
+					case <-activeRangeWorker.nudgeCh:
+					case <-parentCtx.Done():
+						w.drainRangeOnce(activeRangeWorker)
+						return
+					case <-w.stopCh:
+						w.drainRangeOnce(activeRangeWorker)
+						return
+					case <-time.After(idleBackoff):
+					}
+					if idleBackoff < w.interval {
+						idleBackoff *= 2
+						if idleBackoff > w.interval {
+							idleBackoff = w.interval
+						}
+					}
+				} else {
+					idleBackoff = 1 * time.Millisecond
+				}
+			}
+		}(rangeWorker)
+	}
 	go func() {
 		defer w.wg.Done()
 		janitor := newGapJanitor(gapInterval)
@@ -262,7 +332,13 @@ func (w *OperationTrackerDrainWorker) Stop() {
 		return
 	}
 	w.stopOnce.Do(func() { close(w.stopCh) })
-	w.nudge()
+	for workerIndex := range w.rangeWorkers {
+		rangeWorker := &w.rangeWorkers[workerIndex]
+		select {
+		case rangeWorker.nudgeCh <- struct{}{}:
+		default:
+		}
+	}
 	w.wg.Wait()
 }
 
@@ -272,27 +348,18 @@ func (w *OperationTrackerDrainWorker) DrainOnce() int {
 	if w == nil || w.manager == nil {
 		return 0
 	}
-	w.drainMu.Lock()
-	defer w.drainMu.Unlock()
-	drained := 0
-	for shard := 0; shard < w.manager.ShardCount(); shard++ {
-		drained += w.manager.DrainCompletedShard(shard, w.projectCompletedOperation)
-	}
-	return drained
+	w.ensureRangeWorkers()
+	return w.drainRangesOnce()
 }
 
 func (w *OperationTrackerDrainWorker) drainUntilEmpty() int {
 	if w == nil || w.manager == nil {
 		return 0
 	}
-	w.drainMu.Lock()
-	defer w.drainMu.Unlock()
+	w.ensureRangeWorkers()
 	total := 0
 	for {
-		drained := 0
-		for shard := 0; shard < w.manager.ShardCount(); shard++ {
-			drained += w.manager.DrainCompletedShard(shard, w.projectCompletedOperation)
-		}
+		drained := w.drainRangesOnce()
 		if drained == 0 {
 			return total
 		}
@@ -300,11 +367,71 @@ func (w *OperationTrackerDrainWorker) drainUntilEmpty() int {
 	}
 }
 
-func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation commonobs.CompletedOperation) {
-	if w.emitter == nil {
+func (w *OperationTrackerDrainWorker) ensureRangeWorkers() {
+	if w == nil || w.manager == nil || len(w.rangeWorkers) > 0 {
 		return
 	}
-	scratch := &w.scratch
+	workerCount := w.workerCount
+	if workerCount == 0 {
+		workerCount = 1
+	}
+	w.rangeWorkers = w.makeShardRangeWorkers(workerCount)
+}
+
+func (w *OperationTrackerDrainWorker) drainRangesOnce() int {
+	if len(w.rangeWorkers) == 0 {
+		return 0
+	}
+	var totalDrained atomic.Uint64
+	var drainWaitGroup sync.WaitGroup
+	drainWaitGroup.Add(len(w.rangeWorkers))
+	for workerIndex := range w.rangeWorkers {
+		rangeWorker := &w.rangeWorkers[workerIndex]
+		go func(activeRangeWorker *shardRangeWorker) {
+			defer drainWaitGroup.Done()
+			drained := w.drainRangeOnce(activeRangeWorker)
+			if drained > 0 {
+				totalDrained.Add(uint64(drained))
+			}
+		}(rangeWorker)
+	}
+	drainWaitGroup.Wait()
+	return int(totalDrained.Load())
+}
+
+func (w *OperationTrackerDrainWorker) drainRangeUntilEmpty(rangeWorker *shardRangeWorker) int {
+	if w == nil || w.manager == nil || rangeWorker == nil {
+		return 0
+	}
+	total := 0
+	for {
+		drained := w.drainRangeOnce(rangeWorker)
+		if drained == 0 {
+			return total
+		}
+		total += drained
+	}
+}
+
+func (w *OperationTrackerDrainWorker) drainRangeOnce(rangeWorker *shardRangeWorker) int {
+	if w == nil || w.manager == nil || rangeWorker == nil {
+		return 0
+	}
+	rangeWorker.drainMu.Lock()
+	defer rangeWorker.drainMu.Unlock()
+	drained := 0
+	for shard := rangeWorker.shardStart; shard < rangeWorker.shardEnd; shard++ {
+		drained += w.manager.DrainCompletedShard(shard, func(operation commonobs.CompletedOperation) {
+			w.projectCompletedOperation(operation, &rangeWorker.scratch)
+		})
+	}
+	return drained
+}
+
+func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation commonobs.CompletedOperation, scratch *drainWorkerScratch) {
+	if w.emitter == nil || scratch == nil {
+		return
+	}
 	operationContext := w.copyOperationContext(operation)
 	for i := range operation.Records {
 		scratch.reset()

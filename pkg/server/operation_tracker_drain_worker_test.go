@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -498,6 +500,294 @@ func TestDrainWorkerParkWake(t *testing.T) {
 	if stats := manager.ShardStats(0); stats.CompletedSlots != 0 || stats.ActiveSlots != 0 {
 		t.Fatalf("stats after park/wake drain = %+v, want no active or completed slots", stats)
 	}
+}
+
+func TestOperationTrackerDrainSerialParityWorkerCountZeroAndOne(t *testing.T) {
+	const shards = 8
+	zeroIDs, expectedByShard := drainSerialParityOperationIDs(t, 0, shards)
+	oneIDs, _ := drainSerialParityOperationIDs(t, 1, shards)
+
+	assertShardFIFOOrder(t, zeroIDs, expectedByShard, shards)
+	assertShardFIFOOrder(t, oneIDs, expectedByShard, shards)
+	if strings.Join(intsToStrings(oneIDs), ",") != strings.Join(intsToStrings(zeroIDs), ",") {
+		t.Fatalf("workerCount=1 operation order = %v, want exact workerCount=0 parity %v", oneIDs, zeroIDs)
+	}
+}
+
+func TestOperationTrackerDrainParallelStressWorkerCountTwo(t *testing.T) {
+	runOperationTrackerDrainParallelStress(t, 2)
+}
+
+func TestOperationTrackerDrainParallelStressWorkerCountFour(t *testing.T) {
+	result := runOperationTrackerDrainParallelStress(t, 4)
+	wantRanges := [][2]int{{0, 2}, {2, 4}, {4, 6}, {6, 8}}
+	if len(result.ranges) != len(wantRanges) {
+		t.Fatalf("worker ranges = %v, want %v", result.ranges, wantRanges)
+	}
+	for i := range wantRanges {
+		if result.ranges[i] != wantRanges[i] {
+			t.Fatalf("worker range[%d] = %v, want %v", i, result.ranges[i], wantRanges[i])
+		}
+	}
+}
+
+func TestOperationTrackerDrainStressConcurrentNudgeAndDrainOnce(t *testing.T) {
+	const (
+		shards       = 8
+		operations   = 256
+		nudgeWorkers = 16
+		drainWorkers = 8
+		recordsPerOp = 1
+	)
+	manager := newTestSlotOperationTrackerManagerWithShards(t, shards, operations, recordsPerOp)
+	emitter := &recordingEmitter{subscribed: true}
+	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetWorkerCount(4)
+	worker.SetEmitter(emitter)
+
+	for i := 0; i < operations; i++ {
+		operationID := operationIdentityForShard(i%shards, i/shards+1, shards)
+		handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(operationID), apiobs.ParentRef{}, 0)
+		if !ok {
+			t.Fatalf("StartOperation(%d) failed", operationID)
+		}
+		scope := commonobs.NewOperationScope(manager, handle, 1, apiobs.NewOperationRef(strconv.Itoa(operationID), ""))
+		if !scope.OperationStartString("stress", apicommand.OperationID, strconv.Itoa(operationID)) {
+			t.Fatalf("OperationStartString(%d) failed", operationID)
+		}
+		if !scope.Finish(commonobs.SlotTerminalFinished) {
+			t.Fatalf("Finish(%d) failed", operationID)
+		}
+	}
+
+	var wg sync.WaitGroup
+	var drained atomic.Uint64
+	for i := 0; i < drainWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			drained.Add(uint64(worker.DrainOnce()))
+		}()
+	}
+	for i := 0; i < nudgeWorkers; i++ {
+		wg.Add(1)
+		go func(workerIndex int) {
+			defer wg.Done()
+			for shard := 0; shard < shards; shard++ {
+				worker.nudge((workerIndex + shard) % shards)
+			}
+		}(i)
+	}
+	wg.Wait()
+	drained.Add(uint64(worker.DrainOnce()))
+
+	if got := int(drained.Load()); got != operations {
+		t.Fatalf("total drained = %d, want %d", got, operations)
+	}
+	ids := operationStartedIDs(t, emitter.snapshot())
+	if len(ids) != operations {
+		t.Fatalf("emitted operation.started events = %d, want %d", len(ids), operations)
+	}
+	assertNoDuplicateOperationIDs(t, ids, operations)
+}
+
+type drainParallelStressResult struct {
+	ranges [][2]int
+}
+
+func runOperationTrackerDrainParallelStress(t *testing.T, workerCount int) drainParallelStressResult {
+	t.Helper()
+	const (
+		shards              = 8
+		producerGoroutines  = 50
+		operationsPerWorker = 12
+		totalOperations     = producerGoroutines * operationsPerWorker
+	)
+	manager := newTestSlotOperationTrackerManagerWithShards(t, shards, 256, 1)
+	emitter := &recordingEmitter{subscribed: true}
+	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetWorkerCount(workerCount)
+	ranges := workerRangeSnapshot(worker)
+	worker.SetEmitter(emitter)
+	worker.Start(context.Background())
+	defer worker.Stop()
+
+	expectedByShard := make([][]int, shards)
+	shardLocks := make([]sync.Mutex, shards)
+	var startFailures atomic.Uint64
+	var recordFailures atomic.Uint64
+	var finishFailures atomic.Uint64
+	var wg sync.WaitGroup
+	for producer := 0; producer < producerGoroutines; producer++ {
+		producer := producer
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			shard := producer % shards
+			for seq := 0; seq < operationsPerWorker; seq++ {
+				operationID := operationIdentityForShard(shard, producer*operationsPerWorker+seq+1, shards)
+				shardLocks[shard].Lock()
+				handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(operationID), apiobs.ParentRef{}, 0)
+				if !ok {
+					startFailures.Add(1)
+					shardLocks[shard].Unlock()
+					continue
+				}
+				scope := commonobs.NewOperationScope(manager, handle, 1, apiobs.NewOperationRef(strconv.Itoa(operationID), ""))
+				if !scope.OperationStartString("stress", apicommand.OperationID, strconv.Itoa(operationID)) {
+					recordFailures.Add(1)
+				}
+				if !scope.Finish(commonobs.SlotTerminalFinished) {
+					finishFailures.Add(1)
+				} else {
+					expectedByShard[shard] = append(expectedByShard[shard], operationID)
+				}
+				shardLocks[shard].Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := startFailures.Load(); got != 0 {
+		t.Fatalf("StartOperation failures = %d, want 0", got)
+	}
+	if got := recordFailures.Load(); got != 0 {
+		t.Fatalf("OperationStartString failures = %d, want 0", got)
+	}
+	if got := finishFailures.Load(); got != 0 {
+		t.Fatalf("Finish failures = %d, want 0", got)
+	}
+	waitForOperationStartedEvents(t, emitter, totalOperations)
+	ids := operationStartedIDs(t, emitter.snapshot())
+	if len(ids) != totalOperations {
+		t.Fatalf("emitted operation.started events = %d, want %d", len(ids), totalOperations)
+	}
+	assertNoDuplicateOperationIDs(t, ids, totalOperations)
+	assertShardFIFOOrder(t, ids, expectedByShard, shards)
+	for shard := 0; shard < shards; shard++ {
+		stats := manager.ShardStats(shard)
+		if stats.CompletedSlots != 0 || stats.ActiveSlots != 0 {
+			t.Fatalf("shard %d stats after stress = %+v, want no active/completed slots", shard, stats)
+		}
+	}
+	return drainParallelStressResult{ranges: ranges}
+}
+
+func drainSerialParityOperationIDs(t *testing.T, workerCount, shardCount int) ([]int, [][]int) {
+	t.Helper()
+	manager := newTestSlotOperationTrackerManagerWithShards(t, shardCount, 16, 1)
+	expectedByShard := make([][]int, shardCount)
+	for shard := 0; shard < shardCount; shard++ {
+		for seq := 1; seq <= 2; seq++ {
+			operationID := operationIdentityForShard(shard, seq, shardCount)
+			handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(operationID), apiobs.ParentRef{}, 0)
+			if !ok {
+				t.Fatalf("StartOperation(%d) failed", operationID)
+			}
+			scope := commonobs.NewOperationScope(manager, handle, 1, apiobs.NewOperationRef(strconv.Itoa(operationID), ""))
+			if !scope.OperationStartString("serial", apicommand.OperationID, strconv.Itoa(operationID)) {
+				t.Fatalf("OperationStartString(%d) failed", operationID)
+			}
+			if !scope.Finish(commonobs.SlotTerminalFinished) {
+				t.Fatalf("Finish(%d) failed", operationID)
+			}
+			expectedByShard[shard] = append(expectedByShard[shard], operationID)
+		}
+	}
+	emitter := &recordingEmitter{subscribed: true}
+	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetWorkerCount(workerCount)
+	worker.SetEmitter(emitter)
+	if drained := worker.DrainOnce(); drained != shardCount*2 {
+		t.Fatalf("DrainOnce(workerCount=%d) = %d, want %d", workerCount, drained, shardCount*2)
+	}
+	return operationStartedIDs(t, emitter.snapshot()), expectedByShard
+}
+
+func newTestSlotOperationTrackerManagerWithShards(t *testing.T, shards, slots, recordsPerOperation int) *commonobs.SlotOperationTrackerManager {
+	t.Helper()
+	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{ShardCount: shards, MinSegmentsPerShard: 1, MaxSegmentsPerShard: 1, SegmentSize: slots, RecordsPerOperation: recordsPerOperation, CompletedRingPerShard: slots})
+}
+
+func operationIdentityForShard(shard, seq, shardCount int) int {
+	if shard == 0 {
+		return seq * shardCount
+	}
+	return shard + seq*shardCount
+}
+
+func workerRangeSnapshot(worker *OperationTrackerDrainWorker) [][2]int {
+	ranges := make([][2]int, len(worker.rangeWorkers))
+	for i := range worker.rangeWorkers {
+		ranges[i] = [2]int{worker.rangeWorkers[i].shardStart, worker.rangeWorkers[i].shardEnd}
+	}
+	return ranges
+}
+
+func waitForOperationStartedEvents(t *testing.T, emitter *recordingEmitter, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := len(operationStartedIDs(t, emitter.snapshot())); got == want {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatalf("operation.started events did not reach %d before deadline; got %d", want, len(operationStartedIDs(t, emitter.snapshot())))
+}
+
+func operationStartedIDs(t *testing.T, events []apievents.Event) []int {
+	t.Helper()
+	ids := make([]int, 0, len(events))
+	for _, event := range events {
+		if event.Proto == nil || event.Proto.Type != string(apievents.OperationStarted) {
+			continue
+		}
+		id, err := strconv.Atoi(event.Proto.OperationId)
+		if err != nil {
+			t.Fatalf("operation_id %q is not an integer: %v", event.Proto.OperationId, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func assertNoDuplicateOperationIDs(t *testing.T, ids []int, wantTotal int) {
+	t.Helper()
+	seen := make(map[int]int, len(ids))
+	for _, id := range ids {
+		seen[id]++
+		if seen[id] > 1 {
+			t.Fatalf("operation_id %d drained %d times, want exactly once", id, seen[id])
+		}
+	}
+	if len(seen) != wantTotal {
+		t.Fatalf("unique drained operation IDs = %d, want %d", len(seen), wantTotal)
+	}
+}
+
+func assertShardFIFOOrder(t *testing.T, drainedIDs []int, expectedByShard [][]int, shardCount int) {
+	t.Helper()
+	actualByShard := make([][]int, shardCount)
+	for _, id := range drainedIDs {
+		shard := id % shardCount
+		actualByShard[shard] = append(actualByShard[shard], id)
+	}
+	for shard := 0; shard < shardCount; shard++ {
+		actual := actualByShard[shard]
+		expected := expectedByShard[shard]
+		if strings.Join(intsToStrings(actual), ",") != strings.Join(intsToStrings(expected), ",") {
+			t.Fatalf("shard %d drain order = %v, want FIFO completion order %v", shard, actual, expected)
+		}
+	}
+}
+
+func intsToStrings(values []int) []string {
+	stringsOut := make([]string, len(values))
+	for i, value := range values {
+		stringsOut[i] = strconv.Itoa(value)
+	}
+	return stringsOut
 }
 
 func TestGapJanitorSampleEmitsPositiveDeltas(t *testing.T) {

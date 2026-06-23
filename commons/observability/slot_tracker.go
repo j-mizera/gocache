@@ -148,7 +148,7 @@ type SlotOperationTrackerManager struct {
 	shards          []operationSlotShard
 	releaseContext  func(apiobs.ConnectionContextVersion) bool
 	contexts        connectionContextStore
-	notifyCompleted func()
+	notifyCompleted func(shard int)
 
 	hotShardGrowthStop     chan struct{}
 	hotShardGrowthDone     chan struct{}
@@ -552,7 +552,7 @@ func (magazine *SlotMagazine) flushToShard(shard *operationSlotShard) {
 
 // SetCompletedNotify wires a non-blocking notification hook invoked when a
 // completed operation is successfully queued for worker drain.
-func (m *SlotOperationTrackerManager) SetCompletedNotify(fn func()) {
+func (m *SlotOperationTrackerManager) SetCompletedNotify(fn func(shard int)) {
 	if m == nil {
 		return
 	}
@@ -1107,7 +1107,7 @@ func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHand
 		shard.mu.Unlock()
 		return false
 	} else if m.notifyCompleted != nil {
-		m.notifyCompleted()
+		m.notifyCompleted(int(handle.shard))
 	}
 	return true
 }

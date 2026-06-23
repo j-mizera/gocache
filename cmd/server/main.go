@@ -471,6 +471,7 @@ func main() {
 	srv.SetOperationTrackerManager(steadyStateOperationTracker)
 	benchstats.SetOperationTrackerManager(steadyStateOperationTracker)
 	operationDrainWorker := server.NewOperationTrackerDrainWorker(steadyStateOperationTracker, steadyStateOperationTrackerDrainInterval)
+	operationDrainWorker.SetWorkerCount(2)
 	operationDrainWorker.SetEmitter(eventBus)
 
 	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---
