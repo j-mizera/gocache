@@ -1,11 +1,12 @@
 package observability
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	apiobs "gocache/api/observability"
-	"gocache/pkg/benchstats"
 )
 
 type contextReleaseCounter struct {
@@ -40,6 +41,21 @@ func cloneCompletedOperation(operation CompletedOperation) CompletedOperation {
 		operation.ContextOverlay = clone
 	}
 	return operation
+}
+
+func trackerSnapshot(manager *SlotOperationTrackerManager) map[string]string {
+	snapshot := make(map[string]string, 3+manager.ShardCount()*4)
+	snapshot["operation_tracker.skipped_operations"] = strconv.FormatUint(manager.SkippedOperations(), 10)
+	snapshot["operation_tracker.dropped_records"] = strconv.FormatUint(manager.DroppedRecords(), 10)
+	snapshot["operation_tracker.dropped_completed"] = strconv.FormatUint(manager.DroppedCompletedOperations(), 10)
+	for shardIndex := 0; shardIndex < manager.ShardCount(); shardIndex++ {
+		prefix := fmt.Sprintf("operation_tracker.shard_%d.", shardIndex)
+		snapshot[prefix+"skipped"] = strconv.FormatUint(manager.ShardSkipped(shardIndex), 10)
+		snapshot[prefix+"active"] = strconv.Itoa(manager.ShardActiveSlots(shardIndex))
+		snapshot[prefix+"free"] = strconv.Itoa(manager.ShardFreeSlots(shardIndex))
+		snapshot[prefix+"completed"] = strconv.Itoa(manager.ShardCompletedSlots(shardIndex))
+	}
+	return snapshot
 }
 
 func TestSlotTrackerLifecycleDrainsCompletedOperation(t *testing.T) {
@@ -627,13 +643,6 @@ func TestSlotTrackerCompletedOperationContextFoldsBaseOverlayAndRecords(t *testi
 }
 
 func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *testing.T) {
-	benchstats.Reset()
-	t.Cleanup(func() {
-		benchstats.SetOperationTrackerManager(nil)
-		benchstats.Reset()
-		benchstats.SetEnabled(false)
-	})
-
 	const (
 		segmentSize = 3
 		maxSegments = 2
@@ -647,9 +656,6 @@ func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *te
 		RecordsPerOperation:   1,
 		CompletedRingPerShard: slotCount,
 	})
-	benchstats.SetEnabled(true)
-	benchstats.SetOperationTrackerManager(manager)
-
 	handles := make([]InternalTrackerHandle, 0, slotCount)
 	for i := 0; i < slotCount; i++ {
 		handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(i+1), apiobs.ParentRef{}, 0)
@@ -672,7 +678,7 @@ func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *te
 	if shardSkipped := manager.ShardSkipped(0); shardSkipped != 1 {
 		t.Fatalf("ShardSkipped(0) = %d, want 1", shardSkipped)
 	}
-	bench := benchstats.Snapshot(false)
+	bench := trackerSnapshot(manager)
 	if got := bench["operation_tracker.skipped_operations"]; got != "1" {
 		t.Fatalf("benchstats skipped_operations = %q, want %q", got, "1")
 	}
@@ -697,13 +703,6 @@ func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *te
 }
 
 func TestLossCounterRecordOverflowIncrementsDroppedRecords(t *testing.T) {
-	benchstats.Reset()
-	t.Cleanup(func() {
-		benchstats.SetOperationTrackerManager(nil)
-		benchstats.Reset()
-		benchstats.SetEnabled(false)
-	})
-
 	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
 		ShardCount:            1,
 		MinSegmentsPerShard:   1,
@@ -712,9 +711,6 @@ func TestLossCounterRecordOverflowIncrementsDroppedRecords(t *testing.T) {
 		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
-	benchstats.SetEnabled(true)
-	benchstats.SetOperationTrackerManager(manager)
-
 	handle, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
 	if !ok {
 		t.Fatal("operation should allocate the only slot")
@@ -730,7 +726,7 @@ func TestLossCounterRecordOverflowIncrementsDroppedRecords(t *testing.T) {
 	if dropped := manager.DroppedRecords(); dropped != 1 {
 		t.Fatalf("DroppedRecords() = %d, want 1", dropped)
 	}
-	bench := benchstats.Snapshot(false)
+	bench := trackerSnapshot(manager)
 	if got := bench["operation_tracker.dropped_records"]; got != "1" {
 		t.Fatalf("benchstats dropped_records = %q, want %q", got, "1")
 	}
@@ -748,13 +744,6 @@ func TestLossCounterRecordOverflowIncrementsDroppedRecords(t *testing.T) {
 }
 
 func TestLossCounterCompletedRingOverflowIncrementsDroppedCompleted(t *testing.T) {
-	benchstats.Reset()
-	t.Cleanup(func() {
-		benchstats.SetOperationTrackerManager(nil)
-		benchstats.Reset()
-		benchstats.SetEnabled(false)
-	})
-
 	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
 		ShardCount:            1,
 		MinSegmentsPerShard:   1,
@@ -763,9 +752,6 @@ func TestLossCounterCompletedRingOverflowIncrementsDroppedCompleted(t *testing.T
 		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
-	benchstats.SetEnabled(true)
-	benchstats.SetOperationTrackerManager(manager)
-
 	first, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
 	if !ok {
 		t.Fatal("first operation should fit")
@@ -783,7 +769,7 @@ func TestLossCounterCompletedRingOverflowIncrementsDroppedCompleted(t *testing.T
 	if dropped := manager.DroppedCompletedOperations(); dropped != 1 {
 		t.Fatalf("DroppedCompletedOperations() = %d, want 1", dropped)
 	}
-	bench := benchstats.Snapshot(false)
+	bench := trackerSnapshot(manager)
 	if got := bench["operation_tracker.dropped_completed"]; got != "1" {
 		t.Fatalf("benchstats dropped_completed = %q, want %q", got, "1")
 	}

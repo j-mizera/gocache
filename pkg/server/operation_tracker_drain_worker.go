@@ -352,21 +352,6 @@ func (w *OperationTrackerDrainWorker) DrainOnce() int {
 	return w.drainRangesOnce()
 }
 
-func (w *OperationTrackerDrainWorker) drainUntilEmpty() int {
-	if w == nil || w.manager == nil {
-		return 0
-	}
-	w.ensureRangeWorkers()
-	total := 0
-	for {
-		drained := w.drainRangesOnce()
-		if drained == 0 {
-			return total
-		}
-		total += drained
-	}
-}
-
 func (w *OperationTrackerDrainWorker) ensureRangeWorkers() {
 	if w == nil || w.manager == nil || len(w.rangeWorkers) > 0 {
 		return
