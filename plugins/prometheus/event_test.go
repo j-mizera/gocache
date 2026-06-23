@@ -35,6 +35,7 @@ func TestPrometheusRuntimeTelemetryUsesMetricsQueryOnly(t *testing.T) {
 		string(scope.ScopeServerQueryHealth),
 		string(scope.ScopeServerQueryPlugins),
 		string(scope.ScopeServerQueryMetricsCommands),
+		string(scope.ScopeServerQueryMetricsTelemetry),
 	} {
 		if !scopes[want] {
 			t.Fatalf("prometheus scopes missing %q: %v", want, plugin.Scopes())

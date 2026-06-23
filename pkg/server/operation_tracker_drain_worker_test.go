@@ -39,6 +39,7 @@ func TestOperationTrackerDrainWorkerDrainOnceMaterializesLogRequest(t *testing.T
 	}
 
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	if drained := worker.DrainOnce(); drained != 1 {
 		t.Fatalf("DrainOnce() = %d, want 1", drained)
 	}
@@ -86,6 +87,7 @@ func TestOperationTrackerDrainWorkerMaterializesPinnedBaseContext(t *testing.T) 
 	}
 
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	if drained := worker.DrainOnce(); drained != 1 {
 		t.Fatalf("DrainOnce() = %d, want 1", drained)
 	}
@@ -127,6 +129,7 @@ func TestOperationTrackerDrainWorkerMaterializesCommandOverlayContext(t *testing
 	}
 
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	if drained := worker.DrainOnce(); drained != 1 {
 		t.Fatalf("DrainOnce() = %d, want 1", drained)
 	}
@@ -183,6 +186,7 @@ func TestOperationTrackerDrainWorkerFoldsContextMutationsInRecordOrder(t *testin
 	}
 
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	if drained := worker.DrainOnce(); drained != 1 {
 		t.Fatalf("DrainOnce() = %d, want 1", drained)
 	}
@@ -231,6 +235,7 @@ func TestOperationTrackerDrainWorkerRedactsSecretContextAtProjection(t *testing.
 	}
 
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	if drained := worker.DrainOnce(); drained != 1 {
 		t.Fatalf("DrainOnce() = %d, want 1", drained)
 	}
@@ -401,6 +406,7 @@ func TestOperationTrackerDrainWorkerContextCancelPerformsFinalDrain(t *testing.T
 
 	ctx, cancel := context.WithCancel(context.Background())
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	worker.Start(ctx)
 	waitForShardFreeSlots(t, manager, 2)
 
@@ -434,6 +440,7 @@ func TestOperationTrackerDrainWorkerStopPerformsFinalDrain(t *testing.T) {
 
 	manager := newTestSlotOperationTrackerManager(t, 1, 1)
 	worker := NewOperationTrackerDrainWorker(manager, time.Hour)
+	worker.SetEmitter(&recordingEmitter{subscribed: true})
 	worker.Start(context.Background())
 
 	handle, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)

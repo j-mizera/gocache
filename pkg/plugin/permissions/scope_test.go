@@ -27,6 +27,8 @@ func TestParseScope(t *testing.T) {
 		{"server:query:health", "server:query:health", scope.ScopeServerQueryHealth, false},
 		{"server:query:plugins", "server:query:plugins", scope.ScopeServerQueryPlugins, false},
 		{"server:query:stats", "server:query:stats", scope.ScopeServerQueryStats, false},
+		{"server:query:metrics.commands", "server:query:metrics.commands", scope.ScopeServerQueryMetricsCommands, false},
+		{"server:query:metrics.telemetry", "server:query:metrics.telemetry", scope.ScopeServerQueryMetricsTelemetry, false},
 		{"server:query:custom future topic", "server:query:custom", scope.Scope("server:query:custom"), false},
 		{"empty", "", "", true},
 		{"unknown", "execute", "", true},
@@ -108,11 +110,15 @@ func TestImplies(t *testing.T) {
 		{"server:query implies server:query:health", scope.ScopeServerQuery, scope.ScopeServerQueryHealth, true},
 		{"server:query implies server:query:plugins", scope.ScopeServerQuery, scope.ScopeServerQueryPlugins, true},
 		{"server:query implies server:query:stats", scope.ScopeServerQuery, scope.ScopeServerQueryStats, true},
+		{"server:query implies server:query:metrics.telemetry", scope.ScopeServerQuery, scope.ScopeServerQueryMetricsTelemetry, true},
+		{"admin implies server:query:metrics.telemetry", scope.ScopeAdmin, scope.ScopeServerQueryMetricsTelemetry, true},
 		{"server:query:health same", scope.ScopeServerQueryHealth, scope.ScopeServerQueryHealth, true},
 		{"server:query:health does not imply server:query:stats", scope.ScopeServerQueryHealth, scope.ScopeServerQueryStats, false},
 		{"read does not imply server:query", scope.ScopeRead, scope.ScopeServerQuery, false},
 		{"hook:post does not imply server:query", scope.ScopeHookPost, scope.ScopeServerQuery, false},
 		{"server:query:health does not imply server:query", scope.ScopeServerQueryHealth, scope.ScopeServerQuery, false},
+		{"server:query:metrics.telemetry does not imply server:query:metrics.commands", scope.ScopeServerQueryMetricsTelemetry, scope.ScopeServerQueryMetricsCommands, false},
+		{"server:query:metrics.commands does not imply server:query:metrics.telemetry", scope.ScopeServerQueryMetricsCommands, scope.ScopeServerQueryMetricsTelemetry, false},
 	}
 
 	for _, tt := range tests {
@@ -130,61 +136,89 @@ func TestValidateRequest(t *testing.T) {
 		name        string
 		requested   []scope.Scope
 		allowed     []scope.Scope
-		wantGranted int
-		wantDenied  int
+		wantGranted []scope.Scope
+		wantDenied  []scope.Scope
 	}{
 		{
 			"all allowed",
 			[]scope.Scope{scope.ScopeRead, scope.ScopeWrite},
 			[]scope.Scope{scope.ScopeAdmin},
-			2, 0,
+			[]scope.Scope{scope.ScopeRead, scope.ScopeWrite}, nil,
 		},
 		{
 			"partial denied",
 			[]scope.Scope{scope.ScopeWrite, scope.ScopeHookPre},
 			[]scope.Scope{scope.ScopeRead},
-			0, 2,
+			nil, []scope.Scope{scope.ScopeWrite, scope.ScopeHookPre},
 		},
 		{
 			"mixed",
 			[]scope.Scope{scope.ScopeRead, scope.ScopeAdmin},
 			[]scope.Scope{scope.ScopeWrite},
-			1, 1,
+			[]scope.Scope{scope.ScopeRead}, []scope.Scope{scope.ScopeAdmin},
 		},
 		{
 			"key scope exact match",
 			[]scope.Scope{scope.Scope("keys:user:*")},
 			[]scope.Scope{scope.Scope("keys:user:*")},
-			1, 0,
+			[]scope.Scope{scope.Scope("keys:user:*")}, nil,
 		},
 		{
 			"key scope mismatch",
 			[]scope.Scope{scope.Scope("keys:admin:*")},
 			[]scope.Scope{scope.Scope("keys:user:*")},
-			0, 1,
+			nil, []scope.Scope{scope.Scope("keys:admin:*")},
 		},
 		{
 			"hook scopes independent",
 			[]scope.Scope{scope.ScopeHookPre, scope.ScopeHookPost},
 			[]scope.Scope{scope.ScopeHookPre},
-			1, 1,
+			[]scope.Scope{scope.ScopeHookPre}, []scope.Scope{scope.ScopeHookPost},
+		},
+		{
+			"server query wildcard allows telemetry",
+			[]scope.Scope{scope.ScopeServerQueryMetricsTelemetry},
+			[]scope.Scope{scope.ScopeServerQuery},
+			[]scope.Scope{scope.ScopeServerQueryMetricsTelemetry}, nil,
+		},
+		{
+			"exact telemetry denies metrics commands",
+			[]scope.Scope{scope.ScopeServerQueryMetricsTelemetry, scope.ScopeServerQueryMetricsCommands},
+			[]scope.Scope{scope.ScopeServerQueryMetricsTelemetry},
+			[]scope.Scope{scope.ScopeServerQueryMetricsTelemetry}, []scope.Scope{scope.ScopeServerQueryMetricsCommands},
+		},
+		{
+			"exact metrics commands denies telemetry",
+			[]scope.Scope{scope.ScopeServerQueryMetricsCommands, scope.ScopeServerQueryMetricsTelemetry},
+			[]scope.Scope{scope.ScopeServerQueryMetricsCommands},
+			[]scope.Scope{scope.ScopeServerQueryMetricsCommands}, []scope.Scope{scope.ScopeServerQueryMetricsTelemetry},
 		},
 		{
 			"empty request",
 			nil,
 			[]scope.Scope{scope.ScopeAdmin},
-			0, 0,
+			nil, nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			granted, denied := scope.ValidateRequest(tt.requested, tt.allowed)
-			if len(granted) != tt.wantGranted {
-				t.Errorf("granted: got %d (%v), want %d", len(granted), granted, tt.wantGranted)
+			if len(granted) != len(tt.wantGranted) {
+				t.Fatalf("granted: got %d (%v), want %d (%v)", len(granted), granted, len(tt.wantGranted), tt.wantGranted)
 			}
-			if len(denied) != tt.wantDenied {
-				t.Errorf("denied: got %d (%v), want %d", len(denied), denied, tt.wantDenied)
+			for i := range tt.wantGranted {
+				if granted[i] != tt.wantGranted[i] {
+					t.Errorf("granted[%d]: got %q, want %q", i, granted[i], tt.wantGranted[i])
+				}
+			}
+			if len(denied) != len(tt.wantDenied) {
+				t.Fatalf("denied: got %d (%v), want %d (%v)", len(denied), denied, len(tt.wantDenied), tt.wantDenied)
+			}
+			for i := range tt.wantDenied {
+				if denied[i] != tt.wantDenied[i] {
+					t.Errorf("denied[%d]: got %q, want %q", i, denied[i], tt.wantDenied[i])
+				}
 			}
 		})
 	}

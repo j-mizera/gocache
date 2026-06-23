@@ -36,6 +36,10 @@ const ctxCancelShutdownTimeout = 5 * time.Second
 
 const maxBatchSize = 128
 
+// batchTelemetryFullyNestedCommandLimit matches the steady-state 24-record
+// operation cap: OpStart + 11×CmdStart + 11×CmdFinish + OpFinish = 24.
+const batchTelemetryFullyNestedCommandLimit = 11
+
 const (
 	connectionStartedTelemetryEvent = string(events.ConnectionOpen)
 	connectionClosedTelemetryEvent  = string(events.ConnectionClose)
@@ -46,6 +50,7 @@ const (
 const (
 	connectionOperationIdentityBase apiobs.InternalOperationIdentity = 1 << 60
 	runtimeLogOperationIdentityBase apiobs.InternalOperationIdentity = 1 << 59
+	batchOperationIdentityBase      apiobs.InternalOperationIdentity = 1 << 58
 )
 
 // StartupTelemetry carries the root startup operation into Start without using
@@ -114,6 +119,7 @@ type Server struct {
 	operationTrackerManager     atomic.Pointer[commonobs.SlotOperationTrackerManager]
 	connectionOperationSequence atomic.Uint64
 	runtimeLogOperationSequence atomic.Uint64
+	batchOperationSequence      atomic.Uint64
 }
 
 func New(addr string, c *cache.Cache, e *engine.Engine, requirePass string, br *blocking.Registry, wm *watch.Manager) *Server {
@@ -728,6 +734,39 @@ func (srv *Server) runBatch(
 	}
 	sort.Ints(shardIDs)
 
+	detailedCommandLimit := len(batch)
+	overflowCommands := 0
+	if len(batch) > batchTelemetryFullyNestedCommandLimit {
+		// Reserve the batch operation finish record plus one drop marker. With the
+		// steady-state 24-record cap, overflowed batches can carry OpStart,
+		// 10×CmdStart/CmdFinish, TelemetryRecordDrop, and OpFinish without losing
+		// the terminal operation record.
+		detailedCommandLimit = batchTelemetryFullyNestedCommandLimit - 1
+		overflowCommands = len(batch) - detailedCommandLimit
+	}
+
+	var batchTelemetryScope commonobs.OperationScope
+	var batchStartNs int64
+	if manager := srv.operationTrackerManager.Load(); manager != nil {
+		sequence := srv.batchOperationSequence.Add(1)
+		if sequence == 0 {
+			sequence = srv.batchOperationSequence.Add(1)
+		}
+		operation := batchOperationIdentityBase + apiobs.InternalOperationIdentity(sequence)
+		operationID := "batch:" + strconv.FormatUint(sequence, 10)
+		ref := apiobs.NewOperationRef(operationID, ctx.OperationID)
+		batchStartNs = time.Now().UnixNano()
+		handle, _, ok := manager.StartOperationForConnectionWithMetadata(operation, apiobs.NewParentRef(ctx.OperationID), ctx.ConnectionIdentity, commonobs.OperationSnapshotMetadata{
+			Type:          "batch",
+			Ref:           ref,
+			StartUnixNano: batchStartNs,
+		}, &ctx.SlotMagazine)
+		if ok {
+			batchTelemetryScope = commonobs.NewOperationScope(manager, handle, operation, ref)
+			batchTelemetryScope.OperationStartString("batch", apicommand.OperationID, operationID, "_operation_type", "batch", "_parent_operation_id", ctx.OperationID)
+		}
+	}
+
 	releases := make([]func(), len(shardIDs))
 	for i, id := range shardIDs {
 		if shardMode[id] {
@@ -738,9 +777,17 @@ func (srv *Server) runBatch(
 	}
 
 	results := make([]apicommand.Result, len(batch))
+	batchFailed := false
 	ctx.CmdMeta = cmdMeta
 	for i, e := range batch {
-		results[i] = srv.pipeline.EvaluatePreLocked(connCtx, ctx, e.op, e.args)
+		commandTelemetryScope := batchTelemetryScope
+		if i >= detailedCommandLimit {
+			commandTelemetryScope = commonobs.OperationScope{}
+		}
+		results[i] = srv.pipeline.EvaluatePreLocked(connCtx, ctx, e.op, e.args, commandTelemetryScope)
+		if results[i].Err != nil {
+			batchFailed = true
+		}
 		if i == 0 {
 			ctx.CmdMeta = nil
 		}
@@ -749,13 +796,28 @@ func (srv *Server) runBatch(
 	for i := len(releases) - 1; i >= 0; i-- {
 		releases[i]()
 	}
+	if overflowCommands > 0 && !batchTelemetryScope.IsZero() {
+		batchTelemetryScope.DropString("batch_overflow", "overflow_commands", strconv.Itoa(overflowCommands))
+	}
 
 	for _, r := range results {
 		if !r.SuppressResponse {
 			if err := handle.WriteValue(srv.mapToResp(ctx, r)); err != nil {
+				batchFailed = true
 				break
 			}
 		}
+	}
+	if !batchTelemetryScope.IsZero() {
+		status := commonobs.SlotTerminalFinished
+		statusText := "completed"
+		if batchFailed {
+			status = commonobs.SlotTerminalFailed
+			statusText = "failed"
+		}
+		elapsedNs := uint64(time.Now().UnixNano() - batchStartNs)
+		batchTelemetryScope.OperationFinishString("batch", elapsedNs, apicommand.OperationID, batchTelemetryScope.Ref().ID.String(), "_operation_type", "batch", "_status", statusText, apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10))
+		batchTelemetryScope.Finish(status)
 	}
 
 	return overflow

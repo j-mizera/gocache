@@ -301,6 +301,9 @@ func (w *OperationTrackerDrainWorker) drainUntilEmpty() int {
 }
 
 func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation commonobs.CompletedOperation) {
+	if w.emitter == nil {
+		return
+	}
 	scratch := &w.scratch
 	operationContext := w.copyOperationContext(operation)
 	for i := range operation.Records {
@@ -316,9 +319,13 @@ func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation common
 		case apiobs.TelemetryRecordOperationFinish:
 			materializeOperationFinishedRecord(operation, record, operationContext, w.emitter, scratch)
 		case apiobs.TelemetryRecordCommandStart:
-			materializeCommandStartedRecord(record, w.emitter, scratch)
+			if w.emitter.HasSubscribersFor(apievents.CommandStarted) {
+				materializeCommandStartedRecord(record, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordCommandFinish:
-			materializeCommandFinishedRecord(record, w.emitter, scratch)
+			if w.emitter.HasSubscribersFor(apievents.CommandCompleted) {
+				materializeCommandFinishedRecord(record, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordLog:
 			materializeCompletedOperationLog(operation, record, operationContext)
 		case apiobs.TelemetryRecordEvent:

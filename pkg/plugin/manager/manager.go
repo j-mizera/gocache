@@ -89,8 +89,8 @@ type Manager struct {
 	queryRegistry       *QueryRegistry
 	eventBus            *serverEvents.Bus
 	logCollector        LogCollector
-	lifecycleOperations *TelemetryOperationTracker
-	queryOperations     *TelemetryOperationTracker
+	lifecycleOperations atomic.Pointer[TelemetryOperationTracker]
+	queryOperations     atomic.Pointer[TelemetryOperationTracker]
 	clientPusher        ClientPusher
 	commandMetrics      *commandmetrics.CommandCollector
 
@@ -168,9 +168,12 @@ func (m *Manager) SetLogCollector(lc LogCollector) {
 // SetOperationTrackerManager wires plugin lifecycle and plugin-initiated
 // operation queries into telemetry storage.
 func (m *Manager) SetOperationTrackerManager(manager *commonobs.SlotOperationTrackerManager) {
-	m.lifecycleOperations = NewTelemetryOperationTracker(manager, pluginLifecycleOperationIdentityBase)
-	m.queryOperations = NewTelemetryOperationTracker(manager, pluginQueryOperationIdentityBase)
-	RegisterOperationHandlers(m.queryRegistry, m.queryOperations)
+	lifecycleOperations := NewTelemetryOperationTracker(manager, pluginLifecycleOperationIdentityBase)
+	queryOperations := NewTelemetryOperationTracker(manager, pluginQueryOperationIdentityBase)
+	m.lifecycleOperations.Store(lifecycleOperations)
+	m.queryOperations.Store(queryOperations)
+	RegisterOperationHandlers(m.queryRegistry, queryOperations)
+	RegisterTelemetryMetricsHandlers(m.queryRegistry, commandmetrics.NewTelemetryProvider(manager))
 }
 
 // SetClientPusher wires the connection push interface so plugins can send
@@ -191,12 +194,13 @@ func (m *Manager) SetCommandMetrics(c *commandmetrics.CommandCollector) {
 // launch + every restart) so each lifecycle has a distinct ID. No-op when no
 // tracker is wired.
 func (m *Manager) startPluginLifecycleOp(inst *PluginInstance) {
-	if m.lifecycleOperations == nil {
+	lifecycleOperations := m.lifecycleOperations.Load()
+	if lifecycleOperations == nil {
 		return
 	}
-	op := m.lifecycleOperations.Start(ops.TypePluginStart, "")
+	op := lifecycleOperations.Start(ops.TypePluginStart, "")
 	op.Enrich(apicommand.PluginNameKey, inst.Name)
-	m.lifecycleOperations.ContextUpdateStrings(op.ID, apicommand.PluginNameKey, inst.Name)
+	lifecycleOperations.ContextUpdateStrings(op.ID, apicommand.PluginNameKey, inst.Name)
 	inst.SetLifecycleOp(op)
 }
 
@@ -208,11 +212,12 @@ func (m *Manager) finishPluginLifecycleOp(inst *PluginInstance, failReason strin
 	if op == nil {
 		return
 	}
-	if m.lifecycleOperations != nil {
+	lifecycleOperations := m.lifecycleOperations.Load()
+	if lifecycleOperations != nil {
 		if failReason != "" {
-			m.lifecycleOperations.Fail(op.ID, failReason)
+			lifecycleOperations.Fail(op.ID, failReason)
 		} else {
-			m.lifecycleOperations.Complete(op.ID)
+			lifecycleOperations.Complete(op.ID)
 		}
 	} else if failReason != "" {
 		op.Fail(failReason)
@@ -234,17 +239,22 @@ func (m *Manager) pluginCtx(parentCtx context.Context, inst *PluginInstance) con
 }
 
 func (m *Manager) logManagerLifecycle(opType ops.Type, level apiobs.TelemetryLogLevel, message string, fields ...string) bool {
-	if m.lifecycleOperations == nil {
+	lifecycleOperations := m.lifecycleOperations.Load()
+	if lifecycleOperations == nil {
 		return false
 	}
-	op := m.lifecycleOperations.Start(opType, "")
-	m.lifecycleOperations.LogString(op.ID, level, message, fields...)
-	m.lifecycleOperations.Complete(op.ID)
+	op := lifecycleOperations.Start(opType, "")
+	lifecycleOperations.LogString(op.ID, level, message, fields...)
+	lifecycleOperations.Complete(op.ID)
 	return true
 }
 
 func (m *Manager) recordPluginLifecycleEvent(inst *PluginInstance, eventType events.Type, fields ...string) bool {
-	if m.lifecycleOperations == nil || inst == nil {
+	if inst == nil {
+		return false
+	}
+	lifecycleOperations := m.lifecycleOperations.Load()
+	if lifecycleOperations == nil {
 		return false
 	}
 	parentID := ""
@@ -255,20 +265,21 @@ func (m *Manager) recordPluginLifecycleEvent(inst *PluginInstance, eventType eve
 	if eventType == events.PluginStopped {
 		opType = ops.TypePluginStop
 	}
-	op := m.lifecycleOperations.Start(opType, parentID)
+	op := lifecycleOperations.Start(opType, parentID)
 	fields = append([]string{apicommand.PluginNameKey, inst.Name}, fields...)
-	m.lifecycleOperations.EventString(op.ID, string(eventType), fields...)
-	m.lifecycleOperations.Complete(op.ID)
+	lifecycleOperations.EventString(op.ID, string(eventType), fields...)
+	lifecycleOperations.Complete(op.ID)
 	return true
 }
 
 func (m *Manager) recordManagerLifecycleEvent(opType ops.Type, eventType events.Type, fields ...string) bool {
-	if m.lifecycleOperations == nil {
+	lifecycleOperations := m.lifecycleOperations.Load()
+	if lifecycleOperations == nil {
 		return false
 	}
-	op := m.lifecycleOperations.Start(opType, "")
-	m.lifecycleOperations.EventString(op.ID, string(eventType), fields...)
-	m.lifecycleOperations.Complete(op.ID)
+	op := lifecycleOperations.Start(opType, "")
+	lifecycleOperations.EventString(op.ID, string(eventType), fields...)
+	lifecycleOperations.Complete(op.ID)
 	return true
 }
 

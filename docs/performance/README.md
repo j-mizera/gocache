@@ -2,7 +2,7 @@
 title: Performance
 description: Per-shard locking arc — shipped optimizations, measured deltas, and what's still on the table
 status: living
-last_updated: 2026-05-31
+last_updated: 2026-06-23
 related:
   - Audit-per-shard-arc-summary
   - Audit-go-bench-vs-docker-gap
@@ -58,6 +58,23 @@ After every follow-up shipped, on the standardised pipelined `redis-benchmark` w
 
 Per-PR captures are stored at `bench/results/<branch>/` with a `summary.md` describing each delta. The taxonomy mirrors the PR table above.
 
+## Re-baselined telemetry results
+
+The telemetry hardening captures were re-baselined after T-BATCH + T-GATE on `perf/telemetry-processing` at commit `f9c3863`. The earlier pipelined numbers were taken at roughly 47% production and are contaminated by that setup, so they should not be compared directly with the post-fix captures.
+
+Post-fix results:
+
+| Mode | IPC | OTel | Notes |
+|---|---|---|---|
+| Standard (`P=1`) | `SET` 111,731 RPS | `SET` 112,739 RPS | OTel adds ~0% overhead; p99 latency stays around 0.38–0.48 ms |
+| Pipelined (`P=10`) | `SET` 854,700 RPS; `GET` 934,579 RPS | `SET` 854,700 RPS; `GET` 1,010,101 RPS | Throughput stays competitive, but telemetry skip rate does not materially improve |
+
+Skip counters remained roughly unchanged at ~53% despite the 5× operation-count reduction (`1.5M -> 300K` attempted operations): IPC `skipped_operations=165,551` / `operation_completed=134,651` / `total=300,202` (~55% skipped); OTel `skipped_operations=156,630` / `operation_completed=143,576` / `total=300,206` (~52% skipped). The 8 shards still show sustained exhaustion, roughly evenly distributed at ~19K–22K per shard.
+
+Memory stayed comparable to the pre-fix shape: IPC `delta_rss=232MB` (61MB -> 293MB) and OTel `delta_rss=205MB` (63MB -> 268MB), versus the pre-fix ~+204MB profile. T-GATE's partial cut reduced some per-command work, but `copyOperationContext` still runs, so RSS did not materially drop.
+
+Conclusion: standard mode is solved, but pipelined telemetry still needs T-PARALLEL (per-shard drain workers, bounded to 2–4) because the single sequential drain worker remains the bottleneck.
+
 ## Audits
 
 The arc produced three audit documents that are the source of truth for thesis-grade claims about *why* a given delta exists:
@@ -93,6 +110,16 @@ Older command-flow levers remain separate from the modular-overhead work:
 2. **Negative results matter** — #49 burnt three days but the writeup tells future contributors not to retry the bufpool path or N=4 default unless something fundamental changes.
 3. **Memory is just as much a thesis line as throughput** — #48's −15 % RSS without a throughput cost is a clean win that wouldn't have happened without explicit profiling of arena overhead.
 4. **The bench gap audit is reusable** — any future "why does docker disagree with Go bench" question now has a writeup at `Audit-go-bench-vs-docker-gap` and a pprof toggle to attach a profiler in production-shape builds.
+
+## Telemetry hardening captures
+
+The post-hardening IPC captures live under `bench/results/perf-telemetry-processing/`:
+
+- `telemetry-post-hardening-20260611-*` — diagnostic benchmark runs. They are useful regression artifacts, but they are not telemetry-visible through the harness, so they do not prove `metrics.telemetry` visibility.
+- `telemetry-post-hardening-telemetry-visible-20260612-gocache-ipc-*` — current FR-004.1 visibility baseline. These benchmark reruns include baseline, standard, and pipelined `/telemetry` JSON snapshots with `telemetry.*` keys, using least-privilege config grants for `server:query:metrics.commands` and `server:query:metrics.telemetry` without the Prometheus `events` scope.
+- `telemetry-post-hardening-telemetry-visible-20260611-gocache-ipc-*` — earlier telemetry-visible rerun, superseded by the least-privilege 20260612 rerun.
+
+The `/telemetry` JSON snapshots are diagnostic visibility evidence, not standalone performance-result claims or final Phase 2/3 behavior evidence.
 
 ## Pointers
 

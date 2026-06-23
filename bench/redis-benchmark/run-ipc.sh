@@ -11,6 +11,8 @@
 # valkey and core gocache captures: <label>-<target>.csv,
 # <label>-<target>-pipelined.csv, and <label>-<target>-memory.txt.
 # Set BENCH_STATS=1 to enable in-process benchstats counters.
+# IPC runs always capture Prometheus /telemetry JSON snapshots from
+# server:query:metrics.telemetry before, between, and after benchmark suites.
 
 set -euo pipefail
 
@@ -27,6 +29,10 @@ done
 
 if [[ -z "$LABEL" ]]; then
     echo "usage: $0 <label> [--target gocache-ipc|gocache-ipc-otel]" >&2
+    exit 64
+fi
+if [[ ! "$LABEL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || "$LABEL" == *..* ]]; then
+    echo "benchmark label must start with an alphanumeric character, contain only alphanumerics, '.', '_', or '-', and must not contain '..': $LABEL" >&2
     exit 64
 fi
 case "$TARGET" in
@@ -80,11 +86,6 @@ OTEL_NAME="gocache-bench-otel"
 CONFIG_FILE="$RESULTS_DIR/$LABEL-$TARGET-config.yaml"
 OTEL_CONFIG_FILE="$RESULTS_DIR/$LABEL-$TARGET-otel-collector.yaml"
 mkdir -p "$RESULTS_DIR"
-
-PROMETHEUS_EVENT_SCOPE='        - "events"'
-if [[ "$BENCH_IPC_EVENT_MODE" == "events-off" ]]; then
-    PROMETHEUS_EVENT_SCOPE='        # events scope disabled by BENCH_IPC_EVENT_MODE=events-off'
-fi
 
 docker_cmd() { command docker "$@"; }
 
@@ -178,10 +179,10 @@ plugins:
       failure_policy: "halt_server"
       priority: 10
       scopes:
-$PROMETHEUS_EVENT_SCOPE
         - "server:query:health"
         - "server:query:plugins"
         - "server:query:metrics.commands"
+        - "server:query:metrics.telemetry"
 EOF_CFG
 
 if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
@@ -271,6 +272,12 @@ write_bench_snapshot() {
         wget -q -O - "http://127.0.0.1:6060/debug/benchstats?reset=${reset}" \
         > "$file"
 }
+write_telemetry_snapshot() {
+    local file="$1"
+    docker_cmd exec "$TARGET_NAME" \
+        wget -q -O - "http://127.0.0.1:9100/telemetry" \
+        > "$file"
+}
 read_mem_bytes() {
     local name="$1"
     local raw
@@ -299,12 +306,16 @@ MEM_FILE="$RESULTS_DIR/$LABEL-$TARGET-memory.txt"
 BENCH_STATS_BASELINE_FILE=""
 BENCH_STATS_STANDARD_FILE=""
 BENCH_STATS_PIPELINED_FILE=""
+TELEMETRY_BASELINE_FILE="$RESULTS_DIR/$LABEL-$TARGET-telemetry-baseline.json"
+TELEMETRY_STANDARD_FILE="$RESULTS_DIR/$LABEL-$TARGET-telemetry-standard.json"
+TELEMETRY_PIPELINED_FILE="$RESULTS_DIR/$LABEL-$TARGET-telemetry-pipelined.json"
 if [[ "$BENCH_PPROF_ENABLED" == "1" ]]; then
     BENCH_STATS_BASELINE_FILE="$RESULTS_DIR/$LABEL-$TARGET-benchstats-baseline.json"
     BENCH_STATS_STANDARD_FILE="$RESULTS_DIR/$LABEL-$TARGET-benchstats-standard.json"
     BENCH_STATS_PIPELINED_FILE="$RESULTS_DIR/$LABEL-$TARGET-benchstats-pipelined.json"
     write_bench_snapshot "$BENCH_STATS_BASELINE_FILE" true
 fi
+write_telemetry_snapshot "$TELEMETRY_BASELINE_FILE"
 
 echo "Running standard suite (target=$TARGET, n=$N, c=$CLIENTS, r=$KEYSPACE)..."
 docker_cmd run --rm \
@@ -320,6 +331,7 @@ docker_cmd run --rm \
         --csv \
     > "$OUT_STD"
 write_bench_snapshot "$BENCH_STATS_STANDARD_FILE" true
+write_telemetry_snapshot "$TELEMETRY_STANDARD_FILE"
 
 POST_STD_MEM_B=$(read_mem_bytes "$TARGET_NAME")
 OTEL_POST_STD_MEM_B=""
@@ -342,6 +354,7 @@ docker_cmd run --rm \
         --csv \
     > "$OUT_PIPE"
 write_bench_snapshot "$BENCH_STATS_PIPELINED_FILE" false
+write_telemetry_snapshot "$TELEMETRY_PIPELINED_FILE"
 
 FINAL_MEM_B=$(read_mem_bytes "$TARGET_NAME")
 OTEL_FINAL_MEM_B=""
@@ -368,6 +381,9 @@ bench_stats_enabled=$BENCH_PPROF_ENABLED
 bench_stats_baseline_file=$BENCH_STATS_BASELINE_FILE
 bench_stats_standard_file=$BENCH_STATS_STANDARD_FILE
 bench_stats_pipelined_file=$BENCH_STATS_PIPELINED_FILE
+telemetry_baseline_file=$TELEMETRY_BASELINE_FILE
+telemetry_standard_file=$TELEMETRY_STANDARD_FILE
+telemetry_pipelined_file=$TELEMETRY_PIPELINED_FILE
 gocache_commit=$GOCACHE_COMMIT
 gocache_branch=$GOCACHE_BRANCH
 config_file=$CONFIG_FILE
@@ -395,6 +411,9 @@ echo "  $OUT_STD"
 echo "  $OUT_PIPE"
 echo "  $MEM_FILE"
 echo "  $CONFIG_FILE"
+echo "  $TELEMETRY_BASELINE_FILE"
+echo "  $TELEMETRY_STANDARD_FILE"
+echo "  $TELEMETRY_PIPELINED_FILE"
 if [[ "$BENCH_PPROF_ENABLED" == "1" ]]; then
     echo "  $BENCH_STATS_BASELINE_FILE"
     echo "  $BENCH_STATS_STANDARD_FILE"

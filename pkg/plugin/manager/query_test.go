@@ -27,6 +27,14 @@ func (m *mockStateProvider) CacheKeys() int         { return m.keys }
 func (m *mockStateProvider) CacheUsedBytes() int64  { return m.usedBytes }
 func (m *mockStateProvider) CacheMaxBytes() int64   { return m.maxBytes }
 
+type fakeTelemetryMetricsProvider struct {
+	metricsMap map[string]string
+}
+
+func (f fakeTelemetryMetricsProvider) QueryData() map[string]string {
+	return f.metricsMap
+}
+
 func TestQueryRegistry_UnknownTopic(t *testing.T) {
 	qr := NewQueryRegistry()
 	_, err := qr.Handle("nonexistent", nil)
@@ -212,6 +220,40 @@ func TestRegisterCommandMetricsHandlers(t *testing.T) {
 	}
 	if got := data["command.1.bucket.1"]; got != "1" {
 		t.Fatalf("SET bucket count=%q, want 1", got)
+	}
+}
+
+func TestRegisterTelemetryMetricsHandlers(t *testing.T) {
+	qr := NewQueryRegistry()
+	provider := fakeTelemetryMetricsProvider{metricsMap: map[string]string{
+		"telemetry.skipped_operations": "7",
+		"telemetry.dropped_records":    "3",
+		"telemetry.shards.count":       "1",
+	}}
+	RegisterTelemetryMetricsHandlers(qr, provider)
+
+	metricsMap, err := qr.Handle(commandmetrics.TelemetryTopic, nil)
+	if err != nil {
+		t.Fatalf("metrics.telemetry handler error: %v", err)
+	}
+	checks := map[string]string{
+		"telemetry.skipped_operations": "7",
+		"telemetry.dropped_records":    "3",
+		"telemetry.shards.count":       "1",
+	}
+	for key, want := range checks {
+		if got := metricsMap[key]; got != want {
+			t.Errorf("metricsMap[%q]=%q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestRegisterTelemetryMetricsHandlers_NilProvider(t *testing.T) {
+	qr := NewQueryRegistry()
+	RegisterTelemetryMetricsHandlers(qr, nil)
+
+	if _, err := qr.Handle(commandmetrics.TelemetryTopic, nil); err == nil {
+		t.Fatal("metrics.telemetry handler should NOT be registered without provider")
 	}
 }
 

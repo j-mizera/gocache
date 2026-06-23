@@ -79,7 +79,8 @@ const (
 	steadyStateOperationTrackerMinSegmentsPerShard = 1
 	steadyStateOperationTrackerMaxSegmentsPerShard = 4
 	steadyStateOperationTrackerSegmentSize         = 256
-	steadyStateOperationTrackerRecordsPerOperation = 16
+	// Per-batch pipeline telemetry nests OpStart+10×CmdStart+10×CmdFinish+OpFinish = 22 ≤ 24.
+	steadyStateOperationTrackerRecordsPerOperation = 24
 	// Match the initially preallocated slots so accepted operations are retained
 	// for the projection/drain worker instead of being dropped/recycled.
 	steadyStateOperationTrackerCompletedRingPerShard = steadyStateOperationTrackerMinSegmentsPerShard * steadyStateOperationTrackerSegmentSize
