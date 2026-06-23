@@ -1,7 +1,10 @@
 package observability
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
+	"time"
 
 	apiobs "gocache/api/observability"
 )
@@ -38,6 +41,21 @@ func cloneCompletedOperation(operation CompletedOperation) CompletedOperation {
 		operation.ContextOverlay = clone
 	}
 	return operation
+}
+
+func trackerSnapshot(manager *SlotOperationTrackerManager) map[string]string {
+	snapshot := make(map[string]string, 3+manager.ShardCount()*4)
+	snapshot["operation_tracker.skipped_operations"] = strconv.FormatUint(manager.SkippedOperations(), 10)
+	snapshot["operation_tracker.dropped_records"] = strconv.FormatUint(manager.DroppedRecords(), 10)
+	snapshot["operation_tracker.dropped_completed"] = strconv.FormatUint(manager.DroppedCompletedOperations(), 10)
+	for shardIndex := 0; shardIndex < manager.ShardCount(); shardIndex++ {
+		prefix := fmt.Sprintf("operation_tracker.shard_%d.", shardIndex)
+		snapshot[prefix+"skipped"] = strconv.FormatUint(manager.ShardSkipped(shardIndex), 10)
+		snapshot[prefix+"active"] = strconv.Itoa(manager.ShardActiveSlots(shardIndex))
+		snapshot[prefix+"free"] = strconv.Itoa(manager.ShardFreeSlots(shardIndex))
+		snapshot[prefix+"completed"] = strconv.Itoa(manager.ShardCompletedSlots(shardIndex))
+	}
+	return snapshot
 }
 
 func TestSlotTrackerLifecycleDrainsCompletedOperation(t *testing.T) {
@@ -250,6 +268,34 @@ func TestSlotTrackerStaleHandleRejectedAfterSlotReuse(t *testing.T) {
 	}
 	if !manager.RecordTelemetry(newHandle, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 2)) {
 		t.Fatal("new handle should write into reused slot")
+	}
+}
+
+func TestSlotTrackerShardStatsReturnsWhileShardMutexHeld(t *testing.T) {
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           2,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+
+	manager.shards[0].mu.Lock()
+	defer manager.shards[0].mu.Unlock()
+
+	statsCh := make(chan SlotShardStats, 1)
+	go func() {
+		statsCh <- manager.ShardStats(0)
+	}()
+
+	select {
+	case stats := <-statsCh:
+		if stats.Segments != 1 || stats.FreeSlots != 2 || stats.ActiveSlots != 0 || stats.CompletedSlots != 0 {
+			t.Fatalf("ShardStats() = %+v, want segments=1 free=2 active=0 completed=0", stats)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ShardStats blocked while shard mutex was held")
 	}
 }
 
@@ -594,4 +640,270 @@ func TestSlotTrackerCompletedOperationContextFoldsBaseOverlayAndRecords(t *testi
 			t.Fatalf("completed context retained removed traceparent: %+v", got)
 		}
 	})
+}
+
+func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *testing.T) {
+	const (
+		segmentSize = 3
+		maxSegments = 2
+		slotCount   = segmentSize * maxSegments
+	)
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   maxSegments,
+		MaxSegmentsPerShard:   maxSegments,
+		SegmentSize:           segmentSize,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: slotCount,
+	})
+	handles := make([]InternalTrackerHandle, 0, slotCount)
+	for i := 0; i < slotCount; i++ {
+		handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(i+1), apiobs.ParentRef{}, 0)
+		if !ok {
+			t.Fatalf("StartOperation(%d) ok=false before shard capacity exhausted; allocated=%d want=%d", i+1, len(handles), slotCount)
+		}
+		handles = append(handles, handle)
+	}
+	stats := manager.ShardStats(0)
+	if stats.FreeSlots != 0 || stats.ActiveSlots != slotCount || stats.CompletedSlots != 0 {
+		t.Fatalf("ShardStats() at exhaustion = %+v, want free=0 active=%d completed=0", stats, slotCount)
+	}
+
+	if _, ok := manager.StartOperation(99, apiobs.ParentRef{}, 0); ok {
+		t.Fatal("StartOperation beyond SegmentSize*MaxSegments returned ok=true, want ok=false")
+	}
+	if skipped := manager.SkippedOperations(); skipped != 1 {
+		t.Fatalf("SkippedOperations() = %d, want 1", skipped)
+	}
+	if shardSkipped := manager.ShardSkipped(0); shardSkipped != 1 {
+		t.Fatalf("ShardSkipped(0) = %d, want 1", shardSkipped)
+	}
+	bench := trackerSnapshot(manager)
+	if got := bench["operation_tracker.skipped_operations"]; got != "1" {
+		t.Fatalf("benchstats skipped_operations = %q, want %q", got, "1")
+	}
+	if got := bench["operation_tracker.dropped_records"]; got != "0" {
+		t.Fatalf("benchstats dropped_records = %q, want %q", got, "0")
+	}
+	if got := bench["operation_tracker.dropped_completed"]; got != "0" {
+		t.Fatalf("benchstats dropped_completed = %q, want %q", got, "0")
+	}
+	if got := bench["operation_tracker.shard_0.skipped"]; got != "1" {
+		t.Fatalf("benchstats shard_0.skipped = %q, want %q", got, "1")
+	}
+
+	for i, handle := range handles {
+		if !manager.FinishOperation(handle, SlotTerminalFinished) {
+			t.Fatalf("FinishOperation(handle[%d]) = false, want true", i)
+		}
+	}
+	if drained := manager.DrainCompletedShard(0, func(CompletedOperation) {}); drained != slotCount {
+		t.Fatalf("DrainCompletedShard() = %d, want %d", drained, slotCount)
+	}
+}
+
+func TestLossCounterRecordOverflowIncrementsDroppedRecords(t *testing.T) {
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	handle, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("operation should allocate the only slot")
+	}
+	first := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 1)
+	second := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)
+	if !manager.RecordTelemetry(handle, first) {
+		t.Fatal("first telemetry record should fit")
+	}
+	if manager.RecordTelemetry(handle, second) {
+		t.Fatal("second telemetry record should be rejected when RecordsPerOperation=1")
+	}
+	if dropped := manager.DroppedRecords(); dropped != 1 {
+		t.Fatalf("DroppedRecords() = %d, want 1", dropped)
+	}
+	bench := trackerSnapshot(manager)
+	if got := bench["operation_tracker.dropped_records"]; got != "1" {
+		t.Fatalf("benchstats dropped_records = %q, want %q", got, "1")
+	}
+	if !manager.FinishOperation(handle, SlotTerminalFinished) {
+		t.Fatal("FinishOperation() should enqueue the operation with dropped-record metadata")
+	}
+	manager.DrainCompletedShard(0, func(operation CompletedOperation) {
+		if operation.DroppedRecords != 1 {
+			t.Fatalf("CompletedOperation.DroppedRecords = %d, want 1", operation.DroppedRecords)
+		}
+		if len(operation.Records) != 1 || operation.Records[0].Kind != apiobs.TelemetryRecordCommandStart {
+			t.Fatalf("completed records = %+v, want only command.start", operation.Records)
+		}
+	})
+}
+
+func TestLossCounterCompletedRingOverflowIncrementsDroppedCompleted(t *testing.T) {
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           2,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	first, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("first operation should fit")
+	}
+	second, ok := manager.StartOperation(2, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("second operation should fit before completed-ring saturation")
+	}
+	if !manager.FinishOperation(first, SlotTerminalFinished) {
+		t.Fatal("first FinishOperation() should enqueue")
+	}
+	if manager.FinishOperation(second, SlotTerminalFailed) {
+		t.Fatal("second FinishOperation() should be rejected when CompletedRingPerShard=1 is full")
+	}
+	if dropped := manager.DroppedCompletedOperations(); dropped != 1 {
+		t.Fatalf("DroppedCompletedOperations() = %d, want 1", dropped)
+	}
+	bench := trackerSnapshot(manager)
+	if got := bench["operation_tracker.dropped_completed"]; got != "1" {
+		t.Fatalf("benchstats dropped_completed = %q, want %q", got, "1")
+	}
+	var drained []apiobs.InternalOperationIdentity
+	manager.DrainCompletedShard(0, func(operation CompletedOperation) {
+		drained = append(drained, operation.Operation)
+	})
+	if len(drained) != 1 || drained[0] != 1 {
+		t.Fatalf("drained operations = %v, want [1]", drained)
+	}
+}
+
+func TestLossCounterDropStringBatchOverflowMarkerDrainsCompletedRecord(t *testing.T) {
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	handle, ok := manager.StartOperation(42, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("operation should fit")
+	}
+	scope := NewOperationScope(manager, handle, 42, apiobs.OperationRef{})
+	if !scope.DropString("batch_overflow", "overflow_commands", "5") {
+		t.Fatal("DropString batch_overflow record should fit")
+	}
+	if !scope.Finish(SlotTerminalFinished) {
+		t.Fatal("Finish() should enqueue operation with drop marker")
+	}
+
+	var completed CompletedOperation
+	if drained := manager.DrainCompletedShard(0, func(operation CompletedOperation) {
+		completed = cloneCompletedOperation(operation)
+	}); drained != 1 {
+		t.Fatalf("DrainCompletedShard() = %d, want 1", drained)
+	}
+	if completed.Operation != 42 {
+		t.Fatalf("CompletedOperation.Operation = %d, want 42", completed.Operation)
+	}
+	if len(completed.Records) != 1 {
+		t.Fatalf("completed record count = %d, want 1", len(completed.Records))
+	}
+	dropRecord := completed.Records[0]
+	if dropRecord.Kind != apiobs.TelemetryRecordDrop {
+		t.Fatalf("completed record kind = %s, want %s", dropRecord.Kind, apiobs.TelemetryRecordDrop)
+	}
+	if got := string(dropRecord.NameBytes()); got != "batch_overflow" {
+		t.Fatalf("drop record name = %q, want %q", got, "batch_overflow")
+	}
+	fields := telemetryRecordFields(dropRecord)
+	if fields["overflow_commands"] != "5" {
+		t.Fatalf("drop record overflow_commands = %q, want %q", fields["overflow_commands"], "5")
+	}
+	if len(fields) != 1 {
+		t.Fatalf("drop record fields = %+v, want only overflow_commands=5", fields)
+	}
+}
+
+func TestSlotTrackerAdversarialMaxSlotPressureSkipsAndRecycles(t *testing.T) {
+	const slotCount = 64
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           slotCount,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: slotCount,
+	})
+
+	handles := make([]InternalTrackerHandle, 0, slotCount)
+	for operation := 0; operation < slotCount; operation++ {
+		handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(operation+1), apiobs.ParentRef{}, 0)
+		if !ok {
+			t.Fatalf("StartOperation(%d) ok=false before maximum slot pressure; allocated=%d want=%d", operation+1, len(handles), slotCount)
+		}
+		handles = append(handles, handle)
+	}
+
+	stats := manager.ShardStats(0)
+	if stats.FreeSlots != 0 || stats.ActiveSlots != slotCount || stats.CompletedSlots != 0 {
+		t.Fatalf("stats at maximum pressure = %+v, want free=0 active=%d completed=0", stats, slotCount)
+	}
+	if _, ok := manager.StartOperation(10_000, apiobs.ParentRef{}, 0); ok {
+		t.Fatal("StartOperation beyond maximum slot pressure returned ok=true, want clean ok=false")
+	}
+	if skipped := manager.SkippedOperations(); skipped != 1 {
+		t.Fatalf("SkippedOperations() after full-shard attack = %d, want 1", skipped)
+	}
+	if shardSkipped := manager.ShardSkipped(0); shardSkipped != 1 {
+		t.Fatalf("ShardSkipped(0) after full-shard attack = %d, want 1", shardSkipped)
+	}
+
+	for i, handle := range handles {
+		if !manager.FinishOperation(handle, SlotTerminalFinished) {
+			t.Fatalf("FinishOperation(handle[%d]) = false, want true", i)
+		}
+	}
+	if drained := manager.DrainCompletedShard(0, func(operation CompletedOperation) {}); drained != slotCount {
+		t.Fatalf("DrainCompletedShard drained %d after recycling pressure slots, want %d", drained, slotCount)
+	}
+	stats = manager.ShardStats(0)
+	if stats.FreeSlots != slotCount || stats.ActiveSlots != 0 || stats.CompletedSlots != 0 {
+		t.Fatalf("stats after drain/recycle = %+v, want free=%d active=0 completed=0", stats, slotCount)
+	}
+
+	recycled := make([]InternalTrackerHandle, 0, slotCount)
+	for operation := 0; operation < slotCount; operation++ {
+		handle, ok := manager.StartOperation(apiobs.InternalOperationIdentity(20_000+operation), apiobs.ParentRef{}, 0)
+		if !ok {
+			t.Fatalf("recycled StartOperation(%d) ok=false; allocated=%d want=%d", operation, len(recycled), slotCount)
+		}
+		recycled = append(recycled, handle)
+	}
+	for i, stale := range handles {
+		if manager.FinishOperation(stale, SlotTerminalFinished) {
+			t.Fatalf("stale handle[%d] finished a recycled slot, want generation rejection", i)
+		}
+	}
+	if invalid := manager.InvalidHandles(); invalid != slotCount {
+		t.Fatalf("InvalidHandles() after stale reuse attempts = %d, want %d", invalid, slotCount)
+	}
+	for i, handle := range recycled {
+		if !manager.FinishOperation(handle, SlotTerminalFinished) {
+			t.Fatalf("FinishOperation(recycled[%d]) = false, want true", i)
+		}
+	}
+	if drained := manager.DrainCompletedShard(0, func(operation CompletedOperation) {}); drained != slotCount {
+		t.Fatalf("DrainCompletedShard drained %d recycled operations, want %d", drained, slotCount)
+	}
+	if skipped := manager.SkippedOperations(); skipped != 1 {
+		t.Fatalf("SkippedOperations() changed after recycle/stale attack = %d, want 1", skipped)
+	}
+	// NOTE: The slot tracker is single-producer-per-handle (slot_tracker.go:49). Concurrent RecordTelemetry on the same handle is a contract violation, not a supported access pattern. If future hardening requires concurrent-same-handle safety, operationSlot.droppedRecords must become atomic.
 }

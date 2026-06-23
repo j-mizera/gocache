@@ -79,7 +79,8 @@ const (
 	steadyStateOperationTrackerMinSegmentsPerShard = 1
 	steadyStateOperationTrackerMaxSegmentsPerShard = 4
 	steadyStateOperationTrackerSegmentSize         = 256
-	steadyStateOperationTrackerRecordsPerOperation = 16
+	// Per-batch pipeline telemetry nests OpStart+10×CmdStart+10×CmdFinish+OpFinish = 22 ≤ 24.
+	steadyStateOperationTrackerRecordsPerOperation = 24
 	// Match the initially preallocated slots so accepted operations are retained
 	// for the projection/drain worker instead of being dropped/recycled.
 	steadyStateOperationTrackerCompletedRingPerShard = steadyStateOperationTrackerMinSegmentsPerShard * steadyStateOperationTrackerSegmentSize
@@ -470,6 +471,7 @@ func main() {
 	srv.SetOperationTrackerManager(steadyStateOperationTracker)
 	benchstats.SetOperationTrackerManager(steadyStateOperationTracker)
 	operationDrainWorker := server.NewOperationTrackerDrainWorker(steadyStateOperationTracker, steadyStateOperationTrackerDrainInterval)
+	operationDrainWorker.SetWorkerCount(2)
 	operationDrainWorker.SetEmitter(eventBus)
 
 	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---

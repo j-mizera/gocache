@@ -86,6 +86,12 @@ type CommandMetricsProvider interface {
 	Snapshot() []commandmetrics.CommandSnapshot
 }
 
+// TelemetryMetricsProvider returns point-in-time telemetry pressure data for
+// metrics exporters that pull operation-tracker health through server-query.
+type TelemetryMetricsProvider interface {
+	QueryData() map[string]string
+}
+
 // RegisterBuiltinHandlers registers the built-in query topics on the registry.
 func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, ipcStats PluginIPCStatsProvider, sp ServerStateProvider) {
 	if sp != nil {
@@ -103,6 +109,13 @@ func RegisterBuiltinHandlers(qr *QueryRegistry, registry *Registry, ipcStats Plu
 func RegisterCommandMetricsHandlers(qr *QueryRegistry, provider CommandMetricsProvider) {
 	if provider != nil {
 		qr.Register(commandmetrics.CommandsTopic, commandMetricsHandler(provider))
+	}
+}
+
+// RegisterTelemetryMetricsHandlers registers operation-tracker telemetry query topics.
+func RegisterTelemetryMetricsHandlers(qr *QueryRegistry, provider TelemetryMetricsProvider) {
+	if provider != nil {
+		qr.Register(commandmetrics.TelemetryTopic, telemetryMetricsHandler(provider))
 	}
 }
 
@@ -164,6 +177,12 @@ func commandMetricsHandler(provider CommandMetricsProvider) QueryHandlerFunc {
 			}
 		}
 		return data, nil
+	}
+}
+
+func telemetryMetricsHandler(provider TelemetryMetricsProvider) QueryHandlerFunc {
+	return func(_ map[string]string) (map[string]string, error) {
+		return provider.QueryData(), nil
 	}
 }
 

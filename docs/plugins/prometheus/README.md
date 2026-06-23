@@ -11,7 +11,7 @@ related:
 
 # Prometheus Plugin
 
-Prometheus metrics exporter for GoCache. It serves `/metrics`, `/healthz`, and `/readyz` over HTTP; core command-dispatch counters and latency histograms are pulled from the generic `server:query:metrics.commands` aggregate snapshot instead of receiving one IPC event per command.
+Prometheus metrics exporter for GoCache. It serves `/metrics`, `/telemetry`, `/healthz`, and `/readyz` over HTTP; core command-dispatch counters and latency histograms are pulled from the generic `server:query:metrics.commands` aggregate snapshot instead of receiving one IPC event per command. The `/telemetry` endpoint is a JSON diagnostic snapshot backed by `server:query:metrics.telemetry` for benchmark evidence and troubleshooting.
 
 It does **not** register command hooks, operation hooks, or event subscriptions for runtime metrics. Hooks remain reserved for denial/enrichment plugins; exact event streams remain available for plugins that need full records.
 
@@ -33,6 +33,7 @@ It does **not** register command hooks, operation hooks, or event subscriptions 
          priority: 100
          scopes:
            - "server:query:metrics.commands"
+           - "server:query:metrics.telemetry"
            - "server:query:health"
            - "server:query:plugins"
    ```
@@ -53,7 +54,7 @@ It does **not** register command hooks, operation hooks, or event subscriptions 
 |---------|--------|---------|-------------|
 | HTTP port | `PROMETHEUS_PORT` env var | `:9100` | Address for the metrics HTTP server |
 | Critical | `gocache.yaml` override | `false` | Plugin crash does not affect the server |
-| Scopes | `gocache.yaml` override | `server:query:metrics.commands`, `server:query:health`, `server:query:plugins` | Pull-based command metrics plus health/readiness queries |
+| Scopes | `gocache.yaml` override | `server:query:metrics.commands`, `server:query:metrics.telemetry`, `server:query:health`, `server:query:plugins` | Pull-based command metrics, diagnostic telemetry snapshots, and health/readiness queries |
 
 ## Metrics
 
@@ -108,6 +109,10 @@ The plugin implements `QueryPlugin` and receives an SDK session after registrati
 - histogram bucket counts
 
 The HTTP handler replaces the local collector snapshot from that response and renders Prometheus text format on demand. No external Prometheus client dependency is used; the text format is written directly.
+
+The `/telemetry` diagnostic endpoint queries `metrics.telemetry` and returns the server key-value snapshot as JSON, including keys in the `telemetry.*` namespace when the server has telemetry data. This endpoint is intentionally separate from `/metrics`; telemetry pressure/loss counters are not mixed into the Prometheus exposition by this plugin.
+
+The IPC benchmark harness records `/telemetry` snapshots beside CSV and memory artifacts, for example `<label>-<target>-telemetry-baseline.json`, `<label>-<target>-telemetry-standard.json`, and `<label>-<target>-telemetry-pipelined.json`. These files establish the telemetry snapshot available during a run and should not be read as benchmark-result claims by themselves.
 
 OTLP traces/logs/events are intentionally out of scope for this plugin. A separate `instrumentation` plugin should own runtime OTLP export.
 

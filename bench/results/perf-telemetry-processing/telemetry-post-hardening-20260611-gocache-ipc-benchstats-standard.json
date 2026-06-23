@@ -1,0 +1,19 @@
+{
+  "enabled": "true",
+  "manager.event_enqueue_attempts": "0",
+  "manager.event_received": "0",
+  "manager.projection_builds": "0",
+  "operation_tracker.dropped_completed": "0",
+  "operation_tracker.dropped_records": "0",
+  "operation_tracker.skipped_operations": "0",
+  "pipeline.evaluations": "1500000",
+  "pipeline.event.operation_completed": "1499962",
+  "pipeline.event.operation_started": "1499962",
+  "runtime.gc.heap.allocs.bytes": "8520585432",
+  "runtime.gc.heap.allocs.objects": "148173976",
+  "runtime.gc.heap.objects.objects": "1990359",
+  "runtime.memory.classes.heap.objects.bytes": "160847328",
+  "runtime.memory.classes.total.bytes": "220973368",
+  "runtime.sched.goroutines.goroutines": "23",
+  "runtime.sync.mutex.wait.total.seconds": "6.654145072"
+}

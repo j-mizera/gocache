@@ -31,7 +31,7 @@ const (
 type prometheusPlugin struct {
 	collector *Collector
 	server    *http.Server
-	session   *pluginsdk.Session
+	session   serverQuerier
 	log       *apilogger.Logger
 }
 
@@ -61,6 +61,7 @@ func (p *prometheusPlugin) Scopes() []string {
 		string(scope.ScopeServerQueryHealth),
 		string(scope.ScopeServerQueryPlugins),
 		string(scope.ScopeServerQueryMetricsCommands),
+		string(scope.ScopeServerQueryMetricsTelemetry),
 	}
 }
 
@@ -84,6 +85,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", metricsHandler(plugin, pluginName, version.Version))
+	mux.Handle("/telemetry", telemetryHandler(plugin))
 	mux.Handle("/healthz", healthzHandler(plugin))
 	mux.Handle("/readyz", readyzHandler(plugin))
 

@@ -4,12 +4,21 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	apicommand "gocache/api/command"
 	apiobs "gocache/api/observability"
 )
 
 const defaultSlotMagazineCapacity = 16
+
+const (
+	defaultHotShardGrowthOccupancyThreshold = 0.85
+	defaultHotShardGrowthShrinkThreshold    = 0.30
+	defaultHotShardGrowthSustainedChecks    = 3
+	defaultHotShardGrowthMaxSegments        = 2
+	defaultHotShardGrowthCheckInterval      = 100 * time.Millisecond
+)
 
 // SlotTerminalStatus records why an operation slot became terminal.
 type SlotTerminalStatus uint8
@@ -32,6 +41,19 @@ type SlotTrackerConfig struct {
 	RecordsPerOperation     int
 	CompletedRingPerShard   int
 	ReleaseContextVersionFn func(apiobs.ConnectionContextVersion) bool
+	HotShardGrowth          HotShardGrowthConfig
+}
+
+// HotShardGrowthConfig configures an optional off-path pressure monitor that
+// grows or retires slot segments for sustained per-shard occupancy. The zero
+// value is disabled and adds no goroutine.
+type HotShardGrowthConfig struct {
+	Enabled            bool
+	OccupancyThreshold float64
+	SustainedChecks    int
+	MaxGrowthSegments  int
+	ShrinkThreshold    float64
+	CheckInterval      time.Duration
 }
 
 // InternalTrackerHandle is an implementation-only handle for shard-owned slot
@@ -126,7 +148,11 @@ type SlotOperationTrackerManager struct {
 	shards          []operationSlotShard
 	releaseContext  func(apiobs.ConnectionContextVersion) bool
 	contexts        connectionContextStore
-	notifyCompleted func()
+	notifyCompleted func(shard int)
+
+	hotShardGrowthStop     chan struct{}
+	hotShardGrowthDone     chan struct{}
+	hotShardGrowthStopOnce sync.Once
 
 	skippedOperations uint64
 	droppedRecords    uint64
@@ -144,11 +170,13 @@ type operationSlotShard struct {
 	recordsPerOperation int
 	magazineCapacity    int
 
-	free        []slotRef
-	freeCount   int
-	completed   *completedRing
-	activeSlots atomic.Int32
-	skipped     atomic.Uint64
+	free         []slotRef
+	freeCount    int
+	completed    *completedRing
+	activeSlots  atomic.Int32
+	freeSlots    atomic.Int32
+	segmentSlots atomic.Int32
+	skipped      atomic.Uint64
 }
 
 type slotRef struct {
@@ -305,6 +333,7 @@ func NewSlotOperationTrackerManager(config SlotTrackerConfig) *SlotOperationTrac
 		manager.shards[i].init(config)
 	}
 	manager.contexts.init()
+	manager.startHotShardGrowthMonitor(config.HotShardGrowth)
 	return manager
 }
 
@@ -330,6 +359,29 @@ func normalizeSlotTrackerConfig(config SlotTrackerConfig) SlotTrackerConfig {
 	if config.CompletedRingPerShard < 1 {
 		config.CompletedRingPerShard = 1
 	}
+	config.HotShardGrowth = normalizeHotShardGrowthConfig(config.HotShardGrowth)
+	return config
+}
+
+func normalizeHotShardGrowthConfig(config HotShardGrowthConfig) HotShardGrowthConfig {
+	if config.OccupancyThreshold <= 0 || config.OccupancyThreshold > 1 {
+		config.OccupancyThreshold = defaultHotShardGrowthOccupancyThreshold
+	}
+	if config.SustainedChecks < 1 {
+		config.SustainedChecks = defaultHotShardGrowthSustainedChecks
+	}
+	if config.MaxGrowthSegments < 1 {
+		config.MaxGrowthSegments = defaultHotShardGrowthMaxSegments
+	}
+	if config.ShrinkThreshold <= 0 || config.ShrinkThreshold >= config.OccupancyThreshold {
+		config.ShrinkThreshold = defaultHotShardGrowthShrinkThreshold
+		if config.ShrinkThreshold >= config.OccupancyThreshold {
+			config.ShrinkThreshold = config.OccupancyThreshold / 2
+		}
+	}
+	if config.CheckInterval <= 0 {
+		config.CheckInterval = defaultHotShardGrowthCheckInterval
+	}
 	return config
 }
 
@@ -345,6 +397,121 @@ func (s *operationSlotShard) init(config SlotTrackerConfig) {
 	for range config.MinSegmentsPerShard {
 		s.addSegmentLocked()
 	}
+}
+
+// Close stops optional background monitors owned by the slot tracker manager.
+func (m *SlotOperationTrackerManager) Close() {
+	m.StopHotShardGrowthMonitor()
+}
+
+// StopHotShardGrowthMonitor stops the optional hot-shard growth monitor. It is
+// idempotent so callers can tie it to broader server or worker shutdown paths.
+func (m *SlotOperationTrackerManager) StopHotShardGrowthMonitor() {
+	if m == nil || m.hotShardGrowthStop == nil || m.hotShardGrowthDone == nil {
+		return
+	}
+	m.hotShardGrowthStopOnce.Do(func() {
+		close(m.hotShardGrowthStop)
+	})
+	<-m.hotShardGrowthDone
+}
+
+func (m *SlotOperationTrackerManager) startHotShardGrowthMonitor(config HotShardGrowthConfig) {
+	if m == nil || !config.Enabled {
+		return
+	}
+	m.hotShardGrowthStop = make(chan struct{})
+	m.hotShardGrowthDone = make(chan struct{})
+	go m.runHotShardGrowthMonitor(config)
+}
+
+func (m *SlotOperationTrackerManager) runHotShardGrowthMonitor(config HotShardGrowthConfig) {
+	defer close(m.hotShardGrowthDone)
+	ticker := time.NewTicker(config.CheckInterval)
+	defer ticker.Stop()
+
+	hotChecks := make([]int, len(m.shards))
+	coldChecks := make([]int, len(m.shards))
+	for {
+		select {
+		case <-m.hotShardGrowthStop:
+			return
+		case <-ticker.C:
+			m.checkHotShardGrowthPressure(config, hotChecks, coldChecks)
+		}
+	}
+}
+
+func (m *SlotOperationTrackerManager) checkHotShardGrowthPressure(config HotShardGrowthConfig, hotChecks, coldChecks []int) {
+	for shardIndex := range m.shards {
+		shardStats := m.ShardStats(shardIndex)
+		occupancy := slotShardOccupancy(shardStats, m.shards[shardIndex].segmentSize)
+		switch {
+		case occupancy >= config.OccupancyThreshold:
+			coldChecks[shardIndex] = 0
+			hotChecks[shardIndex]++
+			if hotChecks[shardIndex] >= config.SustainedChecks && m.canGrowHotShard(shardIndex, shardStats, config) {
+				if m.GrowShard(shardIndex) {
+					hotChecks[shardIndex] = 0
+				}
+			}
+		case occupancy <= config.ShrinkThreshold:
+			hotChecks[shardIndex] = 0
+			coldChecks[shardIndex]++
+			if coldChecks[shardIndex] >= config.SustainedChecks && m.canRetireColdShardSegment(shardIndex, shardStats) {
+				if m.RetireFreeSegment(shardIndex) {
+					coldChecks[shardIndex] = 0
+				}
+			}
+		default:
+			hotChecks[shardIndex] = 0
+			coldChecks[shardIndex] = 0
+		}
+	}
+}
+
+func slotShardOccupancy(shardStats SlotShardStats, segmentSize int) float64 {
+	if shardStats.Segments < 1 || segmentSize < 1 {
+		return 0
+	}
+	totalSlots := shardStats.Segments * segmentSize
+	if totalSlots < 1 {
+		return 0
+	}
+	occupiedSlots := shardStats.ActiveSlots + shardStats.CompletedSlots
+	if occupiedSlots < 0 {
+		return 0
+	}
+	if occupiedSlots > totalSlots {
+		occupiedSlots = totalSlots
+	}
+	return float64(occupiedSlots) / float64(totalSlots)
+}
+
+func (m *SlotOperationTrackerManager) canGrowHotShard(shardIndex int, shardStats SlotShardStats, config HotShardGrowthConfig) bool {
+	if shardIndex < 0 || shardIndex >= len(m.shards) {
+		return false
+	}
+	return shardStats.Segments < m.hotShardGrowthSegmentLimit(shardIndex, config)
+}
+
+func (m *SlotOperationTrackerManager) canRetireColdShardSegment(shardIndex int, shardStats SlotShardStats) bool {
+	if shardIndex < 0 || shardIndex >= len(m.shards) {
+		return false
+	}
+	return shardStats.Segments > m.shards[shardIndex].minSegments
+}
+
+func (m *SlotOperationTrackerManager) hotShardGrowthSegmentLimit(shardIndex int, config HotShardGrowthConfig) int {
+	shard := &m.shards[shardIndex]
+	growthLimit := shard.minSegments * config.MaxGrowthSegments
+	if growthLimit < shard.minSegments {
+		growthLimit = shard.minSegments
+	}
+	if growthLimit > shard.maxSegments {
+		return shard.maxSegments
+	}
+	return growthLimit
 }
 
 // ShardCount returns the configured number of slot-storage shards.
@@ -378,13 +545,14 @@ func (magazine *SlotMagazine) flushToShard(shard *operationSlotShard) {
 		shard.free[shard.freeCount] = ref
 		shard.freeCount++
 	}
+	shard.freeSlots.Store(int32(shard.freeCount))
 	clear(magazine.refs)
 	magazine.refs = magazine.refs[:0]
 }
 
 // SetCompletedNotify wires a non-blocking notification hook invoked when a
 // completed operation is successfully queued for worker drain.
-func (m *SlotOperationTrackerManager) SetCompletedNotify(fn func()) {
+func (m *SlotOperationTrackerManager) SetCompletedNotify(fn func(shard int)) {
 	if m == nil {
 		return
 	}
@@ -442,6 +610,7 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 			magazine.refs = append(magazine.refs, shard.free[shard.freeCount])
 			shard.free[shard.freeCount] = slotRef{}
 		}
+		shard.freeSlots.Store(int32(shard.freeCount))
 		for {
 			ref, ok := magazine.pop()
 			if !ok {
@@ -457,6 +626,7 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 		shard.freeCount--
 		ref := shard.free[shard.freeCount]
 		shard.free[shard.freeCount] = slotRef{}
+		shard.freeSlots.Store(int32(shard.freeCount))
 		if handle, ok := m.initSlotFromRef(shard, shardIndex, ref, operation, parent, contextVersion, contextOverlay, metadata); ok {
 			return handle, true
 		}
@@ -937,7 +1107,7 @@ func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHand
 		shard.mu.Unlock()
 		return false
 	} else if m.notifyCompleted != nil {
-		m.notifyCompleted()
+		m.notifyCompleted(int(handle.shard))
 	}
 	return true
 }
@@ -1022,11 +1192,9 @@ func (m *SlotOperationTrackerManager) ShardStats(index int) SlotShardStats {
 		return SlotShardStats{}
 	}
 	shard := &m.shards[index]
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
 	return SlotShardStats{
-		Segments:       shard.segmentCountLocked(),
-		FreeSlots:      shard.freeCount,
+		Segments:       int(shard.segmentSlots.Load()),
+		FreeSlots:      int(shard.freeSlots.Load()),
 		ActiveSlots:    int(shard.activeSlots.Load()),
 		CompletedSlots: shard.completed.count(),
 	}
@@ -1053,9 +1221,7 @@ func (m *SlotOperationTrackerManager) ShardFreeSlots(index int) int {
 	if index < 0 || index >= len(m.shards) {
 		return 0
 	}
-	m.shards[index].mu.Lock()
-	defer m.shards[index].mu.Unlock()
-	return m.shards[index].freeCount
+	return int(m.shards[index].freeSlots.Load())
 }
 
 // ShardCompletedSlots returns completed slot count for a shard.
@@ -1189,10 +1355,12 @@ func (s *operationSlotShard) addSegmentLocked() bool {
 	}
 	segment := newOperationSegment(index, s.segmentSize, s.recordsPerOperation)
 	s.segments[index].Store(segment)
+	s.segmentSlots.Add(1)
 	for slot := range s.segmentSize {
 		s.free[s.freeCount] = slotRef{segment: index, slot: slot, segmentRef: segment}
 		s.freeCount++
 	}
+	s.freeSlots.Store(int32(s.freeCount))
 	return true
 }
 
@@ -1300,6 +1468,7 @@ func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slot
 		ref.segmentRef = segment
 		s.free[s.freeCount] = ref
 		s.freeCount++
+		s.freeSlots.Store(int32(s.freeCount))
 	}
 }
 
@@ -1315,6 +1484,7 @@ func (s *operationSlotShard) retireFreeSegmentLocked() bool {
 		segment.retiring.Store(true)
 		s.removeFreeRefsForSegmentLocked(index)
 		s.segments[index].Store(nil)
+		s.segmentSlots.Add(-1)
 		return true
 	}
 	return false
@@ -1333,6 +1503,7 @@ func (s *operationSlotShard) removeFreeRefsForSegmentLocked(segmentIndex int) {
 		s.free[i] = slotRef{}
 	}
 	s.freeCount = write
+	s.freeSlots.Store(int32(s.freeCount))
 }
 
 func (s *operationSlotShard) segmentCountLocked() int {

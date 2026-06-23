@@ -205,14 +205,14 @@ func (b *Pipeline) registerAll() {
 }
 
 func (b *Pipeline) Evaluate(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) apicommand.Result {
-	return b.evaluateCore(parentCtx, client, op, args, false, false)
+	return b.evaluateCore(parentCtx, client, op, args, false, false, commonobs.OperationScope{})
 }
 
 // EvaluatePreLocked evaluates a command with ShardLocked=true, indicating
 // the target shard's lock is already held by the caller. Used by pipeline
 // batch coalescing where shard locks are pre-acquired.
-func (b *Pipeline) EvaluatePreLocked(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string) apicommand.Result {
-	return b.evaluateCore(parentCtx, client, op, args, false, true)
+func (b *Pipeline) EvaluatePreLocked(parentCtx context.Context, client *clientctx.ClientContext, op string, args []string, batchTelemetryScope commonobs.OperationScope) apicommand.Result {
+	return b.evaluateCore(parentCtx, client, op, args, true, true, batchTelemetryScope)
 }
 
 // SpecFor returns the argument spec for the given command name, or false
@@ -226,10 +226,10 @@ func (b *Pipeline) SpecFor(op string) (apicommand.Spec, bool) {
 // re-enter the pipeline for queued commands. Delegates to evaluateCore
 // with shardLocked=false.
 func (b *Pipeline) evaluateInternal(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool) apicommand.Result {
-	return b.evaluateCore(parentCtx, ctx, op, args, inBatch, false)
+	return b.evaluateCore(parentCtx, ctx, op, args, inBatch, false, commonobs.OperationScope{})
 }
 
-func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, shardLocked bool) apicommand.Result {
+func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.ClientContext, op string, args []string, inBatch bool, shardLocked bool, batchTelemetryScope commonobs.OperationScope) apicommand.Result {
 	op = strings.ToUpper(op)
 
 	handler, ok := b.handlers[op]
@@ -280,7 +280,11 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// operation exists.
 
 	metadata := rex.BuildMetadata(ctx.RexMeta, ctx.CmdMeta)
-	telemetryScope := b.startCommandTelemetryScope(ctx)
+	batchTelemetry := inBatch && !batchTelemetryScope.IsZero()
+	telemetryScope := batchTelemetryScope
+	if !inBatch {
+		telemetryScope = b.startCommandTelemetryScope(ctx)
+	}
 	startNs := time.Now().UnixNano()
 	hasHooks := b.hasCommandHookSink(op)
 
@@ -290,7 +294,17 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		startNs = cmdOp.StartTime.UnixNano()
 	}
 	operationID := commandOperationID(telemetryScope, cmdOp)
-	recordCommandStartTelemetryContext(telemetryScope, startNs, operationID, op, len(args), hasSpec && spec.ReadOnly)
+	if batchTelemetry {
+		// Pipeline batching is currently core-command-only because server.canBatch
+		// requires Pipeline.SpecFor to resolve the command. If future canBatch logic
+		// admits plugin commands, revisit routeToPlugin's startCommandTelemetryScope
+		// call so plugin commands do not reopen per-command telemetry operations.
+		if b.emitter != nil && b.emitter.HasSubscribersFor(events.CommandStarted) {
+			telemetryScope.CommandStartString(op, commandEventFields(operationID, op, args, metadata, 0, "", "")...)
+		}
+	} else {
+		recordCommandStartTelemetryContext(telemetryScope, startNs, operationID, op, len(args), hasSpec && spec.ReadOnly)
+	}
 
 	// Build operation-carrying context only for compatibility fanout. The command
 	// cancellation context itself remains serverCtx-derived and is not a telemetry
@@ -303,19 +317,29 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	// Fire operation start hooks (synchronous — enriches context before work).
 	if b.hasCommandOperationHookSink() {
 		b.opHookExecutor.RunStartHooks(opCtx, cmdOp)
-		if cmdOp != nil {
+		if cmdOp != nil && !batchTelemetry {
 			recordTelemetryContextMap(telemetryScope, cmdOp.ContextSnapshot(false))
 		}
 	}
 
-	b.recordCommandStartSignals(telemetryScope, cmdOp, op, args, metadata)
+	if !batchTelemetry {
+		b.recordCommandStartSignals(telemetryScope, cmdOp, op, args, metadata)
+	}
 
 	cmdCtx := cmdCtxPool.Get().(*command.Context)
 	defer putCmdCtx(cmdCtx)
 	b.fillCmdCtx(cmdCtx, ctx, op, args, inBatch, spec)
 	cmdCtx.ShardLocked = shardLocked
 	cmdCtx.SetCancellationContext(parentCtx)
-	cmdCtx.SetTelemetry(telemetryScope)
+	handlerTelemetryScope := telemetryScope
+	if batchTelemetry {
+		// The batch operation owns the telemetry budget. Handlers can emit
+		// diagnostic/cache telemetry through cmdCtx.Telemetry(), but a batched
+		// command must contribute only CmdStart + CmdFinish so overflow budgeting
+		// can always preserve the batch drop marker and OpFinish records.
+		handlerTelemetryScope = commonobs.OperationScope{}
+	}
+	cmdCtx.SetTelemetry(handlerTelemetryScope)
 
 	// --- Command hooks (pre) ---
 	var hookCtx map[string]string
@@ -327,13 +351,22 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		if pre := b.hookExecutor.RunPreHooks(opCtx, cmdInfo, connInfo, hookCtx); pre != nil {
 			if pre.Denied {
 				denyReason := "denied: " + pre.DenyReason
-				recordTelemetryContextMap(telemetryScope, pre.Context)
-				telemetryScope.ContextUpdateStrings(apicommand.ErrorKey, denyReason)
+				if !batchTelemetry {
+					recordTelemetryContextMap(telemetryScope, pre.Context)
+					telemetryScope.ContextUpdateStrings(apicommand.ErrorKey, denyReason)
+				}
 				if cmdOp != nil {
 					cmdOp.Fail(denyReason)
 				}
-				b.recordCommandFinishSignals(telemetryScope, cmdOp, op, args, metadata, uint64(time.Now().UnixNano()-startNs), "", denyReason)
-				telemetryScope.Finish(commonobs.SlotTerminalFailed)
+				elapsedNs := uint64(time.Now().UnixNano() - startNs)
+				if batchTelemetry {
+					if b.emitter != nil && b.emitter.HasSubscribersFor(events.CommandCompleted) {
+						telemetryScope.CommandFinishString(op, elapsedNs, commandEventFields(operationID, op, args, metadata, elapsedNs, "", denyReason)...)
+					}
+				} else {
+					b.recordCommandFinishSignals(telemetryScope, cmdOp, op, args, metadata, elapsedNs, "", denyReason)
+					telemetryScope.Finish(commonobs.SlotTerminalFailed)
+				}
 				if b.opHookExecutor != nil && cmdOp != nil {
 					b.opHookExecutor.RunCompleteHooks(cmdOp)
 				}
@@ -343,7 +376,9 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 			for k, v := range hookCtx {
 				cmdOp.Enrich(k, v)
 			}
-			recordTelemetryContextMap(telemetryScope, hookCtx)
+			if !batchTelemetry {
+				recordTelemetryContextMap(telemetryScope, hookCtx)
+			}
 		}
 	}
 
@@ -371,15 +406,22 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 		}
 	}
 	b.recordCommandMetric(op, elapsedNs, resultErr != "")
-	recordCommandFinishTelemetryContext(telemetryScope, elapsedNs, resultVal, resultErr)
+	if !batchTelemetry {
+		recordCommandFinishTelemetryContext(telemetryScope, elapsedNs, resultVal, resultErr)
+	}
 
 	if b.hasCommandOperationHookSink() && cmdOp != nil {
 		b.opHookExecutor.RunCompleteHooks(cmdOp)
 	}
 
-	b.recordCommandFinishSignals(telemetryScope, cmdOp, op, args, metadata, elapsedNs, resultVal, resultErr)
-
-	finishCommandTelemetryScope(telemetryScope, result)
+	if batchTelemetry {
+		if b.emitter != nil && b.emitter.HasSubscribersFor(events.CommandCompleted) {
+			telemetryScope.CommandFinishString(op, elapsedNs, commandEventFields(operationID, op, args, metadata, elapsedNs, resultVal, resultErr)...)
+		}
+	} else {
+		b.recordCommandFinishSignals(telemetryScope, cmdOp, op, args, metadata, elapsedNs, resultVal, resultErr)
+		finishCommandTelemetryScope(telemetryScope, result)
+	}
 	return result
 }
 

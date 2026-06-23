@@ -3,13 +3,16 @@ package manager
 import (
 	"context"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
 	opctx "gocache/api/context"
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
+	apiobs "gocache/api/observability"
 	ops "gocache/api/operations"
+	commonobs "gocache/commons/observability"
 	"gocache/commons/transport"
 	serverEvents "gocache/pkg/events"
 	"gocache/pkg/plugin"
@@ -550,6 +553,354 @@ func TestGCPC_ServerQuery(t *testing.T) {
 	}
 	if queryResp.Data["status"] != "ok" {
 		t.Errorf("expected status ok, got %q", queryResp.Data["status"])
+	}
+}
+
+func TestGCPC_ServerQuery_TelemetryExactAndWildcardScopes(t *testing.T) {
+	tests := []struct {
+		name            string
+		allowedScope    string
+		requestedScopes []string
+	}{
+		{
+			name:            "exact telemetry scope",
+			allowedScope:    "server:query:metrics.telemetry",
+			requestedScopes: []string{"read", "server:query:metrics.telemetry"},
+		},
+		{
+			name:            "wildcard server query scope",
+			allowedScope:    "server:query",
+			requestedScopes: []string{"read", "server:query"},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			mgr, _, sockPath := setupManager(t)
+			trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+				ShardCount:            1,
+				MinSegmentsPerShard:   1,
+				MaxSegmentsPerShard:   1,
+				SegmentSize:           1,
+				RecordsPerOperation:   1,
+				CompletedRingPerShard: 1,
+			})
+			mgr.SetOperationTrackerManager(trackerManager)
+			mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+				"test-plugin": {Scopes: []string{"read", testCase.allowedScope}},
+			}
+			p := newTestPlugin(t, sockPath)
+
+			ack := p.register("test-plugin", testCase.requestedScopes, nil, nil)
+			if !ack.Accepted {
+				t.Fatalf("rejected: %s", ack.Reason)
+			}
+
+			p.send(gcpc.NewServerQuery("q-telemetry", "metrics.telemetry", nil))
+
+			env := p.recv()
+			queryResp := env.GetServerQueryResponse()
+			if queryResp == nil {
+				t.Fatal("expected ServerQueryResponseV1")
+			}
+			if queryResp.Error != "" {
+				t.Fatalf("unexpected error: %s", queryResp.Error)
+			}
+			metricsMap := queryResp.Data
+			if shardCount := metricsMap["telemetry.shards.count"]; shardCount != "1" {
+				t.Errorf("metricsMap[%q]=%q, want %q", "telemetry.shards.count", shardCount, "1")
+			}
+			telemetryCounterKeys := []string{
+				"telemetry.skipped_operations",
+				"telemetry.dropped_records",
+				"telemetry.dropped_completed",
+				"telemetry.invalid_handles",
+			}
+			for _, telemetryKey := range telemetryCounterKeys {
+				metricValue, ok := metricsMap[telemetryKey]
+				if !ok {
+					t.Errorf("metricsMap missing %q", telemetryKey)
+					continue
+				}
+				if _, err := strconv.ParseUint(metricValue, 10, 64); err != nil {
+					t.Errorf("metricsMap[%q]=%q, want unsigned integer: %v", telemetryKey, metricValue, err)
+				}
+			}
+		})
+	}
+}
+
+func TestGCPC_ServerQuery_TelemetryReportsForcedTrackerPressure(t *testing.T) {
+	mgr, _, sockPath := setupManager(t)
+	trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   4,
+		CompletedRingPerShard: 1,
+	})
+	mgr.SetOperationTrackerManager(trackerManager)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "server:query:metrics.telemetry"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "server:query:metrics.telemetry"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("rejected: %s", ack.Reason)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		stats := trackerManager.ShardStats(0)
+		if stats.FreeSlots == 0 && (stats.ActiveSlots > 0 || stats.CompletedSlots > 0) {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	stats := trackerManager.ShardStats(0)
+	if stats.FreeSlots != 0 || (stats.ActiveSlots == 0 && stats.CompletedSlots == 0) {
+		t.Fatalf("registration telemetry did not occupy tracker shard before timeout; stats=%+v", stats)
+	}
+
+	skippedBefore := trackerManager.SkippedOperations()
+	shardSkippedBefore := trackerManager.ShardSkipped(0)
+	if _, ok := trackerManager.StartOperation(2, apiobs.ParentRef{}, 0); ok {
+		t.Fatal("operation should fail while registration telemetry occupies the only tracker slot")
+	}
+
+	p.send(gcpc.NewServerQuery("q-telemetry-pressure", "metrics.telemetry", nil))
+
+	env := p.recv()
+	queryResp := env.GetServerQueryResponse()
+	if queryResp == nil {
+		t.Fatal("expected ServerQueryResponseV1")
+	}
+	if queryResp.Error != "" {
+		t.Fatalf("unexpected error: %s", queryResp.Error)
+	}
+	metricsMap := queryResp.Data
+	expectedMetrics := map[string]string{
+		"telemetry.shards.count":       "1",
+		"telemetry.skipped_operations": strconv.FormatUint(skippedBefore+1, 10),
+		"telemetry.shard_0.skipped":    strconv.FormatUint(shardSkippedBefore+1, 10),
+	}
+	for telemetryKey, expectedMetric := range expectedMetrics {
+		if metricValue := metricsMap[telemetryKey]; metricValue != expectedMetric {
+			t.Errorf("metricsMap[%q]=%q, want %q", telemetryKey, metricValue, expectedMetric)
+		}
+	}
+
+	unsignedTelemetryKeys := []string{
+		"telemetry.dropped_records",
+		"telemetry.dropped_completed",
+		"telemetry.invalid_handles",
+		"telemetry.shard_0.active",
+		"telemetry.shard_0.free",
+		"telemetry.shard_0.completed",
+		"telemetry.shard_0.segments",
+	}
+	for _, telemetryKey := range unsignedTelemetryKeys {
+		metricValue, ok := metricsMap[telemetryKey]
+		if !ok {
+			t.Errorf("metricsMap missing %q", telemetryKey)
+			continue
+		}
+		if _, err := strconv.ParseUint(metricValue, 10, 64); err != nil {
+			t.Errorf("metricsMap[%q]=%q, want unsigned integer: %v", telemetryKey, metricValue, err)
+		}
+	}
+}
+
+func TestGCPC_ServerQuery_TelemetryReportsRecordOverflow(t *testing.T) {
+	mgr, _, sockPath := setupManager(t)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "server:query:metrics.telemetry"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "server:query:metrics.telemetry"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("rejected: %s", ack.Reason)
+	}
+
+	trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	mgr.SetOperationTrackerManager(trackerManager)
+
+	handle, ok := trackerManager.StartOperation(11, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("operation should fit before record overflow")
+	}
+	droppedRecordsBefore := trackerManager.DroppedRecords()
+	if !trackerManager.RecordTelemetry(handle, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 11)) {
+		t.Fatal("first telemetry record should fit")
+	}
+	if trackerManager.RecordTelemetry(handle, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 11)) {
+		t.Fatal("second telemetry record should drop when operation record storage is full")
+	}
+
+	p.send(gcpc.NewServerQuery("q-telemetry-record-overflow", "metrics.telemetry", nil))
+
+	env := p.recv()
+	queryResp := env.GetServerQueryResponse()
+	if queryResp == nil {
+		t.Fatal("expected ServerQueryResponseV1")
+	}
+	if queryResp.Error != "" {
+		t.Fatalf("unexpected error: %s", queryResp.Error)
+	}
+	metricsMap := queryResp.Data
+	expectedMetrics := map[string]string{
+		"telemetry.shards.count":      "1",
+		"telemetry.dropped_records":   strconv.FormatUint(droppedRecordsBefore+1, 10),
+		"telemetry.shard_0.active":    "1",
+		"telemetry.shard_0.free":      "0",
+		"telemetry.shard_0.completed": "0",
+	}
+	for telemetryKey, expectedMetric := range expectedMetrics {
+		if metricValue := metricsMap[telemetryKey]; metricValue != expectedMetric {
+			t.Errorf("metricsMap[%q]=%q, want %q", telemetryKey, metricValue, expectedMetric)
+		}
+	}
+}
+
+func TestGCPC_ServerQuery_TelemetryReportsCompletedRingOverflow(t *testing.T) {
+	mgr, _, sockPath := setupManager(t)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "server:query:metrics.telemetry"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "server:query:metrics.telemetry"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("rejected: %s", ack.Reason)
+	}
+
+	trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           2,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	mgr.SetOperationTrackerManager(trackerManager)
+
+	firstHandle, ok := trackerManager.StartOperation(21, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("first operation should fit before completed-ring overflow")
+	}
+	secondHandle, ok := trackerManager.StartOperation(22, apiobs.ParentRef{}, 0)
+	if !ok {
+		t.Fatal("second operation should fit before completed-ring overflow")
+	}
+	droppedCompletedBefore := trackerManager.DroppedCompletedOperations()
+	if !trackerManager.FinishOperation(firstHandle, commonobs.SlotTerminalFinished) {
+		t.Fatal("first finish should enqueue completed operation")
+	}
+	if trackerManager.FinishOperation(secondHandle, commonobs.SlotTerminalFinished) {
+		t.Fatal("second finish should drop when completed ring is full")
+	}
+
+	p.send(gcpc.NewServerQuery("q-telemetry-completed-overflow", "metrics.telemetry", nil))
+
+	env := p.recv()
+	queryResp := env.GetServerQueryResponse()
+	if queryResp == nil {
+		t.Fatal("expected ServerQueryResponseV1")
+	}
+	if queryResp.Error != "" {
+		t.Fatalf("unexpected error: %s", queryResp.Error)
+	}
+	metricsMap := queryResp.Data
+	expectedMetrics := map[string]string{
+		"telemetry.shards.count":      "1",
+		"telemetry.dropped_completed": strconv.FormatUint(droppedCompletedBefore+1, 10),
+		"telemetry.shard_0.completed": "1",
+	}
+	for telemetryKey, expectedMetric := range expectedMetrics {
+		if metricValue := metricsMap[telemetryKey]; metricValue != expectedMetric {
+			t.Errorf("metricsMap[%q]=%q, want %q", telemetryKey, metricValue, expectedMetric)
+		}
+	}
+}
+
+func TestGCPC_ServerQuery_TelemetryDeniedWithoutScope(t *testing.T) {
+	mgr, _, sockPath := setupManager(t)
+	trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	mgr.SetOperationTrackerManager(trackerManager)
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("rejected: %s", ack.Reason)
+	}
+
+	p.send(gcpc.NewServerQuery("q-telemetry-denied", "metrics.telemetry", nil))
+
+	env := p.recv()
+	queryResp := env.GetServerQueryResponse()
+	if queryResp == nil {
+		t.Fatal("expected ServerQueryResponseV1")
+	}
+	wantError := "permission denied: missing scope \"server:query:metrics.telemetry\""
+	if queryResp.Error != wantError {
+		t.Fatalf("error=%q, want %q", queryResp.Error, wantError)
+	}
+	if len(queryResp.Data) != 0 {
+		t.Fatalf("denied telemetry query returned data payload: %v", queryResp.Data)
+	}
+}
+
+func TestGCPC_ServerQuery_TelemetryDeniedWithWrongExactScope(t *testing.T) {
+	mgr, _, sockPath := setupManager(t)
+	trackerManager := commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		RecordsPerOperation:   1,
+		CompletedRingPerShard: 1,
+	})
+	mgr.SetOperationTrackerManager(trackerManager)
+	mgr.cfg.Overrides = map[string]plugin.PluginOverride{
+		"test-plugin": {Scopes: []string{"read", "server:query:metrics.commands"}},
+	}
+	p := newTestPlugin(t, sockPath)
+
+	ack := p.register("test-plugin", []string{"read", "server:query:metrics.commands"}, nil, nil)
+	if !ack.Accepted {
+		t.Fatalf("rejected: %s", ack.Reason)
+	}
+
+	p.send(gcpc.NewServerQuery("q-telemetry-wrong-exact-scope", "metrics.telemetry", nil))
+
+	env := p.recv()
+	queryResp := env.GetServerQueryResponse()
+	if queryResp == nil {
+		t.Fatal("expected ServerQueryResponseV1")
+	}
+	wantError := "permission denied: missing scope \"server:query:metrics.telemetry\""
+	if queryResp.Error != wantError {
+		t.Fatalf("error=%q, want %q", queryResp.Error, wantError)
+	}
+	if len(queryResp.Data) != 0 {
+		t.Fatalf("denied telemetry query returned data payload: %v", queryResp.Data)
 	}
 }
 

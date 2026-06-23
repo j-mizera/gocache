@@ -28,7 +28,8 @@ image unchanged while adding selected plugin binaries to the benchmark image.
 ./bench/redis-benchmark/run.sh resp-pool --target gocache
 ./bench/redis-benchmark/run.sh resp-pool --target valkey
 
-# IPC-plugin overhead run with the Prometheus metrics plugin.
+# IPC-plugin overhead run with the Prometheus metrics plugin. The harness
+# records metrics.telemetry JSON snapshots around the standard and pipelined suites.
 ./bench/redis-benchmark/run-ipc.sh resp-pool --target gocache-ipc
 
 # Optional benchstats run: enables in-process counter collection for IPC consumers.
@@ -58,6 +59,7 @@ Output per run lands under `bench/results/<branch>/` (the script derives `<branc
 - `<label>-<target>-pipelined.csv` — same suite with `-P 10`
 - `<label>-<target>-memory.txt` — container RSS before/after + run metadata
 - `<label>-<target>-config.yaml` — generated only for IPC targets, preserving the exact plugin config used for the capture
+- `<label>-<target>-telemetry-baseline.json`, `<label>-<target>-telemetry-standard.json`, `<label>-<target>-telemetry-pipelined.json` — IPC-only diagnostic snapshots fetched from the Prometheus plugin `/telemetry` endpoint, backed by `server:query:metrics.telemetry`
 
 Targets now form the benchmark matrix:
 
@@ -65,7 +67,7 @@ Targets now form the benchmark matrix:
 |--------|--------|------------------|
 | `valkey` | `run.sh` | Reference Valkey server with persistence disabled |
 | `gocache` | `run.sh` | Core GoCache with no IPC plugins |
-| `gocache-ipc` | `run-ipc.sh` | GoCache with the `prometheus` IPC plugin registered, Prometheus metrics scraped from `server:query:metrics.commands` aggregate snapshots |
+| `gocache-ipc` | `run-ipc.sh` | GoCache with the `prometheus` IPC plugin registered, Prometheus metrics scraped from `server:query:metrics.commands` aggregate snapshots, plus diagnostic `metrics.telemetry` JSON snapshots |
 | `gocache-ipc-otel` | `run-ipc.sh` | GoCache with `prometheus` plus runtime `instrumentation` traces/logs exporting to a local OpenTelemetry Collector `nop` pipeline |
 | `gocache-pubsub` | `run-pubsub.sh` | GoCache with the `pubsub` IPC plugin, measured with real subscribers and `ClientPushV1` fanout |
 
@@ -113,7 +115,7 @@ Total runtime ≈ 1 min per target invocation on modern hardware; the full matri
 - Target and client run in separate containers on a shared bridge network, with fixed `cpuset-cpus` so neither noise nor resource contention from the host can skew one side vs the other.
 - `valkey-server` starts with `--save "" --appendonly no` — persistence fully off, same as gocache's `--load-on-startup=false`. This excludes fsync variance.
 - The client container is a fresh `docker run --rm` on each invocation, so no state leaks between runs.
-- IPC runs use `failure_policy: halt_server` and wait for `prometheus`'s `/readyz` endpoint before measuring, so the run fails instead of silently measuring core-only traffic if the plugin does not register.
+- IPC runs use `failure_policy: halt_server` and wait for `prometheus`'s `/readyz` endpoint before measuring, so the run fails instead of silently measuring core-only traffic if the plugin does not register. They also capture `/telemetry` snapshots before the standard suite, after the standard suite, and after the pipelined suite; these files are diagnostic artifacts, not standalone performance results.
 - `valkey-benchmark` is a self-paced closed-loop workload; it does not model a real open-loop latency distribution. Numbers are throughput-ceiling, not p99-under-target-tps. Useful for relative comparison, weaker for absolute latency claims. Document this caveat in the thesis.
 
 ## Known caveats

@@ -3,7 +3,7 @@
 .gitignore
 
 # Claude + editor state
-.claude
+../bup/.claude
 .idea
 .vscode
 *.swp

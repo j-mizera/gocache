@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,10 @@ const (
 	contentTypeJSON       = "application/json"
 	contentTypePrometheus = "text/plain; version=0.0.4; charset=utf-8"
 )
+
+type serverQuerier interface {
+	QueryServer(ctx context.Context, topic string, params map[string]string) (map[string]string, error)
+}
 
 // metricsHandler returns an HTTP handler that serves Prometheus metrics.
 func metricsHandler(p *prometheusPlugin, name, version string) http.Handler {
@@ -35,6 +40,36 @@ func metricsHandler(p *prometheusPlugin, name, version string) http.Handler {
 			}
 		}
 		p.collector.WritePrometheus(w, name, version)
+	})
+}
+
+// telemetryHandler returns an HTTP handler for diagnostic telemetry snapshots.
+func telemetryHandler(p *prometheusPlugin) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentTypeJSON)
+
+		if p.session == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status": "initializing",
+				"hint":   "wait for the prometheus plugin to receive a GCPC session before reading metrics.telemetry",
+			})
+			return
+		}
+
+		telemetrySnapshot, err := p.session.QueryServer(r.Context(), "metrics.telemetry", nil)
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status": "unavailable",
+				"error":  err.Error(),
+				"hint":   "ensure the prometheus plugin has the 'server:query:metrics.telemetry' scope in the server config",
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(telemetrySnapshot)
 	})
 }
 
