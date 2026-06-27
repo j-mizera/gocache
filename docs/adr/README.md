@@ -2,7 +2,7 @@
 title: Architecture Decision Records
 description: Index of architectural decisions captured for gocache — Nygard-format ADRs, one per significant decision
 status: living
-last_updated: 2026-06-11
+last_updated: 2026-06-24
 related:
   - Server-Architecture
   - Performance
@@ -66,6 +66,7 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 | [0034](0034-zero-allocation-operation-telemetry-storage.md) | Zero-Allocation Operation Telemetry Storage | proposed | 2026-06-03 |
 | [0035](0035-no-sink-fast-path-decision.md) | No-sink fast-path decision — always-on telemetry with measured fallback | accepted | 2026-06-05 |
 | [0036](0036-batch-level-pipelined-operation-telemetry.md) | Batch-Level Pipelined Operation Telemetry | proposed | 2026-06-09 |
+| [0037](0037-telemetry-tmpfs-shared-memory-ipc.md) | Telemetry tmpfs Shared-Memory IPC Architecture | proposed | 2026-06-24 |
 
 ## Writing a new ADR
 

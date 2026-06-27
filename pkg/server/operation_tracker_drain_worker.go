@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,10 +29,14 @@ const operationTrackerDrainParentField = "_parent_operation_id"
 // after command execution has finished, keeping zerolog formatting and sink I/O
 // off the command goroutine.
 type OperationTrackerDrainWorker struct {
-	manager      *commonobs.SlotOperationTrackerManager
-	interval     time.Duration
-	gapInterval  time.Duration
-	emitter      apievents.Emitter
+	manager                *commonobs.SlotOperationTrackerManager
+	interval               time.Duration
+	gapInterval            time.Duration
+	emitter                apievents.Emitter
+	tmpfsWriterMu          sync.RWMutex
+	tmpfsWriter            io.Writer
+	hasTelemetrySubscriber bool
+
 	idleBackoff  time.Duration // exponential backoff for idle state
 	workerCount  int
 	rangeWorkers []shardRangeWorker
@@ -234,6 +240,18 @@ func (w *OperationTrackerDrainWorker) SetEmitter(emitter apievents.Emitter) {
 	w.emitter = emitter
 }
 
+// SetTmpfsWriter wires the tmpfs telemetry fan-out used by ScopeTelemetry
+// subscribers. The writer may be an io.MultiWriter for per-plugin fan-out.
+func (w *OperationTrackerDrainWorker) SetTmpfsWriter(writer io.Writer) {
+	if w == nil {
+		return
+	}
+	w.tmpfsWriterMu.Lock()
+	w.tmpfsWriter = writer
+	w.hasTelemetrySubscriber = writer != nil
+	w.tmpfsWriterMu.Unlock()
+}
+
 // SetGapInterval configures how often the worker samples OperationTracker loss
 // counters. Non-positive values reset to the default ~100 ms cadence.
 func (w *OperationTrackerDrainWorker) SetGapInterval(interval time.Duration) {
@@ -414,38 +432,148 @@ func (w *OperationTrackerDrainWorker) drainRangeOnce(rangeWorker *shardRangeWork
 }
 
 func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation commonobs.CompletedOperation, scratch *drainWorkerScratch) {
-	if w.emitter == nil || scratch == nil {
+	if scratch == nil {
 		return
 	}
-	operationContext := w.copyOperationContext(operation)
+	w.tmpfsWriterMu.RLock()
+	hasTelemetrySubscriber := w.hasTelemetrySubscriber
+	w.tmpfsWriterMu.RUnlock()
+	if hasTelemetrySubscriber {
+		telemetryOperation := &gcpcv1.TelemetryOperation{
+			OperationId:    strconv.FormatInt(int64(operation.Operation), 10),
+			TelemetryItems: make([]*gcpcv1.TelemetryItem, 0, len(operation.Records)),
+		}
+		if w.manager != nil && !operation.ContextVersion.IsZero() {
+			w.manager.VisitConnectionContextVersion(operation.ContextVersion, func(contextKey, contextValue string) bool {
+				if !isTelemetryVisibleKey(contextKey) {
+					return true
+				}
+				telemetryOperation.InitialContext = append(telemetryOperation.InitialContext, &gcpcv1.Tag{
+					Key:   []byte(contextKey),
+					Value: []byte(contextValue),
+				})
+				return true
+			})
+		}
+		for contextKey, contextValue := range operation.ContextOverlay {
+			if !isTelemetryVisibleKey(contextKey) {
+				continue
+			}
+			telemetryOperation.InitialContext = append(telemetryOperation.InitialContext, &gcpcv1.Tag{
+				Key:   []byte(contextKey),
+				Value: []byte(contextValue),
+			})
+		}
+		for recordIndex := range operation.Records {
+			record := operation.Records[recordIndex]
+			telemetryKind := gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_UNSPECIFIED
+			switch record.Kind {
+			case apiobs.TelemetryRecordOperationStart:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_OPERATION_START
+			case apiobs.TelemetryRecordOperationFinish:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_OPERATION_FINISH
+			case apiobs.TelemetryRecordCommandStart:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_COMMAND_START
+			case apiobs.TelemetryRecordCommandFinish:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_COMMAND_FINISH
+			case apiobs.TelemetryRecordContextUpdate:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_CONTEXT_UPDATE
+			case apiobs.TelemetryRecordContextRemove:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_CONTEXT_REMOVE
+			case apiobs.TelemetryRecordLog:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_LOG
+			case apiobs.TelemetryRecordEvent:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_EVENT
+			case apiobs.TelemetryRecordDrop:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_DROP
+			}
+			telemetryOperation.TelemetryItems = append(telemetryOperation.TelemetryItems, &gcpcv1.TelemetryItem{
+				Kind:    telemetryKind,
+				Payload: record.PayloadBytes(),
+			})
+		}
+		serializedOperation, marshalErr := telemetryOperation.MarshalVT()
+		if marshalErr != nil {
+			logger.WarnNoCtx().Err(marshalErr).Msg("marshal completed operation telemetry")
+		} else {
+			w.tmpfsWriterMu.RLock()
+			telemetryWriter := w.tmpfsWriter
+			if telemetryWriter != nil {
+				_, writeErr := telemetryWriter.Write(serializedOperation)
+				if writeErr != nil {
+					logger.WarnNoCtx().Err(writeErr).Msg("write completed operation telemetry to tmpfs")
+				}
+			}
+			w.tmpfsWriterMu.RUnlock()
+		}
+	}
+
+	hasEventSubscribers := w.emitter != nil && w.emitter.HasSubscribers()
+	var operationContext map[string]string
+	if hasEventSubscribers {
+		operationContext = w.copyOperationContext(operation)
+	}
 	for i := range operation.Records {
 		scratch.reset()
 		record := operation.Records[i]
 		switch record.Kind {
 		case apiobs.TelemetryRecordContextUpdate:
-			operationContext = foldContextUpdate(operationContext, record)
+			if hasEventSubscribers {
+				operationContext = foldContextUpdate(operationContext, record)
+			}
 		case apiobs.TelemetryRecordContextRemove:
-			foldContextRemove(operationContext, record)
+			if hasEventSubscribers {
+				foldContextRemove(operationContext, record)
+			}
 		case apiobs.TelemetryRecordOperationStart:
-			materializeOperationStartedRecord(operation, record, operationContext, w.emitter, scratch)
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.OperationStarted) {
+				materializeOperationStartedRecord(operation, record, operationContext, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordOperationFinish:
-			materializeOperationFinishedRecord(operation, record, operationContext, w.emitter, scratch)
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.OperationCompleted) {
+				materializeOperationFinishedRecord(operation, record, operationContext, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordCommandStart:
-			if w.emitter.HasSubscribersFor(apievents.CommandStarted) {
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.CommandStarted) {
 				materializeCommandStartedRecord(record, w.emitter, scratch)
 			}
 		case apiobs.TelemetryRecordCommandFinish:
-			if w.emitter.HasSubscribersFor(apievents.CommandCompleted) {
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.CommandCompleted) {
 				materializeCommandFinishedRecord(record, w.emitter, scratch)
 			}
 		case apiobs.TelemetryRecordLog:
 			materializeCompletedOperationLog(operation, record, operationContext)
 		case apiobs.TelemetryRecordEvent:
-			materializeCompletedOperationEvent(record, operationContext, w.emitter, scratch)
+			if hasEventSubscribers {
+				materializeCompletedOperationEvent(record, operationContext, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordDrop:
-			materializeDropRecord(operation, record, operationContext, scratch)
+			if hasEventSubscribers {
+				materializeDropRecord(operation, record, operationContext, scratch)
+			}
 		}
 	}
+}
+
+// isTelemetryVisibleKey returns true if a context key is safe for telemetry export.
+// Private keys (underscore-prefixed, secret-marked, or known credential names) are filtered at the source.
+func isTelemetryVisibleKey(key string) bool {
+	if apictx.IsSecret(key) {
+		return false
+	}
+	// Standard connection metadata keys use underscore prefix but are public.
+	switch key {
+	case "_connection_id", "_remote_addr":
+		return true
+	}
+	if strings.HasPrefix(key, "_") {
+		return false
+	}
+	switch strings.ToLower(key) {
+	case "password", "passwd", "secret", "token", "credential", "auth", "api_key", "apikey", "private_key":
+		return false
+	}
+	return true
 }
 
 func (w *OperationTrackerDrainWorker) copyOperationContext(operation commonobs.CompletedOperation) map[string]string {

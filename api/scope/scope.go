@@ -32,6 +32,9 @@ const (
 	// Event subscription scope.
 	ScopeEvents Scope = "events"
 
+	// Telemetry tmpfs IPC scope (ADR-0037).
+	ScopeTelemetry Scope = "telemetry"
+
 	// Operation hook scope.
 	ScopeOperationHook Scope = "operation:hook"
 )
@@ -81,7 +84,7 @@ func ParseScope(s string) (Scope, error) {
 	switch Scope(s) {
 	case ScopeRead, ScopeWrite, ScopeAdmin, ScopeHookPre, ScopeHookPost,
 		ScopeServerQuery, ScopeServerQueryHealth, ScopeServerQueryPlugins, ScopeServerQueryStats, ScopeServerQueryMetricsCommands, ScopeServerQueryMetricsTelemetry,
-		ScopeEvents, ScopeOperationHook:
+		ScopeEvents, ScopeTelemetry, ScopeOperationHook:
 		return Scope(s), nil
 	}
 
@@ -127,7 +130,7 @@ func Implies(have, need Scope) bool {
 	}
 	switch have {
 	case ScopeAdmin:
-		return need == ScopeWrite || need == ScopeRead || need == ScopeEvents || need == ScopeOperationHook || isServerQueryScope(need)
+		return need == ScopeWrite || need == ScopeRead || need == ScopeEvents || need == ScopeTelemetry || need == ScopeOperationHook || isServerQueryScope(need)
 	case ScopeWrite:
 		return need == ScopeRead
 	}
