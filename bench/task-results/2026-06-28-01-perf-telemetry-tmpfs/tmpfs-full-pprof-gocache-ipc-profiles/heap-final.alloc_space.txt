@@ -1,0 +1,72 @@
+File: gocache
+Build ID: 3c4e2a0fbbc501d40a065f39fcf16f99af2ee1d7
+Type: alloc_space
+Time: 2026-06-28 16:41:52 UTC
+Showing nodes accounting for 557.99MB, 96.27% of 579.58MB total
+Dropped 85 nodes (cum <= 2.90MB)
+      flat  flat%   sum%        cum   cum%
+  163.67MB 28.24% 28.24%   202.67MB 34.97%  gocache/commons/resp.(*Reader).readArray
+   74.50MB 12.86% 41.09%   187.79MB 32.40%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+   54.01MB  9.32% 50.41%   299.81MB 51.73%  gocache/pkg/server.(*Server).runBatch
+      33MB  5.69% 56.11%       33MB  5.69%  gocache/pkg/pipeline.(*Pipeline).hasCommandEventSink (inline)
+   28.30MB  4.88% 60.99%    28.30MB  4.88%  gocache/pkg/cache/slab.newSlab (inline)
+   27.97MB  4.83% 65.82%    27.97MB  4.83%  gocache/pkg/cache.(*Shard).setPackedInternal
+   24.51MB  4.23% 70.05%   490.12MB 84.57%  gocache/pkg/server.(*Server).handleConnection
+   20.01MB  3.45% 73.50%    22.51MB  3.88%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+   19.50MB  3.36% 76.86%       38MB  6.56%  gocache/commons/resp.(*Reader).readBulkString
+   19.50MB  3.36% 80.23%    19.50MB  3.36%  bufio.(*Reader).ReadBytes
+   15.56MB  2.68% 82.91%    15.56MB  2.68%  gocache/commons/observability.newOperationSegment (inline)
+   10.50MB  1.81% 84.72%    15.01MB  2.59%  gocache/pkg/resp/handler.HandleMset
+    9.50MB  1.64% 86.36%    16.50MB  2.85%  time.NewTimer
+       8MB  1.38% 87.74%        8MB  1.38%  gocache/pkg/pipeline.(*Pipeline).fillCmdCtx
+    7.04MB  1.22% 88.96%     7.04MB  1.22%  gocache/commons/observability.cloneRegistry (inline)
+       7MB  1.21% 90.16%        7MB  1.21%  time.newTimer
+    6.54MB  1.13% 91.29%     6.54MB  1.13%  gocache/pkg/cache/packed.ListAppendLeft
+    6.09MB  1.05% 92.35%     6.09MB  1.05%  bufio.NewWriterSize (inline)
+       5MB  0.86% 93.21%    20.14MB  3.48%  gocache/pkg/resp/handler.HandleSet.func1
+    4.50MB  0.78% 93.98%     4.50MB  0.78%  gocache/pkg/engine.(*Engine).AcquireShard
+       4MB  0.69% 94.67%    16.83MB  2.90%  gocache/pkg/resp/handler.incrByDelta
+    3.76MB  0.65% 95.32%     3.76MB  0.65%  github.com/gammazero/deque.(*Deque[go.shape.string]).resize (inline)
+       3MB  0.52% 95.84%        3MB  0.52%  strconv.formatBits
+    1.50MB  0.26% 96.10%     5.26MB  0.91%  gocache/pkg/resp/handler.lpushNative
+    0.51MB 0.089% 96.19%    16.07MB  2.77%  gocache/commons/observability.(*operationSlotShard).init
+    0.50MB 0.086% 96.27%     7.54MB  1.30%  gocache/commons/observability.(*connectionContextStore).updateStrings
+         0     0% 96.27%     3.76MB  0.65%  github.com/gammazero/deque.(*Deque[go.shape.string]).PushFront
+         0     0% 96.27%     3.76MB  0.65%  github.com/gammazero/deque.(*Deque[go.shape.string]).growIfFull
+         0     0% 96.27%     7.54MB  1.30%  gocache/commons/observability.(*SlotOperationTrackerManager).UpdateConnectionContextStrings (inline)
+         0     0% 96.27%     7.04MB  1.22%  gocache/commons/observability.(*connectionContextStore).replaceCurrentLocked
+         0     0% 96.27%    15.56MB  2.68%  gocache/commons/observability.(*operationSlotShard).addSegmentLocked
+         0     0% 96.27%    16.07MB  2.77%  gocache/commons/observability.NewSlotOperationTrackerManager
+         0     0% 96.27%   202.67MB 34.97%  gocache/commons/resp.(*Reader).Read
+         0     0% 96.27%    19.50MB  3.36%  gocache/commons/resp.(*Reader).ReadLine
+         0     0% 96.27%        8MB  1.38%  gocache/commons/resp.(*Reader).readInteger
+         0     0% 96.27%     6.09MB  1.05%  gocache/commons/resp.NewWriter (inline)
+         0     0% 96.27%    27.97MB  4.83%  gocache/pkg/cache.(*Cache).RawSet
+         0     0% 96.27%    27.97MB  4.83%  gocache/pkg/cache.(*Shard).rawSet
+         0     0% 96.27%    27.97MB  4.83%  gocache/pkg/cache.(*Shard).setInternal
+         0     0% 96.27%    28.80MB  4.97%  gocache/pkg/cache.NewWithShards
+         0     0% 96.27%    28.80MB  4.97%  gocache/pkg/cache.newCache
+         0     0% 96.27%    28.80MB  4.97%  gocache/pkg/cache.newShard (inline)
+         0     0% 96.27%    28.30MB  4.88%  gocache/pkg/cache/slab.(*slabClass).alloc
+         0     0% 96.27%    28.30MB  4.88%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+         0     0% 96.27%    28.80MB  4.97%  gocache/pkg/cache/slab.NewAllocatorWithTargetBytes
+         0     0% 96.27%    51.77MB  8.93%  gocache/pkg/command.Dispatch
+         0     0% 96.27%    48.77MB  8.42%  gocache/pkg/command.Dispatch.wrapWithEmission.func1
+         0     0% 96.27%    49.27MB  8.50%  gocache/pkg/command.wrapInline (inline)
+         0     0% 96.27%    34.01MB  5.87%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0% 96.27%   153.78MB 26.53%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0% 96.27%       33MB  5.69%  gocache/pkg/pipeline.(*Pipeline).needsCommandCompatibilityOperation
+         0     0% 96.27%    16.83MB  2.90%  gocache/pkg/resp/handler.HandleIncr
+         0     0% 96.27%    16.83MB  2.90%  gocache/pkg/resp/handler.HandleIncr.func1
+         0     0% 96.27%    11.80MB  2.04%  gocache/pkg/resp/handler.HandleLpush
+         0     0% 96.27%    11.80MB  2.04%  gocache/pkg/resp/handler.HandleLpush.func1
+         0     0% 96.27%    20.14MB  3.48%  gocache/pkg/resp/handler.HandleSet
+         0     0% 96.27%     6.54MB  1.13%  gocache/pkg/resp/handler.lpushPacked
+         0     0% 96.27%    39.01MB  6.73%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0% 96.27%    22.51MB  3.88%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainRangeOnce
+         0     0% 96.27%    22.51MB  3.88%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainRangeUntilEmpty
+         0     0% 96.27%     5.03MB  0.87%  gocache/pkg/server.(*Server).recordConnectionStarted
+         0     0% 96.27%    45.41MB  7.84%  main.main
+         0     0% 96.27%    16.07MB  2.77%  main.newSteadyStateOperationTrackerManager (inline)
+         0     0% 96.27%    45.91MB  7.92%  runtime.main
+         0     0% 96.27%    16.50MB  2.85%  time.After (inline)
