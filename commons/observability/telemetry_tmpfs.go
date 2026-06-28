@@ -49,7 +49,6 @@ type TmpfsTelemetryWriter struct {
 	pluginName      string
 	filePath        string
 	overflowDropped uint64
-	bufPool         sync.Pool
 }
 
 func NewTmpfsTelemetryWriter(pluginName string) (*TmpfsTelemetryWriter, error) {
@@ -81,9 +80,6 @@ func NewTmpfsTelemetryWriter(pluginName string) (*TmpfsTelemetryWriter, error) {
 		data:       mappedData,
 		pluginName: pluginName,
 		filePath:   filePath,
-		bufPool: sync.Pool{New: func() any {
-			return make([]byte, tmpfsTelemetryLengthPrefixSize)
-		}},
 	}
 	writer.storeHeaderLocked(0, 0)
 	return writer, nil
@@ -112,11 +108,9 @@ func (w *TmpfsTelemetryWriter) Write(data []byte) (int, error) {
 	}
 
 	writeStart := TmpfsTelemetryHeaderSize + int(w.writeOffset)
-	lengthPrefix := w.bufPool.Get().([]byte)
-	binary.BigEndian.PutUint32(lengthPrefix, uint32(len(data)))
-	copy(w.data[writeStart:writeStart+tmpfsTelemetryLengthPrefixSize], lengthPrefix)
-	clear(lengthPrefix)
-	w.bufPool.Put(lengthPrefix)
+	var lengthPrefix [4]byte
+	binary.BigEndian.PutUint32(lengthPrefix[:], uint32(len(data)))
+	copy(w.data[writeStart:writeStart+tmpfsTelemetryLengthPrefixSize], lengthPrefix[:])
 	copy(w.data[writeStart+tmpfsTelemetryLengthPrefixSize:writeStart+int(entrySize)], data)
 
 	w.writeOffset += entrySize
