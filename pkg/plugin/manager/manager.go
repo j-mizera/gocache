@@ -133,7 +133,7 @@ func NewManager(cfg plugin.PluginsConfig, coreCommands []string, stateProvider S
 		opHookRegistry:   ophooks.NewRegistry(),
 		scopeRegistry:    permissions.NewRegistry(),
 		queryRegistry:    qr,
-		telemetryWriters: map[string]*commonobs.TmpfsTelemetryWriter{},
+		telemetryWriters: make(map[string]*commonobs.TmpfsTelemetryWriter),
 	}
 	RegisterBuiltinHandlers(qr, reg, mgr.pluginIPCStats, stateProvider)
 	return mgr
@@ -705,6 +705,9 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	critical := inst.Critical()
 	grantedStrings := scope.ScopeStrings(grantedScopes)
 	pluginCfgMap := pkgconfig.FlatPluginConfig(reg.Name)
+	if pluginCfgMap == nil {
+		pluginCfgMap = make(map[string]string)
+	}
 	if m.scopeRegistry.HasScope(reg.Name, scope.ScopeTelemetry) {
 		telemetryWriter, telemetryErr := commonobs.NewTmpfsTelemetryWriter(reg.Name)
 		if telemetryErr != nil {
@@ -767,6 +770,9 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	inst.SetState(StateRunning)
 	pkgconfig.OnPluginReload(reg.Name, func(_ apiconfig.PluginConfig) {
 		updated := pkgconfig.FlatPluginConfig(reg.Name)
+		if updated == nil {
+			updated = make(map[string]string)
+		}
 		m.telemetryWritersMu.Lock()
 		telemetryWriter := m.telemetryWriters[reg.Name]
 		m.telemetryWritersMu.Unlock()

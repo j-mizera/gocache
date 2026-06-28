@@ -192,6 +192,7 @@ if [[ "$TARGET" == "gocache-ipc-otel" ]]; then
       priority: 20
       scopes:
         - "events"
+        - "telemetry"
       config:
         endpoint: "$OTEL_NAME:4318"
         service: "gocache-bench"
