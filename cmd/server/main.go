@@ -79,8 +79,10 @@ const (
 	steadyStateOperationTrackerMinSegmentsPerShard = 1
 	steadyStateOperationTrackerMaxSegmentsPerShard = 4
 	steadyStateOperationTrackerSegmentSize         = 256
-	// Per-batch pipeline telemetry nests OpStart+10×CmdStart+10×CmdFinish+OpFinish = 22 ≤ 24.
-	steadyStateOperationTrackerRecordsPerOperation = 24
+	// Per-command telemetry can include rich handler/plugin records; tmpfs
+	// serialization keeps the larger per-operation record budget cheap enough for
+	// realistic commands and large transactions.
+	steadyStateOperationTrackerRecordsPerOperation = 1024
 	// Match the initially preallocated slots so accepted operations are retained
 	// for the projection/drain worker instead of being dropped/recycled.
 	steadyStateOperationTrackerCompletedRingPerShard = steadyStateOperationTrackerMinSegmentsPerShard * steadyStateOperationTrackerSegmentSize
