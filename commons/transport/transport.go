@@ -10,8 +10,6 @@ import (
 	"sync"
 
 	gcpc "gocache/api/gcpc/v1"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // MaxFrameSize is the maximum allowed size for a single protobuf frame (1 MB).
@@ -54,7 +52,7 @@ func (c *Conn) SendBatch(envs []*gcpc.EnvelopeV1) error {
 	frames := make([][]byte, len(envs))
 	total := 0
 	for i, env := range envs {
-		data, err := proto.Marshal(env)
+		data, err := env.MarshalVT()
 		if err != nil {
 			return fmt.Errorf("marshal envelope: %w", err)
 		}
@@ -108,7 +106,7 @@ func (c *Conn) Recv() (*gcpc.EnvelopeV1, error) {
 	}
 
 	env := &gcpc.EnvelopeV1{}
-	if err := proto.Unmarshal(data, env); err != nil {
+	if err := env.UnmarshalVT(data); err != nil {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
 	return env, nil

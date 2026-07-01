@@ -460,6 +460,7 @@ message TelemetryOperation {
   string                 operation_id    = 1;
   repeated Tag           initial_context = 2;
   repeated TelemetryItem telemetry_items = 3;
+  uint32                 command_count   = 4;
 }
 
 // TelemetryAck is sent by the plugin to the server after consuming telemetry

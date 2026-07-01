@@ -250,7 +250,6 @@ func newManagerTelemetryTracker() *commonobs.SlotOperationTrackerManager {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           32,
-		RecordsPerOperation:   8,
 		CompletedRingPerShard: 32,
 	})
 }

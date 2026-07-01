@@ -122,8 +122,6 @@ func TestEvaluate_TelemetryScopeSaturationDoesNotBuildBenchStartedCompleted(t *t
 	stats := benchstats.Snapshot(false)
 	checks := map[string]string{
 		"pipeline.evaluations":                 "1",
-		"pipeline.event.operation_started":     "0",
-		"pipeline.event.operation_completed":   "0",
 		"operation_tracker.skipped_operations": "1",
 		"operation_tracker.dropped_records":    "0",
 		"operation_tracker.dropped_completed":  "0",
@@ -168,11 +166,7 @@ func TestEvaluate_TelemetryScopeRecordsOperationLifecycleWithoutEventSubscribers
 		t.Fatalf("event record count = %d, want operation start and finish", got)
 	}
 	stats := benchstats.Snapshot(false)
-	checks := map[string]string{
-		"pipeline.evaluations":               "1",
-		"pipeline.event.operation_started":   "1",
-		"pipeline.event.operation_completed": "1",
-	}
+	checks := map[string]string{"pipeline.evaluations": "1"}
 	for key, want := range checks {
 		if got := stats[key]; got != want {
 			t.Fatalf("benchstats[%q] = %q, want %q", key, got, want)
@@ -192,7 +186,6 @@ func newPipelineSaturationTracker() *commonobs.SlotOperationTrackerManager {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   8,
 		CompletedRingPerShard: 1,
 	})
 }

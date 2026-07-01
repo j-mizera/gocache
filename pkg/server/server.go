@@ -742,35 +742,63 @@ func (srv *Server) runBatch(
 
 	results := make([]apicommand.Result, len(batch))
 	ctx.CmdMeta = cmdMeta
-	for i, e := range batch {
-		var commandTelemetryScope commonobs.OperationScope
-		if manager := srv.operationTrackerManager.Load(); manager != nil {
-			sequence := srv.commandOperationSequence.Add(1)
-			if sequence == 0 {
-				sequence = srv.commandOperationSequence.Add(1)
-			}
-			operation := commandOperationIdentityBase + apiobs.InternalOperationIdentity(sequence)
-			operationID := "cmd:" + strconv.FormatUint(sequence, 10)
-			ref := apiobs.NewOperationRef(operationID, ctx.OperationID)
-			handle, _, ok := manager.StartOperationForConnectionWithMetadata(operation, apiobs.NewParentRef(ctx.OperationID), ctx.ConnectionIdentity, commonobs.OperationSnapshotMetadata{
-				Type:          string(ops.TypeCommand),
-				Ref:           ref,
-				StartUnixNano: time.Now().UnixNano(),
-			}, &ctx.SlotMagazine)
-			if ok {
-				commandTelemetryScope = commonobs.NewOperationScope(manager, handle, operation, ref)
-			}
+
+	// Create one telemetry operation for the entire batch, not per command. Each
+	// command's telemetry records still accumulate within this single operation.
+	var batchTelemetryScope commonobs.OperationScope
+	batchStartNs := time.Now().UnixNano()
+	if manager := srv.operationTrackerManager.Load(); manager != nil {
+		sequence := srv.commandOperationSequence.Add(1)
+		if sequence == 0 {
+			sequence = srv.commandOperationSequence.Add(1)
 		}
-		results[i] = srv.pipeline.EvaluatePreLocked(connCtx, ctx, e.op, e.args, commandTelemetryScope)
-		if !commandTelemetryScope.IsZero() {
-			if results[i].Err != nil {
-				commandTelemetryScope.Finish(commonobs.SlotTerminalFailed)
-			} else {
-				commandTelemetryScope.Finish(commonobs.SlotTerminalFinished)
-			}
+		operation := commandOperationIdentityBase + apiobs.InternalOperationIdentity(sequence)
+		operationID := "batch:" + strconv.FormatUint(sequence, 10)
+		ref := apiobs.NewOperationRef(operationID, ctx.OperationID)
+		handle, _, ok := manager.StartOperationForConnectionWithMetadata(operation, apiobs.NewParentRef(ctx.OperationID), ctx.ConnectionIdentity, commonobs.OperationSnapshotMetadata{
+			Type:          string(ops.TypeCommand),
+			Ref:           ref,
+			StartUnixNano: batchStartNs,
+		}, &ctx.SlotMagazine)
+		if ok {
+			batchTelemetryScope = commonobs.NewOperationScope(manager, handle, operation, ref)
+			batchTelemetryScope.OperationStartString(string(ops.TypeCommand),
+				apicommand.OperationID, operationID,
+				"_operation_type", string(ops.TypeCommand),
+				"_parent_operation_id", ctx.OperationID,
+			)
+		}
+	}
+
+	batchFailed := false
+	for i, e := range batch {
+		results[i] = srv.pipeline.EvaluatePreLocked(connCtx, ctx, e.op, e.args, batchTelemetryScope)
+		if results[i].Err != nil {
+			batchFailed = true
 		}
 		if i == 0 {
 			ctx.CmdMeta = nil
+		}
+	}
+
+	if !batchTelemetryScope.IsZero() {
+		elapsedNs := uint64(time.Now().UnixNano() - batchStartNs)
+		if batchFailed {
+			batchTelemetryScope.OperationFinishString(string(ops.TypeCommand), elapsedNs,
+				apicommand.OperationID, batchTelemetryScope.Ref().ID.String(),
+				"_operation_type", string(ops.TypeCommand),
+				"_status", "failed",
+				apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+			)
+			batchTelemetryScope.Finish(commonobs.SlotTerminalFailed)
+		} else {
+			batchTelemetryScope.OperationFinishString(string(ops.TypeCommand), elapsedNs,
+				apicommand.OperationID, batchTelemetryScope.Ref().ID.String(),
+				"_operation_type", string(ops.TypeCommand),
+				"_status", "completed",
+				apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
+			)
+			batchTelemetryScope.Finish(commonobs.SlotTerminalFinished)
 		}
 	}
 

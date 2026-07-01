@@ -30,6 +30,9 @@ docs/
 *.md
 !README.md
 
+# Bench artifacts (large, not needed in image)
+bench/
+
 # OS junk
 .DS_Store
 Thumbs.db

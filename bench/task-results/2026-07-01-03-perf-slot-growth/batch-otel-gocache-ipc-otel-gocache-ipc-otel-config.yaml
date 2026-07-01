@@ -1,0 +1,42 @@
+server:
+  address: "0.0.0.0"
+  port: 6379
+  log_level: "warn"
+
+persistence:
+  load_on_startup: false
+
+memory:
+  max_memory_mb: 1024
+  eviction_policy: "lru"
+
+plugins:
+  enabled: true
+  dir: "/usr/local/lib/gocache/plugins"
+  socket_path: "/tmp/gocache-plugins.sock"
+  health_interval: 10s
+  shutdown_timeout: 5s
+  max_restarts: 0
+  connect_timeout: 10s
+  min_restart_interval_for_replay: 30s
+  overrides:
+    prometheus:
+      failure_policy: "halt_server"
+      priority: 10
+      scopes:
+        - "server:query:health"
+        - "server:query:plugins"
+        - "server:query:metrics.commands"
+        - "server:query:metrics.telemetry"
+    instrumentation:
+      failure_policy: "halt_server"
+      priority: 20
+      scopes:
+        - "events"
+        - "telemetry"
+      config:
+        endpoint: "gocache-bench-otel:4318"
+        service: "gocache-bench"
+        timeout_ms: 3000
+        insecure: true
+        disabled: false

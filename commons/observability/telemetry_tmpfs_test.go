@@ -123,6 +123,27 @@ func TestTmpfsTelemetryWriterWriteFramesAndAcknowledges(t *testing.T) {
 	}
 }
 
+func TestTmpfsTelemetryWriterCountsRecords(t *testing.T) {
+	writer := newTestTmpfsTelemetryWriter(t)
+
+	payload := []byte("test-payload")
+	for writeIndex := 0; writeIndex < 5; writeIndex++ {
+		if _, err := writer.Write(payload); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+	}
+	if recordsWritten := writer.RecordsWritten(); recordsWritten != 5 {
+		t.Errorf("RecordsWritten() = %d, want 5", recordsWritten)
+	}
+	expectedBytesWritten := uint64(len(payload)) * 5
+	if bytesWritten := writer.BytesWritten(); bytesWritten != expectedBytesWritten {
+		t.Errorf("BytesWritten() = %d, want %d", bytesWritten, expectedBytesWritten)
+	}
+	if writeErrors := writer.WriteErrors(); writeErrors != 0 {
+		t.Errorf("WriteErrors() = %d, want 0", writeErrors)
+	}
+}
+
 func TestTmpfsTelemetryWriterCompactsUnconsumedData(t *testing.T) {
 	writer := newTestTmpfsTelemetryWriter(t)
 	filePath := writer.FilePath()
@@ -223,5 +244,8 @@ func TestTmpfsTelemetryWriterOverflowIncrementsCounter(t *testing.T) {
 	}
 	if overflowDropped := writer.OverflowDropped(); overflowDropped != 1 {
 		t.Fatalf("OverflowDropped() = %d, want 1", overflowDropped)
+	}
+	if writeErrors := writer.WriteErrors(); writeErrors != 1 {
+		t.Fatalf("WriteErrors() = %d, want 1", writeErrors)
 	}
 }

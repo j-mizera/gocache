@@ -114,7 +114,6 @@ func TestServer_SetOperationTrackerManagerThreadsCommandScope(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           4,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 4,
 	})
 	srv.SetOperationTrackerManager(manager)
@@ -196,7 +195,6 @@ func TestServer_ConnectionLifecycleUsesSeparateTelemetryOperations(t *testing.T)
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           2,
-		RecordsPerOperation:   8,
 		CompletedRingPerShard: 2,
 	})
 
@@ -278,7 +276,6 @@ func TestServer_RuntimeLogUsesTelemetryOperation(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 1,
 	})
 	connIdentity := apiobs.ConnectionIdentity(202)
@@ -325,7 +322,6 @@ func TestServer_AuthFailedUsesTelemetryEvent(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 1,
 	})
 	const (
@@ -474,7 +470,6 @@ func TestServer_StartCompletesStartupTelemetryAfterListen(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(44, apiobs.ParentRef{}, 0)
@@ -564,7 +559,6 @@ func TestServer_StartFailsStartupTelemetryOnListenError(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(45, apiobs.ParentRef{}, 0)

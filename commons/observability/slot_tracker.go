@@ -38,7 +38,7 @@ type SlotTrackerConfig struct {
 	MaxSegmentsPerShard     int
 	SegmentSize             int
 	MagazineCapacity        int
-	RecordsPerOperation     int
+	MaxChunksPerClass       int64
 	CompletedRingPerShard   int
 	ReleaseContextVersionFn func(apiobs.ConnectionContextVersion) bool
 	HotShardGrowth          HotShardGrowthConfig
@@ -90,15 +90,18 @@ func (h InternalTrackerHandle) IsZero() bool {
 }
 
 // CompletedOperation is a worker-side view over a completed operation slot.
-// Records is valid only for the duration of the DrainCompletedShard callback.
+// Records is an owned copy valid indefinitely (copy-on-drain from arena).
 type CompletedOperation struct {
 	Operation      apiobs.InternalOperationIdentity
 	Parent         apiobs.ParentRef
 	ContextVersion apiobs.ConnectionContextVersion
-	// ContextOverlay contains command-scoped metadata borrowed from the operation
-	// slot. It is valid only during the DrainCompletedShard callback.
+	// ContextOverlay contains command-scoped metadata as an owned copy.
+	// It is valid beyond the DrainCompletedShard callback lifecycle.
 	ContextOverlay map[string]string
 	Status         SlotTerminalStatus
+	// Records are arena-drained telemetry entries backed by a per-shard buffer
+	// pool. They are valid during the DrainCompletedShard callback only — the
+	// backing array is returned to the pool after callbacks complete.
 	Records        []apiobs.TelemetryRecord
 	DroppedRecords uint64
 }
@@ -158,17 +161,24 @@ type SlotOperationTrackerManager struct {
 	droppedRecords    uint64
 	droppedCompleted  uint64
 	invalidHandles    uint64
+
+	// Tracker-owned counters — drain-independent, always correct.
+	commandsTotal       uint64
+	batchesTotal        uint64
+	operationsStarted   uint64
+	operationsCompleted uint64
 }
 
 type operationSlotShard struct {
 	mu sync.Mutex
 
-	segments            []atomic.Pointer[operationSegment]
-	minSegments         int
-	maxSegments         int
-	segmentSize         int
-	recordsPerOperation int
-	magazineCapacity    int
+	segments         []atomic.Pointer[operationSegment]
+	minSegments      int
+	maxSegments      int
+	segmentSize      int
+	chunkPool        *ChunkPool
+	magazineCapacity int
+	recordBufPool    [][]apiobs.TelemetryRecord
 
 	free         []slotRef
 	freeCount    int
@@ -186,12 +196,10 @@ type slotRef struct {
 }
 
 type operationSegment struct {
-	index               int
-	slots               []operationSlot
-	records             []apiobs.TelemetryRecord
-	recordsPerOperation int
-	active              atomic.Int32
-	retiring            atomic.Bool
+	index    int
+	slots    []operationSlot
+	active   atomic.Int32
+	retiring atomic.Bool
 }
 
 type operationSlotState uint8
@@ -218,7 +226,7 @@ type operationSlot struct {
 	snapshotParentIDLen   uint16
 	snapshotParentID      [apiobs.TelemetryParentIDBytes]byte
 	snapshotStartUnixNano int64
-	recordCount           atomic.Uint32
+	arena                 *RecordArena
 	droppedRecords        uint64
 }
 
@@ -353,8 +361,8 @@ func normalizeSlotTrackerConfig(config SlotTrackerConfig) SlotTrackerConfig {
 	if config.MagazineCapacity < 1 {
 		config.MagazineCapacity = defaultSlotMagazineCapacity
 	}
-	if config.RecordsPerOperation < 1 {
-		config.RecordsPerOperation = 1
+	if config.MaxChunksPerClass < 1 {
+		config.MaxChunksPerClass = 0
 	}
 	if config.CompletedRingPerShard < 1 {
 		config.CompletedRingPerShard = 1
@@ -389,7 +397,7 @@ func (s *operationSlotShard) init(config SlotTrackerConfig) {
 	s.minSegments = config.MinSegmentsPerShard
 	s.maxSegments = config.MaxSegmentsPerShard
 	s.segmentSize = config.SegmentSize
-	s.recordsPerOperation = config.RecordsPerOperation
+	s.chunkPool = NewChunkPool(config.MaxChunksPerClass)
 	s.magazineCapacity = config.MagazineCapacity
 	s.segments = make([]atomic.Pointer[operationSegment], config.MaxSegmentsPerShard)
 	s.free = make([]slotRef, config.MaxSegmentsPerShard*config.SegmentSize)
@@ -633,6 +641,7 @@ func (m *SlotOperationTrackerManager) startOperation(operation apiobs.InternalOp
 	}
 
 	atomic.AddUint64(&m.skippedOperations, 1)
+	atomic.AddUint64(&m.batchesTotal, 1)
 	shard.skipped.Add(1)
 	return InternalTrackerHandle{}, false
 }
@@ -657,10 +666,13 @@ func (m *SlotOperationTrackerManager) initSlotFromRef(shard *operationSlotShard,
 	slot.contextOverlay = contextOverlay
 	slot.status = SlotTerminalUnknown
 	slot.setSnapshotMetadata(metadata)
-	slot.recordCount.Store(0)
+	slot.arena = NewRecordArena(shard.chunkPool)
 	slot.droppedRecords = 0
 	slot.state.Store(uint32(operationSlotActive))
 	shard.activeSlots.Add(1)
+	atomic.AddUint64(&m.operationsStarted, 1)
+	atomic.AddUint64(&m.batchesTotal, 1)
+	atomic.AddUint64(&m.commandsTotal, 1)
 
 	return InternalTrackerHandle{
 		shard:      uint16(shardIndex),
@@ -750,16 +762,14 @@ func (m *SlotOperationTrackerManager) OperationContextSnapshot(handle InternalTr
 	shard := &m.shards[handle.shard]
 
 	shard.mu.Lock()
-	segment, slot, ok := shard.activeSlotLocked(handle)
+	_, slot, ok := shard.activeSlotLocked(handle)
 	if !ok {
 		shard.mu.Unlock()
 		return nil
 	}
 	contextVersion := slot.contextVersion
 	contextOverlay := slot.contextOverlay
-	recordCount := int(slot.recordCount.Load())
-	start := int(handle.slot) * segment.recordsPerOperation
-	records := append([]apiobs.TelemetryRecord(nil), segment.records[start:start+recordCount]...)
+	records := slot.arena.SnapshotRead()
 	shard.mu.Unlock()
 
 	return m.materializeOperationContext(contextVersion, contextOverlay, records)
@@ -812,8 +822,6 @@ func (m *SlotOperationTrackerManager) appendActiveOperationSnapshotInputs(inputs
 			if operationSlotState(slot.state.Load()) != operationSlotActive {
 				continue
 			}
-			start := slotIndex * segment.recordsPerOperation
-			end := start + int(slot.recordCount.Load())
 			input := activeOperationSnapshotInput{
 				Operation:      slot.operation,
 				Metadata:       slot.snapshotMetadata(),
@@ -821,8 +829,8 @@ func (m *SlotOperationTrackerManager) appendActiveOperationSnapshotInputs(inputs
 				ContextVersion: slot.contextVersion,
 				ContextOverlay: cloneStringMap(slot.contextOverlay),
 			}
-			if end > start {
-				input.Records = append([]apiobs.TelemetryRecord(nil), segment.records[start:end]...)
+			if slot.arena != nil {
+				input.Records = slot.arena.SnapshotRead()
 			}
 			inputs = append(inputs, input)
 		}
@@ -1050,22 +1058,19 @@ func foldContextRemove(operationContext map[string]string, record apiobs.Telemet
 	}
 }
 
-// RecordTelemetry appends record to the operation-local fixed record storage.
+// RecordTelemetry appends record to the operation-local arena storage.
 func (m *SlotOperationTrackerManager) RecordTelemetry(handle InternalTrackerHandle, record apiobs.TelemetryRecord) bool {
-	segment, slot, ok := m.activeSlot(handle)
+	_, slot, ok := m.activeSlot(handle)
 	if !ok {
 		atomic.AddUint64(&m.invalidHandles, 1)
 		return false
 	}
-	count := int(slot.recordCount.Load())
-	if count >= segment.recordsPerOperation {
+	record.Operation = slot.operation
+	if !slot.arena.Append(record) {
 		slot.droppedRecords++
 		atomic.AddUint64(&m.droppedRecords, 1)
 		return false
 	}
-	record.Operation = slot.operation
-	segment.records[int(handle.slot)*segment.recordsPerOperation+count] = record
-	slot.recordCount.Store(uint32(count + 1))
 	return true
 }
 
@@ -1109,6 +1114,7 @@ func (m *SlotOperationTrackerManager) FinishOperation(handle InternalTrackerHand
 	} else if m.notifyCompleted != nil {
 		m.notifyCompleted(int(handle.shard))
 	}
+	atomic.AddUint64(&m.operationsCompleted, 1)
 	return true
 }
 
@@ -1136,29 +1142,46 @@ func (m *SlotOperationTrackerManager) DrainCompletedShard(index int, fn func(Com
 			continue
 		}
 		slot.state.Store(uint32(operationSlotWorkerOwned))
-		operations = append(operations, completedOperationFromSlot(segment, slot, ref.slot))
+		operations = append(operations, completedOperationFromSlot(shard, slot))
 		refs = append(refs, ref)
 	}
 	if len(operations) == 0 {
 		return 0
 	}
-	for i := range operations {
-		if fn != nil {
-			fn(operations[i])
-		}
-	}
+
+	// Recycle slots before running callbacks. Since ContextOverlay is now an
+	// owned copy and Records are owned via arena.DrainInto, the CompletedOperation
+	// snapshots are safe to use after the originating slot is recycled. Context
+	// versions are captured before recycling and released after callbacks complete,
+	// because the callback may need to materialize base context from the version.
+	contextVersions := make([]apiobs.ConnectionContextVersion, 0, len(refs))
 	shard.mu.Lock()
 	for i := range refs {
 		ref := refs[i]
 		segment, ok := shard.segmentForRef(ref)
 		if !ok {
+			contextVersions = append(contextVersions, 0)
 			continue
 		}
 		slot := &segment.slots[ref.slot]
-		m.releaseContextVersion(slot.contextVersion)
+		contextVersions = append(contextVersions, slot.contextVersion)
 		shard.resetSlotLocked(segment, ref)
 	}
 	shard.mu.Unlock()
+
+	for i := range operations {
+		if fn != nil {
+			fn(operations[i])
+		}
+	}
+	for i := range contextVersions {
+		m.releaseContextVersion(contextVersions[i])
+	}
+	for i := range operations {
+		if operations[i].Records != nil {
+			shard.recordBufPool = append(shard.recordBufPool, operations[i].Records[:0])
+		}
+	}
 	return len(operations)
 }
 
@@ -1298,6 +1321,38 @@ func (m *SlotOperationTrackerManager) InvalidHandles() uint64 {
 	return atomic.LoadUint64(&m.invalidHandles)
 }
 
+// CommandsTotal returns the total number of commands that entered tracking.
+func (m *SlotOperationTrackerManager) CommandsTotal() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.commandsTotal)
+}
+
+// BatchesTotal returns the total number of batches that entered tracking.
+func (m *SlotOperationTrackerManager) BatchesTotal() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.batchesTotal)
+}
+
+// OperationsStarted returns the total number of telemetry operations successfully created.
+func (m *SlotOperationTrackerManager) OperationsStarted() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.operationsStarted)
+}
+
+// OperationsCompleted returns the total number of telemetry operations finished.
+func (m *SlotOperationTrackerManager) OperationsCompleted() uint64 {
+	if m == nil {
+		return 0
+	}
+	return atomic.LoadUint64(&m.operationsCompleted)
+}
+
 func (s *operationSlot) setSnapshotMetadata(metadata OperationSnapshotMetadata) {
 	s.snapshotTypeLen = uint16(copy(s.snapshotType[:], metadata.Type))
 	s.snapshotIDLen = uint16(copy(s.snapshotID[:], metadata.Ref.ID.String()))
@@ -1353,7 +1408,7 @@ func (s *operationSlotShard) addSegmentLocked() bool {
 	if index < 0 {
 		return false
 	}
-	segment := newOperationSegment(index, s.segmentSize, s.recordsPerOperation)
+	segment := newOperationSegment(index, s.segmentSize)
 	s.segments[index].Store(segment)
 	s.segmentSlots.Add(1)
 	for slot := range s.segmentSize {
@@ -1364,12 +1419,10 @@ func (s *operationSlotShard) addSegmentLocked() bool {
 	return true
 }
 
-func newOperationSegment(index, segmentSize, recordsPerOperation int) *operationSegment {
+func newOperationSegment(index, segmentSize int) *operationSegment {
 	return &operationSegment{
-		index:               index,
-		slots:               make([]operationSlot, segmentSize),
-		records:             make([]apiobs.TelemetryRecord, segmentSize*recordsPerOperation),
-		recordsPerOperation: recordsPerOperation,
+		index: index,
+		slots: make([]operationSlot, segmentSize),
 	}
 }
 
@@ -1434,18 +1487,27 @@ func (s *operationSlotShard) activeSlotLocked(handle InternalTrackerHandle) (*op
 	return segment, slot, true
 }
 
-func completedOperationFromSlot(segment *operationSegment, slot *operationSlot, slotIndex int) CompletedOperation {
-	start := slotIndex * segment.recordsPerOperation
-	end := start + int(slot.recordCount.Load())
+func completedOperationFromSlot(shard *operationSlotShard, slot *operationSlot) CompletedOperation {
+	var buf []apiobs.TelemetryRecord
+	if n := len(shard.recordBufPool); n > 0 {
+		buf = shard.recordBufPool[n-1]
+		shard.recordBufPool[n-1] = nil
+		shard.recordBufPool = shard.recordBufPool[:n-1]
+	}
+	buf = slot.arena.DrainInto(buf)
 	return CompletedOperation{
 		Operation:      slot.operation,
 		Parent:         slot.parent,
 		ContextVersion: slot.contextVersion,
-		ContextOverlay: slot.contextOverlay,
+		ContextOverlay: copyContextOverlay(slot.contextOverlay),
 		Status:         slot.status,
-		Records:        segment.records[start:end],
+		Records:        buf,
 		DroppedRecords: slot.droppedRecords,
 	}
+}
+
+func copyContextOverlay(src map[string]string) map[string]string {
+	return cloneStringMap(src)
 }
 
 func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slotRef) {
@@ -1459,7 +1521,10 @@ func (s *operationSlotShard) resetSlotLocked(segment *operationSegment, ref slot
 	slot.snapshotIDLen = 0
 	slot.snapshotParentIDLen = 0
 	slot.snapshotStartUnixNano = 0
-	slot.recordCount.Store(0)
+	if slot.arena != nil {
+		slot.arena.Reset(s.chunkPool)
+		slot.arena = nil
+	}
 	slot.droppedRecords = 0
 	slot.state.Store(uint32(operationSlotFree))
 	segment.active.Add(-1)

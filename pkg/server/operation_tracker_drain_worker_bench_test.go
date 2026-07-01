@@ -100,7 +100,6 @@ func newTelemetrySerializationBenchmarkFixture() telemetrySerializationBenchmark
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   10,
 		CompletedRingPerShard: 1,
 	})
 	contextVersion := manager.UpdateConnectionContextStrings(

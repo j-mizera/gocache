@@ -183,7 +183,9 @@ func (m *Manager) SetOperationTrackerManager(manager *commonobs.SlotOperationTra
 	m.lifecycleOperations.Store(lifecycleOperations)
 	m.queryOperations.Store(queryOperations)
 	RegisterOperationHandlers(m.queryRegistry, queryOperations)
-	RegisterTelemetryMetricsHandlers(m.queryRegistry, commandmetrics.NewTelemetryProvider(manager))
+	telemetryProvider := commandmetrics.NewTelemetryProvider(manager)
+	telemetryProvider.SetSubscriberSource(m)
+	RegisterTelemetryMetricsHandlers(m.queryRegistry, telemetryProvider)
 }
 
 // SetClientPusher wires the connection push interface so plugins can send
@@ -209,6 +211,28 @@ func (m *Manager) SetTelemetryDrainWorker(worker TelemetryDrainWorker) {
 	if worker != nil {
 		worker.SetTmpfsWriter(currentWriter)
 	}
+}
+
+// SubscriberStats returns per-subscriber tmpfs telemetry delivery health.
+// Implements commandmetrics.TelemetrySubscriberSource.
+func (m *Manager) SubscriberStats() []commandmetrics.TelemetrySubscriberSnapshot {
+	m.telemetryWritersMu.Lock()
+	defer m.telemetryWritersMu.Unlock()
+	stats := make([]commandmetrics.TelemetrySubscriberSnapshot, 0, len(m.telemetryWriters))
+	for name, writer := range m.telemetryWriters {
+		writeOffset := writer.WriteOffset()
+		consumedOffset := writer.ConsumedOffset()
+		stats = append(stats, commandmetrics.TelemetrySubscriberSnapshot{
+			Name:            name,
+			RecordsWritten:  writer.RecordsWritten(),
+			BytesWritten:    writer.BytesWritten(),
+			WriteErrors:     writer.WriteErrors(),
+			OverflowDropped: writer.OverflowDropped(),
+			WriteOffset:     writeOffset,
+			ConsumedOffset:  consumedOffset,
+		})
+	}
+	return stats
 }
 
 func rebuildMultiWriter(writers map[string]*commonobs.TmpfsTelemetryWriter) io.Writer {

@@ -49,6 +49,9 @@ type TmpfsTelemetryWriter struct {
 	pluginName      string
 	filePath        string
 	overflowDropped uint64
+	recordsWritten  uint64
+	bytesWritten    uint64
+	writeErrors     uint64
 }
 
 func NewTmpfsTelemetryWriter(pluginName string) (*TmpfsTelemetryWriter, error) {
@@ -90,19 +93,23 @@ func (w *TmpfsTelemetryWriter) Write(data []byte) (int, error) {
 	defer w.mu.Unlock()
 
 	if w.closedLocked() {
+		w.writeErrors++
 		return 0, ErrTmpfsTelemetryClosed
 	}
 	entrySize, err := tmpfsTelemetryEntrySize(data)
 	if err != nil {
+		w.writeErrors++
 		w.overflowDropped++
 		return 0, err
 	}
 	if w.writeOffset+entrySize > tmpfsTelemetryPayloadCapacity() {
 		if _, err := w.compactLocked(true); err != nil {
+			w.writeErrors++
 			return 0, err
 		}
 	}
 	if w.writeOffset+entrySize > tmpfsTelemetryPayloadCapacity() {
+		w.writeErrors++
 		w.overflowDropped++
 		return 0, ErrTmpfsTelemetryOverflow
 	}
@@ -117,9 +124,12 @@ func (w *TmpfsTelemetryWriter) Write(data []byte) (int, error) {
 	w.storeWriteOffsetLocked(w.writeOffset)
 	if w.writeOffset >= TmpfsCompactionThreshold {
 		if _, err := w.compactLocked(false); err != nil {
+			w.writeErrors++
 			return 0, err
 		}
 	}
+	w.recordsWritten++
+	w.bytesWritten += uint64(len(data))
 	return len(data), nil
 }
 
@@ -154,6 +164,24 @@ func (w *TmpfsTelemetryWriter) OverflowDropped() uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.overflowDropped
+}
+
+func (w *TmpfsTelemetryWriter) RecordsWritten() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.recordsWritten
+}
+
+func (w *TmpfsTelemetryWriter) BytesWritten() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.bytesWritten
+}
+
+func (w *TmpfsTelemetryWriter) WriteErrors() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeErrors
 }
 
 func (w *TmpfsTelemetryWriter) Close() error {

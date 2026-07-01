@@ -170,7 +170,6 @@ func newTestOperationScope(t *testing.T, operation apiobs.InternalOperationIdent
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(operation, apiobs.ParentRef{}, 0)

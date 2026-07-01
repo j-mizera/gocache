@@ -1,0 +1,17 @@
+label=batch-valkey
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=603859ce4659bc6f1d009a023daa758bb3e15bb8
+gocache_branch=perf/telemetry-tmpfs
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-7
+client_cpus=8-11
+mem_limit=2g
+baseline_rss_bytes=16766730
+post_standard_rss_bytes=30660362
+final_rss_bytes=36364615
+delta_rss_bytes=19597885

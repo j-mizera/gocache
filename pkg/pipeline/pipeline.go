@@ -236,8 +236,10 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	if !ok {
 		// Fall through to plugin router for plugin-provided commands.
 		if b.pluginRouter != nil && b.pluginRouter.HasCommand(op) {
+			benchstats.RecordPipelinePluginRouted()
 			return b.routeToPlugin(parentCtx, ctx, op, args)
 		}
+		benchstats.RecordPipelineCommandUnknown()
 		return apicommand.Result{Value: resp.ErrUnknown(strings.ToLower(op))}
 	}
 	benchstats.RecordPipelineEvaluation()
@@ -246,6 +248,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 	if hasSpec {
 		n := len(args)
 		if n < spec.Min || (spec.Max >= 0 && n > spec.Max) {
+			benchstats.RecordPipelineCommandArgError()
 			return apicommand.Result{Value: resp.ErrArgs(strings.ToLower(op))}
 		}
 	}
@@ -259,6 +262,7 @@ func (b *Pipeline) evaluateCore(parentCtx context.Context, ctx *clientctx.Client
 				return apicommand.Result{Value: "OK"}
 			}
 			ctx.EnqueueCommand(append([]string{op}, args...))
+			benchstats.RecordPipelineCommandQueued()
 			return apicommand.Result{Value: "QUEUED"}
 		}
 	}
@@ -436,7 +440,9 @@ func (b *Pipeline) recordCommandStartSignals(scope commonobs.OperationScope, cmd
 			"_operation_type", string(ops.TypeCommand),
 			"_parent_operation_id", commandParentID(scope, cmdOp),
 		)
-		benchstats.RecordPipelineOperationStarted()
+		// benchstats counter removed: operation-lifecycle events are tracked by the
+		// operation tracker (telemetry.operations_started/completed). Pipeline-scoped
+		// benchstats should measure pipeline execution decisions, not telemetry emission.
 		if b.emitter.HasSubscribersFor(events.CommandStarted) {
 			scope.CommandStartString(op, commandEventFields(operationID, op, args, metadata, 0, "", "")...)
 		}
@@ -463,7 +469,9 @@ func (b *Pipeline) recordCommandFinishSignals(scope commonobs.OperationScope, cm
 			apicommand.ElapsedNs, strconv.FormatUint(elapsedNs, 10),
 			apicommand.ErrorKey, resultErr,
 		)
-		benchstats.RecordPipelineOperationCompleted()
+		// benchstats counter removed: operation-lifecycle events are tracked by the
+		// operation tracker (telemetry.operations_started/completed). Pipeline-scoped
+		// benchstats should measure pipeline execution decisions, not telemetry emission.
 		return
 	}
 	// Runtime event fanout is sidecar-owned. If no sidecar scope exists, keep

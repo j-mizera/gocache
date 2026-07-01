@@ -20,7 +20,6 @@ func newBenchmarkSlotTracker(segmentSize, recordsPerOperation, completedRing int
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           segmentSize,
-		RecordsPerOperation:   recordsPerOperation,
 		CompletedRingPerShard: completedRing,
 	})
 }

@@ -12,11 +12,18 @@ func TestSnapshotDisabledStillIncludesRuntimeMetrics(t *testing.T) {
 
 	RecordPipelineEvaluation()
 	data := Snapshot(false)
-	if data["enabled"] != "false" {
-		t.Fatalf("enabled=%q, want false", data["enabled"])
+	checks := map[string]string{
+		"enabled":                    "false",
+		"pipeline.evaluations":       "0",
+		"pipeline.command_unknown":   "0",
+		"pipeline.command_arg_error": "0",
+		"pipeline.command_queued":    "0",
+		"pipeline.plugin_routed":     "0",
 	}
-	if data["pipeline.evaluations"] != "0" {
-		t.Fatalf("pipeline.evaluations=%q, want 0", data["pipeline.evaluations"])
+	for key, want := range checks {
+		if got := data[key]; got != want {
+			t.Fatalf("data[%q]=%q, want %q", key, got, want)
+		}
 	}
 	if data["runtime.sched.goroutines.goroutines"] == "" {
 		t.Fatal("expected runtime goroutine metric")
@@ -32,8 +39,10 @@ func TestSnapshotReset(t *testing.T) {
 	})
 
 	RecordPipelineEvaluation()
-	RecordPipelineOperationStarted()
-	RecordPipelineOperationCompleted()
+	RecordPipelineCommandUnknown()
+	RecordPipelineCommandArgError()
+	RecordPipelineCommandQueued()
+	RecordPipelinePluginRouted()
 	RecordManagerEventReceived()
 	RecordManagerEventDropped()
 	RecordManagerProjectionBuild()
@@ -41,14 +50,16 @@ func TestSnapshotReset(t *testing.T) {
 
 	data := Snapshot(true)
 	checks := map[string]string{
-		"enabled":                            "true",
-		"pipeline.evaluations":               "1",
-		"pipeline.event.operation_started":   "1",
-		"pipeline.event.operation_completed": "1",
-		"manager.event_received":             "1",
-		"manager.event_dropped":              "1",
-		"manager.event_enqueue_attempts":     "1",
-		"manager.projection_builds":          "1",
+		"enabled":                        "true",
+		"pipeline.evaluations":           "1",
+		"pipeline.command_unknown":       "1",
+		"pipeline.command_arg_error":     "1",
+		"pipeline.command_queued":        "1",
+		"pipeline.plugin_routed":         "1",
+		"manager.event_received":         "1",
+		"manager.event_dropped":          "1",
+		"manager.event_enqueue_attempts": "1",
+		"manager.projection_builds":      "1",
 	}
 	for key, want := range checks {
 		if got := data[key]; got != want {

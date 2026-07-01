@@ -582,7 +582,6 @@ func TestGCPC_ServerQuery_TelemetryExactAndWildcardScopes(t *testing.T) {
 				MinSegmentsPerShard:   1,
 				MaxSegmentsPerShard:   1,
 				SegmentSize:           1,
-				RecordsPerOperation:   1,
 				CompletedRingPerShard: 1,
 			})
 			mgr.SetOperationTrackerManager(trackerManager)
@@ -637,7 +636,6 @@ func TestGCPC_ServerQuery_TelemetryReportsForcedTrackerPressure(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 1,
 	})
 	mgr.SetOperationTrackerManager(trackerManager)
@@ -730,7 +728,7 @@ func TestGCPC_ServerQuery_TelemetryReportsRecordOverflow(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
+		MaxChunksPerClass:     1,
 		CompletedRingPerShard: 1,
 	})
 	mgr.SetOperationTrackerManager(trackerManager)
@@ -743,8 +741,16 @@ func TestGCPC_ServerQuery_TelemetryReportsRecordOverflow(t *testing.T) {
 	if !trackerManager.RecordTelemetry(handle, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 11)) {
 		t.Fatal("first telemetry record should fit")
 	}
+	// Fill arena growth chain to capacity: 32 + 64 + 128 = 224 total with MaxChunksPerClass=1.
+	for i := 0; i < 223; i++ {
+		rec := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordLog, apiobs.InternalOperationIdentity(i+100))
+		if !trackerManager.RecordTelemetry(handle, rec) {
+			t.Fatalf("record %d should fit within arena growth chain", i+1)
+		}
+	}
+	// The 225th record exceeds pool capacity and should drop.
 	if trackerManager.RecordTelemetry(handle, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 11)) {
-		t.Fatal("second telemetry record should drop when operation record storage is full")
+		t.Fatal("record beyond pool capacity should drop")
 	}
 
 	p.send(gcpc.NewServerQuery("q-telemetry-record-overflow", "metrics.telemetry", nil))
@@ -789,7 +795,6 @@ func TestGCPC_ServerQuery_TelemetryReportsCompletedRingOverflow(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           2,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	mgr.SetOperationTrackerManager(trackerManager)
@@ -840,7 +845,6 @@ func TestGCPC_ServerQuery_TelemetryDeniedWithoutScope(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	mgr.SetOperationTrackerManager(trackerManager)
@@ -874,7 +878,6 @@ func TestGCPC_ServerQuery_TelemetryDeniedWithWrongExactScope(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	mgr.SetOperationTrackerManager(trackerManager)

@@ -274,7 +274,6 @@ func newReplayTelemetryManager() *commonobs.SlotOperationTrackerManager {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           16,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 16,
 	})
 }

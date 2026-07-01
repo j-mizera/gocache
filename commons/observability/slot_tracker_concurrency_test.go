@@ -17,7 +17,6 @@ func TestSlotTrackerDoubleFinishRejectedAndContextReleasedOnce(t *testing.T) {
 		MinSegmentsPerShard:     1,
 		MaxSegmentsPerShard:     1,
 		SegmentSize:             1,
-		RecordsPerOperation:     1,
 		CompletedRingPerShard:   1,
 		ReleaseContextVersionFn: releases.release,
 	})
@@ -54,7 +53,6 @@ func TestSlotTrackerConcurrentIndependentOperations(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           operations,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: operations,
 	})
 
@@ -105,7 +103,6 @@ func TestSlotTrackerConcurrentFinishAndDrain(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           operations,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: operations,
 	})
 
@@ -197,7 +194,6 @@ func TestSlotTrackerRetireFreeSegmentDoesNotInvalidateActiveSegment(t *testing.T
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   2,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 2,
 	})
 
@@ -243,7 +239,6 @@ func TestSlotTrackerMagazineReducesLockContention(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   2,
 		SegmentSize:           operations / connections,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: operations,
 		MagazineCapacity:      16,
 	})
@@ -314,7 +309,6 @@ func TestSlotTrackerMagazineFlushReturnsSlots(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           4,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 4,
 		MagazineCapacity:      2,
 	})

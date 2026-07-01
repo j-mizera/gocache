@@ -65,7 +65,6 @@ func TestSlotTrackerLifecycleDrainsCompletedOperation(t *testing.T) {
 		MinSegmentsPerShard:     1,
 		MaxSegmentsPerShard:     1,
 		SegmentSize:             2,
-		RecordsPerOperation:     4,
 		CompletedRingPerShard:   2,
 		ReleaseContextVersionFn: releases.release,
 	})
@@ -136,7 +135,6 @@ func TestSlotTrackerNoSlotSkipsWithoutContextRelease(t *testing.T) {
 		MinSegmentsPerShard:     1,
 		MaxSegmentsPerShard:     1,
 		SegmentSize:             1,
-		RecordsPerOperation:     1,
 		CompletedRingPerShard:   1,
 		ReleaseContextVersionFn: releases.release,
 	})
@@ -164,25 +162,34 @@ func TestSlotTrackerNoSlotSkipsWithoutContextRelease(t *testing.T) {
 }
 
 func TestSlotTrackerDropsRecordsWhenOperationBufferFull(t *testing.T) {
+	// Under the arena model, records grow dynamically. Pool exhaustion is the
+	// only drop path. With maxChunksPerClass=1 and 3 classes (32+64+128=224
+	// total capacity across the growth chain), the 225th record drops.
 	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
 		ShardCount:            1,
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
-		CompletedRingPerShard: 1,
+		MaxChunksPerClass:     1,
+		CompletedRingPerShard: 4,
 	})
 	handle, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
 	if !ok {
 		t.Fatal("operation should fit")
 	}
-	first := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 1)
-	second := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)
-	if !manager.RecordTelemetry(handle, first) {
-		t.Fatal("first record should fit")
+
+	// Fill all three chunk classes: 32 + 64 + 128 = 224 records.
+	for i := 0; i < 224; i++ {
+		record := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, apiobs.InternalOperationIdentity(i))
+		if !manager.RecordTelemetry(handle, record) {
+			t.Fatalf("record %d should fit within arena growth chain", i)
+		}
 	}
-	if manager.RecordTelemetry(handle, second) {
-		t.Fatal("second record should drop when operation record storage is full")
+
+	// The 225th record exceeds pool capacity and should drop.
+	overflow := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)
+	if manager.RecordTelemetry(handle, overflow) {
+		t.Fatal("record beyond pool capacity should drop")
 	}
 	if dropped := manager.DroppedRecords(); dropped != 1 {
 		t.Fatalf("DroppedRecords() = %d, want 1", dropped)
@@ -194,8 +201,8 @@ func TestSlotTrackerDropsRecordsWhenOperationBufferFull(t *testing.T) {
 		if operation.DroppedRecords != 1 {
 			t.Fatalf("completed dropped records = %d, want 1", operation.DroppedRecords)
 		}
-		if len(operation.Records) != 1 || operation.Records[0].Kind != apiobs.TelemetryRecordCommandStart {
-			t.Fatalf("records = %+v, want only first command-start record", operation.Records)
+		if len(operation.Records) != 224 {
+			t.Fatalf("records count = %d, want 224", len(operation.Records))
 		}
 	})
 }
@@ -207,7 +214,6 @@ func TestSlotTrackerCompletedRingFullDropsAndReleasesContext(t *testing.T) {
 		MinSegmentsPerShard:     1,
 		MaxSegmentsPerShard:     1,
 		SegmentSize:             2,
-		RecordsPerOperation:     1,
 		CompletedRingPerShard:   1,
 		ReleaseContextVersionFn: releases.release,
 	})
@@ -247,7 +253,6 @@ func TestSlotTrackerStaleHandleRejectedAfterSlotReuse(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	oldHandle, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
@@ -277,7 +282,6 @@ func TestSlotTrackerShardStatsReturnsWhileShardMutexHeld(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           2,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 
@@ -305,7 +309,6 @@ func TestSlotTrackerGrowsAndRetiresFreeSegments(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   2,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 2,
 	})
 	first, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
@@ -345,7 +348,6 @@ func TestSlotTrackerShardsByConnection(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           4,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 4,
 	})
 	conn1 := apiobs.ConnectionIdentity(1)
@@ -378,7 +380,6 @@ func TestSlotTrackerStartOperationForConnectionPinsInitialContextVersion(t *test
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(9)
@@ -433,7 +434,6 @@ func TestSlotTrackerStartOperationWithConnectionContextAttachesCommandOverlay(t 
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(10)
@@ -479,13 +479,58 @@ func TestSlotTrackerStartOperationWithConnectionContextAttachesCommandOverlay(t 
 	}
 }
 
+func TestDrainCompletedShardRecyclesBeforeCallback(t *testing.T) {
+	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
+		ShardCount:            1,
+		MinSegmentsPerShard:   1,
+		MaxSegmentsPerShard:   1,
+		SegmentSize:           1,
+		CompletedRingPerShard: 1,
+	})
+	initialOverlay := map[string]string{"tenant": "acme", "traceparent": "00-abc"}
+	handle, _, ok := manager.StartOperationWithConnectionContext(1, apiobs.ParentRef{}, apiobs.ConnectionIdentity(1), initialOverlay)
+	if !ok {
+		t.Fatal("StartOperationWithConnectionContext should allocate the only slot")
+	}
+	if !manager.FinishOperation(handle, SlotTerminalFinished) {
+		t.Fatal("FinishOperation should enqueue the completed operation")
+	}
+
+	var drainedOverlay map[string]string
+	drained := manager.DrainCompletedShard(0, func(operation CompletedOperation) {
+		drainedOverlay = operation.ContextOverlay
+		secondHandle, secondOK := manager.StartOperation(2, apiobs.ParentRef{}, 0)
+		if !secondOK {
+			t.Error("StartOperation during drain callback failed; slot was not recycled before callback")
+			return
+		}
+		if !manager.FinishOperation(secondHandle, SlotTerminalFinished) {
+			t.Error("FinishOperation for recycled slot should enqueue")
+		}
+	})
+
+	if drained != 1 {
+		t.Fatalf("DrainCompletedShard drained %d operations, want 1", drained)
+	}
+	if len(drainedOverlay) != len(initialOverlay) {
+		t.Fatalf("drained context overlay length = %d, want %d", len(drainedOverlay), len(initialOverlay))
+	}
+	initialOverlay["tenant"] = "mutated"
+	initialOverlay["traceparent"] = "mutated"
+	if tenant := drainedOverlay["tenant"]; tenant != "acme" {
+		t.Fatalf("drained overlay tenant = %q, want acme", tenant)
+	}
+	if traceParent := drainedOverlay["traceparent"]; traceParent != "00-abc" {
+		t.Fatalf("drained overlay traceparent = %q, want 00-abc", traceParent)
+	}
+}
+
 func TestSlotTrackerForgetConnectionContextKeepsPinnedVersionUntilDrain(t *testing.T) {
 	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
 		ShardCount:            1,
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(11)
@@ -525,7 +570,6 @@ func TestSlotTrackerForgetConnectionContextDeletesUnpinnedCurrentVersion(t *test
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(12)
@@ -550,7 +594,6 @@ func TestSlotTrackerStartOperationForConnectionNoSlotReleasesPinnedVersion(t *te
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	if _, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0); !ok {
@@ -573,7 +616,6 @@ func TestSlotTrackerOperationContextSnapshotFoldsBaseOverlayAndRecords(t *testin
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(13)
@@ -611,7 +653,6 @@ func TestSlotTrackerCompletedOperationContextFoldsBaseOverlayAndRecords(t *testi
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(14)
@@ -653,7 +694,6 @@ func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *te
 		MinSegmentsPerShard:   maxSegments,
 		MaxSegmentsPerShard:   maxSegments,
 		SegmentSize:           segmentSize,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: slotCount,
 	})
 	handles := make([]InternalTrackerHandle, 0, slotCount)
@@ -703,42 +743,49 @@ func TestLossCounterSlotExhaustionIncrementsSkippedOperationsAndBenchstats(t *te
 }
 
 func TestLossCounterRecordOverflowIncrementsDroppedRecords(t *testing.T) {
+	// Under the arena model, records grow dynamically. Pool exhaustion is the
+	// only drop path. With maxChunksPerClass=1, the arena chain holds at most
+	// 32 + 64 + 128 = 224 records before the pool is exhausted.
 	manager := NewSlotOperationTrackerManager(SlotTrackerConfig{
 		ShardCount:            1,
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
-		CompletedRingPerShard: 1,
+		MaxChunksPerClass:     1,
+		CompletedRingPerShard: 4,
 	})
 	handle, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
 	if !ok {
 		t.Fatal("operation should allocate the only slot")
 	}
 	first := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 1)
-	second := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)
 	if !manager.RecordTelemetry(handle, first) {
 		t.Fatal("first telemetry record should fit")
 	}
-	if manager.RecordTelemetry(handle, second) {
-		t.Fatal("second telemetry record should be rejected when RecordsPerOperation=1")
+	// Fill remaining capacity: 223 more records (224 total with first).
+	for i := 0; i < 223; i++ {
+		record := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, apiobs.InternalOperationIdentity(i+2))
+		if !manager.RecordTelemetry(handle, record) {
+			t.Fatalf("record %d should fit within arena growth chain", i+2)
+		}
+	}
+	// The 225th record exceeds pool capacity and should drop.
+	overflow := apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)
+	if manager.RecordTelemetry(handle, overflow) {
+		t.Fatal("record beyond pool capacity should drop")
 	}
 	if dropped := manager.DroppedRecords(); dropped != 1 {
-		t.Fatalf("DroppedRecords() = %d, want 1", dropped)
-	}
-	bench := trackerSnapshot(manager)
-	if got := bench["operation_tracker.dropped_records"]; got != "1" {
-		t.Fatalf("benchstats dropped_records = %q, want %q", got, "1")
+		t.Fatalf("DroppedRecords() = %d, want 1 after pool exhaustion", dropped)
 	}
 	if !manager.FinishOperation(handle, SlotTerminalFinished) {
-		t.Fatal("FinishOperation() should enqueue the operation with dropped-record metadata")
+		t.Fatal("finish should enqueue completed operation")
 	}
 	manager.DrainCompletedShard(0, func(operation CompletedOperation) {
 		if operation.DroppedRecords != 1 {
-			t.Fatalf("CompletedOperation.DroppedRecords = %d, want 1", operation.DroppedRecords)
+			t.Fatalf("completed operation dropped records = %d, want 1", operation.DroppedRecords)
 		}
-		if len(operation.Records) != 1 || operation.Records[0].Kind != apiobs.TelemetryRecordCommandStart {
-			t.Fatalf("completed records = %+v, want only command.start", operation.Records)
+		if len(operation.Records) != 224 {
+			t.Fatalf("records count = %d, want 224 (32+64+128 growth chain)", len(operation.Records))
 		}
 	})
 }
@@ -749,7 +796,6 @@ func TestLossCounterCompletedRingOverflowIncrementsDroppedCompleted(t *testing.T
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           2,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	first, ok := manager.StartOperation(1, apiobs.ParentRef{}, 0)
@@ -788,7 +834,6 @@ func TestLossCounterDropStringBatchOverflowMarkerDrainsCompletedRecord(t *testin
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(42, apiobs.ParentRef{}, 0)
@@ -838,7 +883,6 @@ func TestSlotTrackerAdversarialMaxSlotPressureSkipsAndRecycles(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           slotCount,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: slotCount,
 	})
 

@@ -42,7 +42,6 @@ func TestCache_ClearWithScopeRecordsLogRequestThroughHolder(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(102, apiobs.ParentRef{}, 0)
@@ -164,7 +163,6 @@ func TestCache_MemoryLimit_NoEvictionRecordsLogRequestThroughHolder(t *testing.T
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(101, apiobs.ParentRef{}, 0)

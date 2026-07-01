@@ -4158,6 +4158,7 @@ type TelemetryOperation struct {
 	OperationId    string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	InitialContext []*Tag                 `protobuf:"bytes,2,rep,name=initial_context,json=initialContext,proto3" json:"initial_context,omitempty"`
 	TelemetryItems []*TelemetryItem       `protobuf:"bytes,3,rep,name=telemetry_items,json=telemetryItems,proto3" json:"telemetry_items,omitempty"`
+	CommandCount   uint32                 `protobuf:"varint,4,opt,name=command_count,json=commandCount,proto3" json:"command_count,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -4211,6 +4212,13 @@ func (x *TelemetryOperation) GetTelemetryItems() []*TelemetryItem {
 		return x.TelemetryItems
 	}
 	return nil
+}
+
+func (x *TelemetryOperation) GetCommandCount() uint32 {
+	if x != nil {
+		return x.CommandCount
+	}
+	return 0
 }
 
 // TelemetryAck is sent by the plugin to the server after consuming telemetry
@@ -4616,11 +4624,12 @@ const file_gcpc_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\fR\x05value\"Y\n" +
 	"\rTelemetryItem\x12.\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1a.gcpc.v1.TelemetryItemKindR\x04kind\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload\"\xaf\x01\n" +
+	"\apayload\x18\x02 \x01(\fR\apayload\"\xd4\x01\n" +
 	"\x12TelemetryOperation\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x125\n" +
 	"\x0finitial_context\x18\x02 \x03(\v2\f.gcpc.v1.TagR\x0einitialContext\x12?\n" +
-	"\x0ftelemetry_items\x18\x03 \x03(\v2\x16.gcpc.v1.TelemetryItemR\x0etelemetryItems\"7\n" +
+	"\x0ftelemetry_items\x18\x03 \x03(\v2\x16.gcpc.v1.TelemetryItemR\x0etelemetryItems\x12#\n" +
+	"\rcommand_count\x18\x04 \x01(\rR\fcommandCount\"7\n" +
 	"\fTelemetryAck\x12'\n" +
 	"\x0fconsumed_offset\x18\x01 \x01(\x04R\x0econsumedOffset*R\n" +
 	"\vHookPhaseV1\x12\x1a\n" +
