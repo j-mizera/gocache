@@ -16,7 +16,6 @@ func TestConnectionContextOwnedPinPreservesPointInTimeVersion(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	connection := apiobs.ConnectionIdentity(31)
@@ -58,7 +57,6 @@ func TestConnectionContextPinVisitReleaseRace(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           8,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 8,
 	})
 	connection := apiobs.ConnectionIdentity(32)

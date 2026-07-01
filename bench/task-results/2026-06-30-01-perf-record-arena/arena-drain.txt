@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: gocache/commons/observability
+cpu: AMD Ryzen 9 7900X 12-Core Processor
+
+# Arena Drain (cold path — copy-on-drain)
+BenchmarkArenaDrain/drain-4-24     2499206    476.4 ns/op    1280 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-4-24     2481609    459.5 ns/op    1280 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-4-24     2585983    480.8 ns/op    1280 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-20-24     717367   1569.0 ns/op    6528 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-20-24     728781   1582.0 ns/op    6528 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-20-24     765697   1536.0 ns/op    6528 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-50-24     281188   4144.0 ns/op   16384 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-50-24     307228   4070.0 ns/op   16384 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-50-24     289863   4105.0 ns/op   16384 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-200-24     82129  15225.0 ns/op   65536 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-200-24     85495  15662.0 ns/op   65536 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-200-24     83286  14983.0 ns/op   65536 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-500-24     33939  36488.0 ns/op  163840 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-500-24     31508  38506.0 ns/op  163840 B/op     1 allocs/op
+BenchmarkArenaDrain/drain-500-24     31183  37168.0 ns/op  163840 B/op     1 allocs/op

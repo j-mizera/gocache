@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -27,9 +28,11 @@ import (
 	apictx "gocache/api/context"
 	apiEvents "gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
+	apiplugin "gocache/api/plugin"
 	"gocache/api/scope"
 	"gocache/api/version"
 	apilogger "gocache/commons/logger"
+	"gocache/commons/transport"
 	"gocache/sdk/pluginsdk"
 )
 
@@ -42,11 +45,12 @@ const (
 	keyInsecure  = "insecure"
 	keyDisabled  = "disabled"
 
-	envEndpoint  = "GOCACHE_INSTRUMENTATION_OTLP_ENDPOINT"
-	envService   = "GOCACHE_INSTRUMENTATION_OTLP_SERVICE"
-	envTimeoutMs = "GOCACHE_INSTRUMENTATION_OTLP_TIMEOUT_MS"
-	envInsecure  = "GOCACHE_INSTRUMENTATION_OTLP_INSECURE"
-	envDisabled  = "GOCACHE_INSTRUMENTATION_OTLP_DISABLED"
+	envEndpoint     = "GOCACHE_INSTRUMENTATION_OTLP_ENDPOINT"
+	envService      = "GOCACHE_INSTRUMENTATION_OTLP_SERVICE"
+	envTimeoutMs    = "GOCACHE_INSTRUMENTATION_OTLP_TIMEOUT_MS"
+	envInsecure     = "GOCACHE_INSTRUMENTATION_OTLP_INSECURE"
+	envDisabled     = "GOCACHE_INSTRUMENTATION_OTLP_DISABLED"
+	envTelemetryShm = "GOCACHE_TELEMETRY_SHM"
 
 	defaultService = "gocache"
 	defaultTimeout = 3 * time.Second
@@ -102,13 +106,18 @@ func (p *plugin) Version() string { return version.Version }
 func (p *plugin) Critical() bool  { return false }
 
 func (p *plugin) Scopes() []string {
-	return []string{string(scope.ScopeEvents)}
+	return []string{string(scope.ScopeEvents), string(scope.ScopeTelemetry)}
 }
 
 func (p *plugin) EventTypes() []string {
 	return []string{
-		string(apiEvents.OperationStarted),
-		string(apiEvents.OperationCompleted),
+		string(apiEvents.ConnectionOpen),
+		string(apiEvents.ConnectionClose),
+		string(apiEvents.PluginRegistered),
+		string(apiEvents.PluginCrashed),
+		string(apiEvents.PluginRestarted),
+		string(apiEvents.PluginStarted),
+		string(apiEvents.PluginStopped),
 		string(apiEvents.RuntimeLogBatch),
 		string(apiEvents.ReplayGap),
 	}
@@ -398,6 +407,137 @@ func (p *plugin) handleReplayGap(ctx context.Context, timestamp uint64, payload 
 	logger.Emit(ctx, record)
 }
 
+func (p *plugin) handleReconstructedOperation(ctx context.Context, operation *pluginsdk.ReconstructedOperation) {
+	if operation == nil || operation.OperationID == "" {
+		return
+	}
+
+	p.mu.RLock()
+	tracer := p.tracer
+	logger := p.logger
+	p.mu.RUnlock()
+	if tracer == nil && logger == nil {
+		return
+	}
+
+	endTime := time.Now()
+	startTime := endTime
+	if operation.Elapsed > 0 {
+		startTime = endTime.Add(-operation.Elapsed)
+	}
+
+	operationCtx := p.parentContext(ctx, operation.Context)
+	spanCtx := operationCtx
+	var operationSpan trace.Span
+	if tracer != nil {
+		spanCtx, operationSpan = tracer.Start(operationCtx, "gocache.operation.telemetry",
+			trace.WithSpanKind(trace.SpanKindServer),
+			trace.WithTimestamp(startTime),
+			trace.WithAttributes(reconstructedOperationAttributes(operation)...),
+		)
+		p.recordCommandSpans(spanCtx, tracer, operation.Commands, startTime)
+	}
+
+	if logger != nil {
+		for _, logEntry := range operation.Logs {
+			logger.Emit(spanCtx, reconstructedLogRecord(operation.OperationID, operation.Context, logEntry))
+		}
+	}
+
+	if operationSpan != nil {
+		if strings.EqualFold(operation.Status, "failed") {
+			operationSpan.SetStatus(codes.Error, operation.Status)
+		}
+		operationSpan.End(trace.WithTimestamp(endTime))
+	}
+}
+
+func (p *plugin) recordCommandSpans(ctx context.Context, tracer trace.Tracer, commands []pluginsdk.ReconstructedCommand, operationStartTime time.Time) {
+	commandStartTime := operationStartTime
+	for _, commandEntry := range commands {
+		commandEndTime := commandStartTime
+		if commandEntry.Elapsed > 0 {
+			commandEndTime = commandStartTime.Add(commandEntry.Elapsed)
+		}
+		_, commandSpan := tracer.Start(ctx, commandSpanName(commandEntry.Name),
+			trace.WithSpanKind(trace.SpanKindInternal),
+			trace.WithTimestamp(commandStartTime),
+			trace.WithAttributes(reconstructedCommandAttributes(commandEntry)...),
+		)
+		if commandEntry.Error != "" {
+			commandSpan.SetStatus(codes.Error, commandEntry.Error)
+		}
+		commandSpan.End(trace.WithTimestamp(commandEndTime))
+		commandStartTime = commandEndTime
+	}
+}
+
+func reconstructedOperationAttributes(operation *pluginsdk.ReconstructedOperation) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("gocache.operation.id", operation.OperationID),
+		attribute.String("gocache.operation.source", "telemetry"),
+	}
+	if operation.Elapsed > 0 {
+		attrs = append(attrs, attribute.Int64("gocache.operation.elapsed_ns", operation.Elapsed.Nanoseconds()))
+	}
+	if operation.Status != "" {
+		attrs = append(attrs, attribute.String("gocache.operation.status", operation.Status))
+	}
+	return appendContextAttributes(attrs, operation.Context)
+}
+
+func reconstructedCommandAttributes(commandEntry pluginsdk.ReconstructedCommand) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("gocache.command.name", commandEntry.Name),
+		attribute.Int("gocache.command.arg_count", len(commandEntry.Args)),
+	}
+	if commandEntry.Elapsed > 0 {
+		attrs = append(attrs, attribute.Int64("gocache.command.elapsed_ns", commandEntry.Elapsed.Nanoseconds()))
+	}
+	if commandEntry.Error != "" {
+		attrs = append(attrs, attribute.String("gocache.command.status", "error"))
+		attrs = append(attrs, attribute.String("gocache.command.error", commandEntry.Error))
+	} else {
+		attrs = append(attrs, attribute.String("gocache.command.status", "ok"))
+	}
+	return attrs
+}
+
+func reconstructedLogRecord(operationID string, fields map[string]string, logEntry pluginsdk.ReconstructedLog) otellog.Record {
+	record := otellog.Record{}
+	record.SetTimestamp(time.Now())
+	record.SetObservedTimestamp(time.Now())
+	record.SetSeverity(severity(logEntry.Level))
+	record.SetSeverityText(logEntry.Level)
+	record.SetBody(otellog.StringValue(logEntry.Message))
+
+	attrs := []otellog.KeyValue{
+		otellog.String("gocache.operation.id", operationID),
+		otellog.String("gocache.log.source", "telemetry"),
+	}
+	if logEntry.Caller != "" {
+		attrs = append(attrs, otellog.String("code.filepath", logEntry.Caller))
+	}
+	redactedFields := apictx.RedactSecrets(fields)
+	keys := make([]string, 0, len(redactedFields))
+	for key := range redactedFields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		attrs = append(attrs, otellog.String(key, redactedFields[key]))
+	}
+	record.AddAttributes(attrs...)
+	return record
+}
+
+func commandSpanName(commandName string) string {
+	if commandName == "" {
+		return "gocache.command"
+	}
+	return "gocache.command." + strings.ToUpper(commandName)
+}
+
 func (p *plugin) parentContext(ctx context.Context, fields map[string]string) context.Context {
 	if traceparent := firstNonEmpty(fields[apictx.SharedTraceparent], fields[apictx.SharedRexTraceparent], fields["traceparent"]); traceparent != "" {
 		return p.propagator.Extract(ctx, propagation.MapCarrier{"traceparent": traceparent})
@@ -473,7 +613,6 @@ func operationCompleteAttributes(payload *gcpc.OperationCompleteEventV1) []attri
 }
 
 func appendContextAttributes(attrs []attribute.KeyValue, fields map[string]string) []attribute.KeyValue {
-	fields = apictx.RedactSecrets(fields)
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
 		keys = append(keys, key)
@@ -532,13 +671,234 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func runInstrumentationPlugin(ctx context.Context, instrumentation *plugin) error {
+	sockPath := os.Getenv(apiplugin.EnvSocketPath)
+	if sockPath == "" {
+		return fmt.Errorf("%s not set", apiplugin.EnvSocketPath)
+	}
+
+	socketConn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return fmt.Errorf("dial plugin socket: %w", err)
+	}
+	framedConn := transport.NewConn(socketConn)
+	defer framedConn.Close()
+
+	var handlerWg sync.WaitGroup
+	defer handlerWg.Wait()
+
+	registerEnvelope := &gcpc.EnvelopeV1{
+		Version: gcpc.ProtocolVersion,
+		Payload: &gcpc.EnvelopeV1_Register{Register: &gcpc.RegisterV1{
+			Name:            instrumentation.Name(),
+			Version:         instrumentation.Version(),
+			Critical:        instrumentation.Critical(),
+			RequestedScopes: instrumentation.Scopes(),
+		}},
+	}
+	if err := framedConn.Send(registerEnvelope); err != nil {
+		return fmt.Errorf("send register: %w", err)
+	}
+
+	registerAckEnvelope, err := framedConn.Recv()
+	if err != nil {
+		return fmt.Errorf("recv register ack: %w", err)
+	}
+	registerAck := registerAckEnvelope.GetRegisterAck()
+	if registerAck == nil {
+		return fmt.Errorf("expected RegisterAck, got different message")
+	}
+	if !registerAck.Accepted {
+		return fmt.Errorf("registration rejected: %s", registerAck.Reason)
+	}
+	if len(registerAck.GrantedScopes) > 0 {
+		instrumentation.log.InfoNoCtx().Strs("scopes", registerAck.GrantedScopes).Msg("granted scopes")
+	}
+	logDeniedScopes(instrumentation, registerAck.GrantedScopes)
+
+	remoteCfg := pluginsdk.NewRemoteConfig(registerAck.Config)
+	instrumentation.OnConfigReload(remoteCfg)
+
+	ackConfirmations := make(chan uint64, 1)
+	telemetryPlugin, err := startTelemetryPlugin(ctx, instrumentation, framedConn, ackConfirmations, registerAck.GrantedScopes, registerAck.Config)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		stopTelemetryPlugin(instrumentation, telemetryPlugin)
+	}()
+
+	if err := framedConn.Send(gcpc.NewEventSubscribe(instrumentation.EventTypes())); err != nil {
+		return fmt.Errorf("send event subscribe: %w", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		envelope, err := framedConn.Recv()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("recv: %w", err)
+		}
+
+		switch envelope.Payload.(type) {
+		case *gcpc.EnvelopeV1_HealthCheck:
+			healthErr := instrumentation.OnHealthCheck(ctx)
+			status := ""
+			if healthErr != nil {
+				status = healthErr.Error()
+			}
+			if err := framedConn.Send(gcpc.NewHealthResponse(healthErr == nil, status)); err != nil {
+				return fmt.Errorf("send health response: %w", err)
+			}
+		case *gcpc.EnvelopeV1_Shutdown:
+			shutdownPayload := envelope.GetShutdown()
+			deadline := time.Unix(0, int64(shutdownPayload.DeadlineNs))
+			shutdownCtx, cancel := context.WithDeadline(ctx, deadline)
+			stopTelemetryPlugin(instrumentation, telemetryPlugin)
+			telemetryPlugin = nil
+			_ = instrumentation.OnShutdown(shutdownCtx)
+			cancel()
+			if err := framedConn.Send(gcpc.NewShutdownAck()); err != nil {
+				return fmt.Errorf("send shutdown ack: %w", err)
+			}
+			return nil
+		case *gcpc.EnvelopeV1_Event:
+			eventPayload := envelope.GetEvent()
+			handlerWg.Add(1)
+			go func() {
+				defer handlerWg.Done()
+				instrumentation.HandleEvent(ctx, eventPayload)
+			}()
+		case *gcpc.EnvelopeV1_TelemetryAck:
+			telemetryAck := envelope.GetTelemetryAck()
+			if telemetryAck != nil {
+				signalTelemetryConfirmation(instrumentation, ackConfirmations, telemetryAck.GetConsumedOffset())
+			}
+		case *gcpc.EnvelopeV1_ConfigUpdate:
+			configUpdate := envelope.GetConfigUpdate()
+			if configUpdate == nil {
+				continue
+			}
+			remoteCfg.Replace(configUpdate.Entries)
+			instrumentation.OnConfigReload(remoteCfg)
+			if telemetryPlugin == nil {
+				startedTelemetryPlugin, startErr := startTelemetryPlugin(ctx, instrumentation, framedConn, ackConfirmations, registerAck.GrantedScopes, configUpdate.Entries)
+				if startErr != nil {
+					instrumentation.log.ErrorNoCtx().Err(startErr).Msg("instrumentation telemetry startup failed")
+					instrumentation.recordErr(startErr)
+				} else {
+					telemetryPlugin = startedTelemetryPlugin
+				}
+			}
+		}
+	}
+}
+
+func startTelemetryPlugin(ctx context.Context, instrumentation *plugin, framedConn *transport.Conn, confirmations <-chan uint64, grantedScopes []string, serverConfig map[string]string) (*pluginsdk.TelemetryPlugin, error) {
+	if !hasGrantedScope(grantedScopes, string(scope.ScopeTelemetry)) {
+		return nil, nil
+	}
+
+	filePath := firstNonEmpty(os.Getenv(envTelemetryShm), serverConfig[envTelemetryShm])
+	if filePath == "" {
+		return nil, fmt.Errorf("telemetry scope granted but %s is not configured", envTelemetryShm)
+	}
+
+	ackFunc := func(consumedOffset uint64) {
+		if err := framedConn.Send(telemetryAckEnvelope(consumedOffset)); err != nil {
+			instrumentation.log.ErrorNoCtx().Err(err).Uint64("consumed_offset", consumedOffset).Msg("failed to send telemetry ack")
+		}
+	}
+	waitForConfirm := func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case _, ok := <-confirmations:
+			if !ok {
+				return fmt.Errorf("telemetry ack confirmation channel closed")
+			}
+			return nil
+		}
+	}
+
+	telemetryPlugin := pluginsdk.NewTelemetryPlugin(filePath, ackFunc, waitForConfirm)
+	if err := telemetryPlugin.Start(); err != nil {
+		return nil, err
+	}
+	go consumeTelemetryOperations(ctx, instrumentation, telemetryPlugin.Operations())
+	instrumentation.log.InfoNoCtx().Str("file", filePath).Msg("instrumentation telemetry plugin started")
+	return telemetryPlugin, nil
+}
+
+func consumeTelemetryOperations(ctx context.Context, instrumentation *plugin, operations <-chan *pluginsdk.ReconstructedOperation) {
+	for operation := range operations {
+		instrumentation.handleReconstructedOperation(ctx, operation)
+	}
+}
+
+func stopTelemetryPlugin(instrumentation *plugin, telemetryPlugin *pluginsdk.TelemetryPlugin) {
+	if telemetryPlugin == nil {
+		return
+	}
+	if err := telemetryPlugin.Stop(); err != nil {
+		instrumentation.log.ErrorNoCtx().Err(err).Msg("instrumentation telemetry plugin stop failed")
+	}
+}
+
+func telemetryAckEnvelope(consumedOffset uint64) *gcpc.EnvelopeV1 {
+	return &gcpc.EnvelopeV1{
+		Version: gcpc.ProtocolVersion,
+		Payload: &gcpc.EnvelopeV1_TelemetryAck{TelemetryAck: &gcpc.TelemetryAck{ConsumedOffset: consumedOffset}},
+	}
+}
+
+func signalTelemetryConfirmation(instrumentation *plugin, confirmations chan<- uint64, consumedOffset uint64) {
+	select {
+	case confirmations <- consumedOffset:
+	default:
+		instrumentation.log.WarnNoCtx().Uint64("consumed_offset", consumedOffset).Msg("dropping stale telemetry ack confirmation")
+	}
+}
+
+func hasGrantedScope(grantedScopes []string, wantedScope string) bool {
+	for _, grantedScope := range grantedScopes {
+		if grantedScope == wantedScope {
+			return true
+		}
+	}
+	return false
+}
+
+func logDeniedScopes(instrumentation *plugin, grantedScopes []string) {
+	grantedSet := make(map[string]struct{}, len(grantedScopes))
+	for _, grantedScope := range grantedScopes {
+		grantedSet[grantedScope] = struct{}{}
+	}
+	deniedScopes := make([]string, 0)
+	for _, requestedScope := range instrumentation.Scopes() {
+		if _, granted := grantedSet[requestedScope]; !granted {
+			deniedScopes = append(deniedScopes, requestedScope)
+		}
+	}
+	if len(deniedScopes) > 0 {
+		instrumentation.log.WarnNoCtx().Strs("denied", deniedScopes).Msg("scopes denied — features requiring these scopes will return errors")
+	}
+}
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
 	plog := apilogger.New(os.Stdout, pluginName, "debug")
 	plugin := newPlugin(plog)
-	if err := pluginsdk.Run(ctx, plugin); err != nil {
+	if err := runInstrumentationPlugin(ctx, plugin); err != nil {
 		plog.ErrorNoCtx().Err(err).Msg("plugin error")
 		os.Exit(1)
 	}

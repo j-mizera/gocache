@@ -97,7 +97,6 @@ func TestWorker_UsesSidecarOperationRecords(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   4,
 		CompletedRingPerShard: 1,
 	})
 	w := NewCleanupWorker(cache.New(), e, time.Hour)

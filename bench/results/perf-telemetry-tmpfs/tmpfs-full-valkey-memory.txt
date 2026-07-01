@@ -1,0 +1,17 @@
+label=tmpfs-full
+target=valkey
+valkey_image=valkey/valkey:8
+gocache_image=gocache-bench:local
+gocache_commit=448effa67061ebe0150bd7c5f309b873f1657b2d
+gocache_branch=perf/telemetry-tmpfs
+n=100000
+clients=50
+keyspace=100000
+pipeline=10
+target_cpus=0-3
+client_cpus=4-7
+mem_limit=2g
+baseline_rss_bytes=16127098
+post_standard_rss_bytes=31992053
+final_rss_bytes=34907095
+delta_rss_bytes=18779997

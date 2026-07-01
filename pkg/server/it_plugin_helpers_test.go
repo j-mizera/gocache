@@ -270,7 +270,6 @@ func startTestServerWithPubSub(t *testing.T) string {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           128,
-		RecordsPerOperation:   16,
 		CompletedRingPerShard: 128,
 	})
 

@@ -48,6 +48,11 @@ type ClientPusher interface {
 	Push(connectionID string, data []byte) error
 }
 
+// TelemetryDrainWorker receives the tmpfs fan-out for ScopeTelemetry subscribers.
+type TelemetryDrainWorker interface {
+	SetTmpfsWriter(writer io.Writer)
+}
+
 type eventBridgeMode string
 
 const (
@@ -79,26 +84,30 @@ func benchEventBridgeMode() eventBridgeMode {
 // or parameter. Shutdown calls the stored cancel function to terminate all
 // in-flight goroutines and subprocesses.
 type Manager struct {
-	cfg                 plugin.PluginsConfig
-	listener            *transport.Listener
-	registry            *Registry
-	router              *router.Router
-	hookRegistry        *cmdhooks.Registry
-	opHookRegistry      *ophooks.Registry
-	scopeRegistry       *permissions.Registry
-	queryRegistry       *QueryRegistry
-	eventBus            *serverEvents.Bus
-	logCollector        LogCollector
-	lifecycleOperations atomic.Pointer[TelemetryOperationTracker]
-	queryOperations     atomic.Pointer[TelemetryOperationTracker]
-	clientPusher        ClientPusher
-	commandMetrics      *commandmetrics.CommandCollector
+	cfg                  plugin.PluginsConfig
+	listener             *transport.Listener
+	registry             *Registry
+	router               *router.Router
+	hookRegistry         *cmdhooks.Registry
+	opHookRegistry       *ophooks.Registry
+	scopeRegistry        *permissions.Registry
+	queryRegistry        *QueryRegistry
+	eventBus             *serverEvents.Bus
+	logCollector         LogCollector
+	lifecycleOperations  atomic.Pointer[TelemetryOperationTracker]
+	queryOperations      atomic.Pointer[TelemetryOperationTracker]
+	clientPusher         ClientPusher
+	commandMetrics       *commandmetrics.CommandCollector
+	telemetryDrainWorker TelemetryDrainWorker
 
 	// cancel terminates the lifecycle context derived inside Start.
 	// nil before Start; reset to nil by Shutdown.
 	cancel context.CancelFunc
 
 	pluginConns             sync.Map // map[pluginName]*router.PluginConn
+	telemetryWritersMu      sync.Mutex
+	currentMultiWriter      io.Writer
+	telemetryWriters        map[string]*commonobs.TmpfsTelemetryWriter
 	commandMetricsConsumers sync.Map // map[pluginName]struct{}
 	stats                   managerStats
 	wg                      sync.WaitGroup
@@ -117,13 +126,14 @@ func NewManager(cfg plugin.PluginsConfig, coreCommands []string, stateProvider S
 	reg := NewRegistry()
 	qr := NewQueryRegistry()
 	mgr := &Manager{
-		cfg:            cfg,
-		registry:       reg,
-		router:         router.NewRouter(coreCommands),
-		hookRegistry:   cmdhooks.NewRegistry(),
-		opHookRegistry: ophooks.NewRegistry(),
-		scopeRegistry:  permissions.NewRegistry(),
-		queryRegistry:  qr,
+		cfg:              cfg,
+		registry:         reg,
+		router:           router.NewRouter(coreCommands),
+		hookRegistry:     cmdhooks.NewRegistry(),
+		opHookRegistry:   ophooks.NewRegistry(),
+		scopeRegistry:    permissions.NewRegistry(),
+		queryRegistry:    qr,
+		telemetryWriters: make(map[string]*commonobs.TmpfsTelemetryWriter),
 	}
 	RegisterBuiltinHandlers(qr, reg, mgr.pluginIPCStats, stateProvider)
 	return mgr
@@ -173,7 +183,9 @@ func (m *Manager) SetOperationTrackerManager(manager *commonobs.SlotOperationTra
 	m.lifecycleOperations.Store(lifecycleOperations)
 	m.queryOperations.Store(queryOperations)
 	RegisterOperationHandlers(m.queryRegistry, queryOperations)
-	RegisterTelemetryMetricsHandlers(m.queryRegistry, commandmetrics.NewTelemetryProvider(manager))
+	telemetryProvider := commandmetrics.NewTelemetryProvider(manager)
+	telemetryProvider.SetSubscriberSource(m)
+	RegisterTelemetryMetricsHandlers(m.queryRegistry, telemetryProvider)
 }
 
 // SetClientPusher wires the connection push interface so plugins can send
@@ -187,6 +199,65 @@ func (m *Manager) SetClientPusher(p ClientPusher) {
 func (m *Manager) SetCommandMetrics(c *commandmetrics.CommandCollector) {
 	m.commandMetrics = c
 	RegisterCommandMetricsHandlers(m.queryRegistry, c)
+}
+
+// SetTelemetryDrainWorker wires the server-side telemetry drain worker used by
+// ScopeTelemetry plugins that poll the tmpfs telemetry file.
+func (m *Manager) SetTelemetryDrainWorker(worker TelemetryDrainWorker) {
+	m.telemetryDrainWorker = worker
+	m.telemetryWritersMu.Lock()
+	currentWriter := m.currentMultiWriter
+	m.telemetryWritersMu.Unlock()
+	if worker != nil {
+		worker.SetTmpfsWriter(currentWriter)
+	}
+}
+
+// SubscriberStats returns per-subscriber tmpfs telemetry delivery health.
+// Implements commandmetrics.TelemetrySubscriberSource.
+func (m *Manager) SubscriberStats() []commandmetrics.TelemetrySubscriberSnapshot {
+	m.telemetryWritersMu.Lock()
+	defer m.telemetryWritersMu.Unlock()
+	stats := make([]commandmetrics.TelemetrySubscriberSnapshot, 0, len(m.telemetryWriters))
+	for name, writer := range m.telemetryWriters {
+		writeOffset := writer.WriteOffset()
+		consumedOffset := writer.ConsumedOffset()
+		stats = append(stats, commandmetrics.TelemetrySubscriberSnapshot{
+			Name:            name,
+			RecordsWritten:  writer.RecordsWritten(),
+			BytesWritten:    writer.BytesWritten(),
+			WriteErrors:     writer.WriteErrors(),
+			OverflowDropped: writer.OverflowDropped(),
+			WriteOffset:     writeOffset,
+			ConsumedOffset:  consumedOffset,
+		})
+	}
+	return stats
+}
+
+func rebuildMultiWriter(writers map[string]*commonobs.TmpfsTelemetryWriter) io.Writer {
+	if len(writers) == 0 {
+		return nil
+	}
+	ioWriters := make([]io.Writer, 0, len(writers))
+	for _, telemetryWriter := range writers {
+		if telemetryWriter != nil {
+			ioWriters = append(ioWriters, telemetryWriter)
+		}
+	}
+	if len(ioWriters) == 0 {
+		return nil
+	}
+	return io.MultiWriter(ioWriters...)
+}
+
+func (m *Manager) closeTelemetryWriter(pluginName string, telemetryWriter *commonobs.TmpfsTelemetryWriter) {
+	if telemetryWriter == nil {
+		return
+	}
+	if err := telemetryWriter.Close(); err != nil {
+		logger.WarnNoCtx().Str("plugin", pluginName).Err(err).Msg("failed to close tmpfs telemetry writer")
+	}
 }
 
 // startPluginLifecycleOp creates the lifecycle operation for a plugin instance
@@ -658,6 +729,37 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	critical := inst.Critical()
 	grantedStrings := scope.ScopeStrings(grantedScopes)
 	pluginCfgMap := pkgconfig.FlatPluginConfig(reg.Name)
+	if pluginCfgMap == nil {
+		pluginCfgMap = make(map[string]string)
+	}
+	if m.scopeRegistry.HasScope(reg.Name, scope.ScopeTelemetry) {
+		telemetryWriter, telemetryErr := commonobs.NewTmpfsTelemetryWriter(reg.Name)
+		if telemetryErr != nil {
+			errMsg := "telemetry tmpfs setup failed: " + telemetryErr.Error()
+			logger.Error(pluginCtx).Str("plugin", reg.Name).Err(telemetryErr).Msg("failed to create telemetry tmpfs writer")
+			m.recordPluginRegistrationFailed(inst, reg.Name, reg.Version, critical, errMsg)
+			m.deregisterPlugin(reg.Name)
+			_ = conn.Send(gcpcv1.NewRegisterAck(false, errMsg, nil, nil))
+			_ = conn.Close()
+			return
+		}
+		m.telemetryWritersMu.Lock()
+		if m.telemetryWriters == nil {
+			m.telemetryWriters = map[string]*commonobs.TmpfsTelemetryWriter{}
+		}
+		previousWriter := m.telemetryWriters[reg.Name]
+		m.telemetryWriters[reg.Name] = telemetryWriter
+		m.currentMultiWriter = rebuildMultiWriter(m.telemetryWriters)
+		currentWriter := m.currentMultiWriter
+		m.telemetryWritersMu.Unlock()
+		if m.telemetryDrainWorker != nil {
+			m.telemetryDrainWorker.SetTmpfsWriter(currentWriter)
+		} else {
+			logger.Warn(pluginCtx).Str("plugin", reg.Name).Msg("telemetry scope granted but tmpfs fan-out is not wired to the drain worker")
+		}
+		m.closeTelemetryWriter(reg.Name, previousWriter)
+		pluginCfgMap["GOCACHE_TELEMETRY_SHM"] = telemetryWriter.FilePath()
+	}
 	if err := conn.Send(gcpcv1.NewRegisterAck(true, "", grantedStrings, pluginCfgMap)); err != nil {
 		logger.Error(pluginCtx).Str("plugin", reg.Name).Err(err).Msg("failed to send register ack")
 		m.recordPluginRegistrationFailed(inst, reg.Name, reg.Version, critical, "failed to send register ack: "+err.Error())
@@ -692,6 +794,15 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 	inst.SetState(StateRunning)
 	pkgconfig.OnPluginReload(reg.Name, func(_ apiconfig.PluginConfig) {
 		updated := pkgconfig.FlatPluginConfig(reg.Name)
+		if updated == nil {
+			updated = make(map[string]string)
+		}
+		m.telemetryWritersMu.Lock()
+		telemetryWriter := m.telemetryWriters[reg.Name]
+		m.telemetryWritersMu.Unlock()
+		if telemetryWriter != nil {
+			updated["GOCACHE_TELEMETRY_SHM"] = telemetryWriter.FilePath()
+		}
 		_ = conn.Send(gcpcv1.NewConfigUpdate(updated))
 	})
 	logger.Info(pluginCtx).Str("plugin", reg.Name).Str("version", reg.Version).Bool("critical", critical).Int("commands", len(reg.Commands)).Strs("scopes", grantedStrings).Msg("plugin registered")
@@ -710,6 +821,7 @@ func (m *Manager) handleConnection(ctx context.Context, conn *transport.Conn) {
 
 	// Read loop for this plugin — single reader on the transport connection.
 	m.readLoop(ctx, inst, pc)
+	m.deregisterPlugin(reg.Name)
 }
 
 // validateScopes resolves the granted scopes for a plugin.
@@ -911,6 +1023,33 @@ func (m *Manager) readLoop(ctx context.Context, inst *PluginInstance, pc *router
 			if err := m.clientPusher.Push(push.ConnectionId, push.Data); err != nil {
 				logger.Debug(loopCtx).Str("plugin", inst.Name).Err(err).Msg("client push failed")
 			}
+		case *gcpcv1.EnvelopeV1_TelemetryAck:
+			telemetryAck := env.GetTelemetryAck()
+			if !m.scopeRegistry.HasScope(inst.Name, scope.ScopeTelemetry) {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("telemetry ack denied: missing 'telemetry' scope")
+				continue
+			}
+			m.telemetryWritersMu.Lock()
+			telemetryWriter := m.telemetryWriters[inst.Name]
+			m.telemetryWritersMu.Unlock()
+			if telemetryWriter == nil {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Msg("telemetry ack received but no tmpfs writer is registered")
+				continue
+			}
+			telemetryWriter.Acknowledge(telemetryAck.GetConsumedOffset())
+			if _, err := telemetryWriter.CompactIfNeeded(); err != nil {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Err(err).Msg("telemetry tmpfs compaction failed")
+				continue
+			}
+			confirmedOffset := telemetryWriter.ConsumedOffset()
+			ackEnvelope := &gcpcv1.EnvelopeV1{
+				Version: gcpcv1.ProtocolVersion,
+				Payload: &gcpcv1.EnvelopeV1_TelemetryAck{TelemetryAck: &gcpcv1.TelemetryAck{ConsumedOffset: confirmedOffset}},
+			}
+			if err := conn.Send(ackEnvelope); err != nil {
+				logger.Warn(loopCtx).Str("plugin", inst.Name).Err(err).Msg("failed to send telemetry ack confirmation")
+				return
+			}
 		case *gcpcv1.EnvelopeV1_CommandResponse:
 			if pc != nil {
 				pc.Deliver(env.GetCommandResponse().RequestId, env)
@@ -942,6 +1081,16 @@ func (m *Manager) deregisterPlugin(name string) {
 	if pc, ok := m.pluginConns.LoadAndDelete(name); ok {
 		pc.(*router.PluginConn).Close()
 	}
+	m.telemetryWritersMu.Lock()
+	telemetryWriter := m.telemetryWriters[name]
+	delete(m.telemetryWriters, name)
+	m.currentMultiWriter = rebuildMultiWriter(m.telemetryWriters)
+	currentWriter := m.currentMultiWriter
+	m.telemetryWritersMu.Unlock()
+	if m.telemetryDrainWorker != nil {
+		m.telemetryDrainWorker.SetTmpfsWriter(currentWriter)
+	}
+	m.closeTelemetryWriter(name, telemetryWriter)
 	if m.eventBus != nil {
 		m.eventBus.Unsubscribe("plugin:" + name)
 	}

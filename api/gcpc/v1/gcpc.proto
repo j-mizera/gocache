@@ -26,6 +26,7 @@ message EnvelopeV1 {
     OperationHookResponseV1 operation_hook_response = 81;
     PluginConfigV1          config_update           = 90;
     ClientPushV1            client_push             = 100;
+    TelemetryAck            telemetry_ack           = 110;
   }
 }
 
@@ -415,4 +416,55 @@ message OperationHookRequestV1 {
 message OperationHookResponseV1 {
   string              request_id     = 1;
   map<string, string> context_values = 2; // values to merge into operation context
+}
+
+// --- Telemetry tmpfs IPC (ADR-0037) ---
+
+// Tag is a key-value pair used for context representation in telemetry.
+// Protobuf bytes fields carry their own length prefix in wire format.
+message Tag {
+  bytes key   = 1;
+  bytes value = 2;
+}
+
+// TelemetryItemKind mirrors the in-memory TelemetryRecordKind enum values
+// (telemetry_record.go:78-88) but uses proto3-compatible explicit numbering.
+// NOTE: proto3 adds UNSPECIFIED=0, shifting all values by 1 compared to
+// the in-memory iota. Code that maps between them MUST use an explicit
+// switch, not a direct cast.
+enum TelemetryItemKind {
+  TELEMETRY_ITEM_UNSPECIFIED      = 0;
+  TELEMETRY_ITEM_OPERATION_START  = 1;
+  TELEMETRY_ITEM_OPERATION_FINISH = 2;
+  TELEMETRY_ITEM_COMMAND_START    = 3;
+  TELEMETRY_ITEM_COMMAND_FINISH   = 4;
+  TELEMETRY_ITEM_CONTEXT_UPDATE   = 5;
+  TELEMETRY_ITEM_CONTEXT_REMOVE   = 6;
+  TELEMETRY_ITEM_LOG              = 7;
+  TELEMETRY_ITEM_EVENT            = 8;
+  TELEMETRY_ITEM_DROP             = 9;
+}
+
+// TelemetryItem carries a single telemetry record within a TelemetryOperation.
+message TelemetryItem {
+  TelemetryItemKind kind    = 1;
+  bytes             payload = 2;
+}
+
+// TelemetryOperation represents a complete operation serialized as one protobuf
+// message. Written sequentially to per-plugin /dev/shm tmpfs files.
+// initial_context is the connection context snapshot at operation start time.
+// telemetry_items includes all records (operation lifecycle, command boundaries,
+// context deltas, logs) for this operation.
+message TelemetryOperation {
+  string                 operation_id    = 1;
+  repeated Tag           initial_context = 2;
+  repeated TelemetryItem telemetry_items = 3;
+  uint32                 command_count   = 4;
+}
+
+// TelemetryAck is sent by the plugin to the server after consuming telemetry
+// data from the tmpfs file. The server uses consumed_offset to compact the file.
+message TelemetryAck {
+  uint64 consumed_offset = 1;
 }

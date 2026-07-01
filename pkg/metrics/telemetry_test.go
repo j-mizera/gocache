@@ -12,6 +12,10 @@ type telemetrySourceStub struct {
 	droppedRecords             uint64
 	droppedCompletedOperations uint64
 	invalidHandles             uint64
+	commandsTotal              uint64
+	batchesTotal               uint64
+	operationsStarted          uint64
+	operationsCompleted        uint64
 	shardSkippedOperations     []uint64
 	shardStats                 []commonobs.SlotShardStats
 }
@@ -30,6 +34,22 @@ func (s telemetrySourceStub) DroppedCompletedOperations() uint64 {
 
 func (s telemetrySourceStub) InvalidHandles() uint64 {
 	return s.invalidHandles
+}
+
+func (s telemetrySourceStub) CommandsTotal() uint64 {
+	return s.commandsTotal
+}
+
+func (s telemetrySourceStub) BatchesTotal() uint64 {
+	return s.batchesTotal
+}
+
+func (s telemetrySourceStub) OperationsStarted() uint64 {
+	return s.operationsStarted
+}
+
+func (s telemetrySourceStub) OperationsCompleted() uint64 {
+	return s.operationsCompleted
 }
 
 func (s telemetrySourceStub) ShardCount() int {
@@ -57,11 +77,15 @@ func TestTelemetryProviderNilSourceReturnsZeroQueryData(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			metricsMap := tc.provider.QueryData()
 			expectedMetrics := map[string]string{
-				"telemetry.skipped_operations": "0",
-				"telemetry.dropped_records":    "0",
-				"telemetry.dropped_completed":  "0",
-				"telemetry.invalid_handles":    "0",
-				"telemetry.shards.count":       "0",
+				"telemetry.skipped_operations":   "0",
+				"telemetry.dropped_records":      "0",
+				"telemetry.dropped_completed":    "0",
+				"telemetry.invalid_handles":      "0",
+				"telemetry.commands_total":       "0",
+				"telemetry.batches_total":        "0",
+				"telemetry.operations_started":   "0",
+				"telemetry.operations_completed": "0",
+				"telemetry.shards.count":         "0",
 			}
 
 			if !reflect.DeepEqual(metricsMap, expectedMetrics) {
@@ -77,6 +101,10 @@ func TestTelemetryProviderSnapshotsAggregateAndShardPressure(t *testing.T) {
 		droppedRecords:             22,
 		droppedCompletedOperations: 33,
 		invalidHandles:             44,
+		commandsTotal:              45,
+		batchesTotal:               46,
+		operationsStarted:          47,
+		operationsCompleted:        48,
 		shardSkippedOperations:     []uint64{55, 66},
 		shardStats: []commonobs.SlotShardStats{
 			{Segments: 2, ActiveSlots: 3, FreeSlots: 4, CompletedSlots: 5},
@@ -91,6 +119,10 @@ func TestTelemetryProviderSnapshotsAggregateAndShardPressure(t *testing.T) {
 		DroppedRecords:             22,
 		DroppedCompletedOperations: 33,
 		InvalidHandles:             44,
+		CommandsTotal:              45,
+		BatchesTotal:               46,
+		OperationsStarted:          47,
+		OperationsCompleted:        48,
 		Shards: []TelemetryShardSnapshot{
 			{SkippedOperations: 55, Segments: 2, ActiveSlots: 3, FreeSlots: 4, CompletedSlots: 5},
 			{SkippedOperations: 66, Segments: 6, ActiveSlots: 7, FreeSlots: 8, CompletedSlots: 9},
@@ -108,6 +140,10 @@ func TestTelemetryProviderQueryDataUsesDeterministicShardKeys(t *testing.T) {
 		droppedRecords:             2,
 		droppedCompletedOperations: 3,
 		invalidHandles:             4,
+		commandsTotal:              15,
+		batchesTotal:               16,
+		operationsStarted:          17,
+		operationsCompleted:        18,
 		shardSkippedOperations:     []uint64{5, 10},
 		shardStats: []commonobs.SlotShardStats{
 			{Segments: 6, ActiveSlots: 7, FreeSlots: 8, CompletedSlots: 9},
@@ -117,25 +153,55 @@ func TestTelemetryProviderQueryDataUsesDeterministicShardKeys(t *testing.T) {
 
 	metricsMap := NewTelemetryProvider(source).QueryData()
 	expectedMetrics := map[string]string{
-		"telemetry.skipped_operations": "1",
-		"telemetry.dropped_records":    "2",
-		"telemetry.dropped_completed":  "3",
-		"telemetry.invalid_handles":    "4",
-		"telemetry.shards.count":       "2",
-		"telemetry.shard_0.skipped":    "5",
-		"telemetry.shard_0.active":     "7",
-		"telemetry.shard_0.free":       "8",
-		"telemetry.shard_0.completed":  "9",
-		"telemetry.shard_0.segments":   "6",
-		"telemetry.shard_1.skipped":    "10",
-		"telemetry.shard_1.active":     "12",
-		"telemetry.shard_1.free":       "13",
-		"telemetry.shard_1.completed":  "14",
-		"telemetry.shard_1.segments":   "11",
+		"telemetry.skipped_operations":   "1",
+		"telemetry.dropped_records":      "2",
+		"telemetry.dropped_completed":    "3",
+		"telemetry.invalid_handles":      "4",
+		"telemetry.commands_total":       "15",
+		"telemetry.batches_total":        "16",
+		"telemetry.operations_started":   "17",
+		"telemetry.operations_completed": "18",
+		"telemetry.shards.count":         "2",
+		"telemetry.shard_0.skipped":      "5",
+		"telemetry.shard_0.active":       "7",
+		"telemetry.shard_0.free":         "8",
+		"telemetry.shard_0.completed":    "9",
+		"telemetry.shard_0.segments":     "6",
+		"telemetry.shard_1.skipped":      "10",
+		"telemetry.shard_1.active":       "12",
+		"telemetry.shard_1.free":         "13",
+		"telemetry.shard_1.completed":    "14",
+		"telemetry.shard_1.segments":     "11",
 	}
 
 	if !reflect.DeepEqual(metricsMap, expectedMetrics) {
 		t.Fatalf("QueryData() = %#v, want %#v", metricsMap, expectedMetrics)
+	}
+}
+
+func TestTelemetrySnapshotQueryDataWithSubscribers(t *testing.T) {
+	snapshot := TelemetrySnapshot{
+		Subscribers: []TelemetrySubscriberSnapshot{
+			{
+				Name:            "instrumentation",
+				RecordsWritten:  100,
+				BytesWritten:    5000,
+				WriteErrors:     0,
+				OverflowDropped: 0,
+				WriteOffset:     5000,
+				ConsumedOffset:  4000,
+			},
+		},
+	}
+	metricsMap := snapshot.QueryData()
+	if metricsMap["telemetry.subscriber_0.name"] != "instrumentation" {
+		t.Errorf("subscriber_0.name = %q", metricsMap["telemetry.subscriber_0.name"])
+	}
+	if metricsMap["telemetry.subscriber_0.records_written_total"] != "100" {
+		t.Errorf("subscriber_0.records_written_total = %q", metricsMap["telemetry.subscriber_0.records_written_total"])
+	}
+	if metricsMap["telemetry.subscribers"] != "instrumentation" {
+		t.Errorf("subscribers = %q", metricsMap["telemetry.subscribers"])
 	}
 }
 

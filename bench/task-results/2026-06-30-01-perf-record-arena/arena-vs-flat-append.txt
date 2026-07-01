@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: gocache/commons/observability
+cpu: AMD Ryzen 9 7900X 12-Core Processor
+
+# Arena Append (hot path — zero alloc target)
+BenchmarkArenaAppend-24    69855264    17.83 ns/op    0 B/op    0 allocs/op
+BenchmarkArenaAppend-24    64542441    17.94 ns/op    0 B/op    0 allocs/op
+BenchmarkArenaAppend-24    65565146    17.86 ns/op    0 B/op    0 allocs/op
+BenchmarkArenaAppend-24    68811438    17.79 ns/op    0 B/op    0 allocs/op
+BenchmarkArenaAppend-24    64613541    17.59 ns/op    0 B/op    0 allocs/op
+
+# Legacy Flat Array Write (baseline comparison)
+BenchmarkLegacyFlatArrayWrite-24    97285324    12.12 ns/op    0 B/op    0 allocs/op
+BenchmarkLegacyFlatArrayWrite-24   100000000    12.57 ns/op    0 B/op    0 allocs/op
+BenchmarkLegacyFlatArrayWrite-24    91086211    12.15 ns/op    0 B/op    0 allocs/op
+BenchmarkLegacyFlatArrayWrite-24    95665423    11.91 ns/op    0 B/op    0 allocs/op
+BenchmarkLegacyFlatArrayWrite-24   100000000    11.92 ns/op    0 B/op    0 allocs/op

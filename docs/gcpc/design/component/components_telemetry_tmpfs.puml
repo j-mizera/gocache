@@ -1,0 +1,93 @@
+@startuml components_telemetry_tmpfs
+!include ../../../design/theme.iuml
+
+title Telemetry tmpfs IPC Architecture (ADR-0037)
+
+frame "GoCache Server" as Server {
+
+  rectangle "Command hot path" as hotpath {
+    component "Command\nGoroutine" as CmdGoro <<per-connection>>
+    component "Slot Tracker" as SlotTracker <<zero-alloc ring\n(ADR-0034)>>
+  }
+
+  rectangle "Drain path (SIMPLIFIED)" as drain {
+    component "Drain Worker" as DrainWorker <<protobuf serializer\nio.MultiWriter\nNO materialization\nNO context map>>
+    component "Tmpfs Writer" as TmpfsWriter <<mmap /dev/shm\nsequential write>>
+    component "Socket\nCoordinator" as SocketCoord <<TelemetryAck{consumed_offset}\nTelemetryAck>>
+  }
+}
+
+database "/dev/shm/\ngocache-telemetry-<plugin>" as ShmFile <<tmpfs\n15M ceiling\nsequential bytes>>
+
+frame "Observability Plugin\n(instrumentation / lifecycleotlp)" as Plugin {
+  component "Socket Reader" as SockReader <<coordination only>>
+  component "Tmpfs Reader" as TmpfsReader <<pread at offset>>
+  component "Context\nReconstructor" as CtxRecon <<delta state machine\nTag{keyLen,keyBytes,\nvalLen,valBytes}>>
+  component "OTLP Converter" as OtlpConv
+  component "Exporter" as Exporter <<HTTP/gRPC>>
+}
+
+cloud "Jaeger /\nOTLP Backend" as Backend
+
+' --- Command hot path (unchanged) ---
+CmdGoro --> SlotTracker : RecordTelemetry\n(TelemetryRecord bytes)
+
+' --- Drain path (NEW: stripped) ---
+SlotTracker --> DrainWorker : completed operation\n(records []TelemetryRecord)
+DrainWorker --> TmpfsWriter : serialized TelemetryOperation\nprotobuf (whole operation)\n(ZERO map alloc)
+TmpfsWriter --> ShmFile : sequential write\n(mmap, ~200ns)
+
+' --- Socket coordination (NEW: coordination only) ---
+SockReader --> ShmFile : polls for new data
+
+' --- Plugin read path (NEW) ---
+SockReader --> TmpfsReader : wake up, read at offset
+TmpfsReader --> ShmFile : pread(offset, length)
+TmpfsReader --> CtxRecon : TelemetryOperation\n{opId, record bytes}
+CtxRecon --> CtxRecon : apply Tag deltas\nreconstruct context map
+CtxRecon --> OtlpConv : full operation\n+ materialized context
+OtlpConv --> Exporter : OTLP spans/logs
+Exporter --> Backend : OTLP HTTP/gRPC
+
+' --- Ack path (NEW) ---
+TmpfsReader --> SockReader : read complete
+SockReader --> SocketCoord : TelemetryAck{consumed_offset}
+SocketCoord --> TmpfsWriter : truncate consumed bytes
+SocketCoord --> SockReader : ack confirm (compaction done)
+
+note bottom of drain
+  **REMOVED from drain worker (ADR-0036 path):**
+  • copyOperationContext — map[string]string allocation
+  • foldContextUpdate — string() from binary payload
+  • 6 materialize functions — GCPC EventV1 construction
+  • Event Bus → Plugin Bridge → Router FIFO → Transport
+
+  The drain worker now does ONE thing:
+  copy record bytes → write to tmpfs → done.
+end note
+
+note right of ShmFile
+  **File format (whole operations):**
+  [4-byte len][serialized TelemetryOperation protobuf]
+  [4-byte len][serialized TelemetryOperation protobuf]
+  ...
+
+  TelemetryOperation proto = {
+    operation_id: string
+    initial_context: repeated Tag
+    telemetry_items: repeated TelemetryItem
+  }
+
+  Tag = { key: bytes, value: bytes }
+
+  initial_context = connection context
+    snapshot at OpStart (the base).
+
+  telemetry_items include ContextUpdate/
+    ContextRemove deltas applied on top
+    of initial_context.
+
+  Serialized protobuf is the format.
+end note
+
+@enduml

@@ -71,16 +71,13 @@ const (
 	// path in pkg/server which has its own shorter timeout.
 	serverShutdownTimeout = 10 * time.Second
 
-	// Steady-state OperationTracker defaults are intentionally hardcoded in
-	// this first production wiring slice. ADR-0034 treats tracker sizing and
-	// config surface as benchmark-driven follow-up work; these bounded values
-	// activate command-scope telemetry without adding deployment knobs yet.
+	// Steady-state OperationTracker defaults are intentionally hardcoded in this
+	// production wiring slice. The tracker starts with three segments per shard and
+	// enables the bounded hot-shard growth monitor without adding deployment knobs.
 	steadyStateOperationTrackerShardCount          = 8
-	steadyStateOperationTrackerMinSegmentsPerShard = 1
+	steadyStateOperationTrackerMinSegmentsPerShard = 3
 	steadyStateOperationTrackerMaxSegmentsPerShard = 4
 	steadyStateOperationTrackerSegmentSize         = 256
-	// Per-batch pipeline telemetry nests OpStart+10×CmdStart+10×CmdFinish+OpFinish = 22 ≤ 24.
-	steadyStateOperationTrackerRecordsPerOperation = 24
 	// Match the initially preallocated slots so accepted operations are retained
 	// for the projection/drain worker instead of being dropped/recycled.
 	steadyStateOperationTrackerCompletedRingPerShard = steadyStateOperationTrackerMinSegmentsPerShard * steadyStateOperationTrackerSegmentSize
@@ -126,8 +123,12 @@ func newSteadyStateOperationTrackerManager() *commonobs.SlotOperationTrackerMana
 		MaxSegmentsPerShard:   steadyStateOperationTrackerMaxSegmentsPerShard,
 		SegmentSize:           steadyStateOperationTrackerSegmentSize,
 		MagazineCapacity:      16,
-		RecordsPerOperation:   steadyStateOperationTrackerRecordsPerOperation,
 		CompletedRingPerShard: steadyStateOperationTrackerCompletedRingPerShard,
+		MaxChunksPerClass:     int64(steadyStateOperationTrackerMaxSegmentsPerShard * steadyStateOperationTrackerSegmentSize),
+		HotShardGrowth: commonobs.HotShardGrowthConfig{
+			Enabled:           true,
+			MaxGrowthSegments: 4,
+		},
 	})
 }
 
@@ -386,7 +387,6 @@ func main() {
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
 		MagazineCapacity:      16,
-		RecordsPerOperation:   64,
 		CompletedRingPerShard: 1,
 	})
 	startupOperation := apiobs.InternalOperationIdentity(1)
@@ -471,7 +471,7 @@ func main() {
 	srv.SetOperationTrackerManager(steadyStateOperationTracker)
 	benchstats.SetOperationTrackerManager(steadyStateOperationTracker)
 	operationDrainWorker := server.NewOperationTrackerDrainWorker(steadyStateOperationTracker, steadyStateOperationTrackerDrainInterval)
-	operationDrainWorker.SetWorkerCount(2)
+	operationDrainWorker.SetWorkerCount(8)
 	operationDrainWorker.SetEmitter(eventBus)
 
 	// --- Plugin loading (NOT an operation — plugins must be ready before operations can be hooked) ---

@@ -14,7 +14,6 @@ func TestSubmitHandlerErrorLogRecordsListWriteBackFailureThroughHolder(t *testin
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(201, apiobs.ParentRef{}, 0)

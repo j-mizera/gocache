@@ -32,7 +32,6 @@ func TestIT_TelemetryDrainWorkerPublishesCommandTelemetry(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           16,
-		RecordsPerOperation:   16,
 		CompletedRingPerShard: 16,
 	})
 
@@ -123,7 +122,6 @@ func TestIT_TelemetryDrainWorkerMaterializesRuntimeLogFromTCPReadError(t *testin
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           16,
-		RecordsPerOperation:   16,
 		CompletedRingPerShard: 16,
 	})
 

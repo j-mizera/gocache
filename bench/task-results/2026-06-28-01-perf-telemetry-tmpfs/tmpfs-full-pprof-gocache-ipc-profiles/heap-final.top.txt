@@ -1,0 +1,96 @@
+File: gocache
+Build ID: 3c4e2a0fbbc501d40a065f39fcf16f99af2ee1d7
+Type: inuse_space
+Time: 2026-06-28 16:41:52 UTC
+Showing nodes accounting for 76.82MB, 100% of 76.82MB total
+      flat  flat%   sum%        cum   cum%
+   28.30MB 36.84% 36.84%    28.30MB 36.84%  gocache/pkg/cache/slab.newSlab (inline)
+   15.56MB 20.25% 57.09%    15.56MB 20.25%  gocache/commons/observability.newOperationSegment (inline)
+   12.83MB 16.70% 73.79%    12.83MB 16.70%  gocache/pkg/cache.(*Shard).setPackedInternal
+    7.50MB  9.76% 83.55%     8.50MB 11.06%  gocache/commons/resp.(*Reader).readBulkString
+    2.04MB  2.65% 86.20%     2.04MB  2.65%  github.com/gammazero/deque.(*Deque[go.shape.string]).resize (inline)
+    2.01MB  2.62% 88.82%     2.01MB  2.62%  gocache/pkg/resp/handler.init.func1
+    1.50MB  1.96% 90.78%       10MB 13.02%  gocache/commons/resp.(*Reader).readArray
+       1MB  1.30% 92.08%        1MB  1.30%  google.golang.org/protobuf/internal/impl.fieldInfoForOneof
+       1MB  1.30% 93.38%        1MB  1.30%  bufio.(*Reader).ReadBytes
+    0.54MB   0.7% 94.08%     0.54MB   0.7%  gocache/pkg/events.newRing (inline)
+    0.53MB  0.69% 94.77%     0.53MB  0.69%  gocache/pkg/logcollector.(*Collector).readSource
+    0.51MB  0.67% 95.44%    16.07MB 20.92%  gocache/commons/observability.(*operationSlotShard).init
+    0.50MB  0.65% 96.09%     0.50MB  0.65%  runtime.allocm
+    0.50MB  0.65% 96.75%     0.50MB  0.65%  gocache/commons/observability.(*SlotOperationTrackerManager).DrainCompletedShard
+    0.50MB  0.65% 97.40%     0.50MB  0.65%  runtime.malg
+    0.50MB  0.65% 98.05%    27.88MB 36.29%  gocache/pkg/server.(*Server).handleConnection
+    0.50MB  0.65% 98.70%     0.50MB  0.65%  gocache/pkg/cache/slab.newSlabClass (inline)
+    0.50MB  0.65% 99.35%     2.51MB  3.27%  gocache/pkg/resp/handler.HandleMset
+    0.50MB  0.65%   100%     0.50MB  0.65%  net.newTCPConn
+         0     0%   100%     2.04MB  2.65%  github.com/gammazero/deque.(*Deque[go.shape.string]).PushFront
+         0     0%   100%     2.04MB  2.65%  github.com/gammazero/deque.(*Deque[go.shape.string]).growIfFull
+         0     0%   100%    15.56MB 20.25%  gocache/commons/observability.(*operationSlotShard).addSegmentLocked
+         0     0%   100%    16.07MB 20.92%  gocache/commons/observability.NewSlotOperationTrackerManager
+         0     0%   100%       10MB 13.02%  gocache/commons/resp.(*Reader).Read
+         0     0%   100%        1MB  1.30%  gocache/commons/resp.(*Reader).ReadLine
+         0     0%   100%        1MB  1.30%  gocache/commons/resp.(*Reader).readInteger
+         0     0%   100%     0.50MB  0.65%  gocache/commons/transport.(*Conn).Recv
+         0     0%   100%    12.83MB 16.70%  gocache/pkg/cache.(*Cache).RawSet
+         0     0%   100%    12.83MB 16.70%  gocache/pkg/cache.(*Shard).rawSet
+         0     0%   100%    12.83MB 16.70%  gocache/pkg/cache.(*Shard).setInternal
+         0     0%   100%    28.80MB 37.49%  gocache/pkg/cache.NewWithShards
+         0     0%   100%    28.80MB 37.49%  gocache/pkg/cache.newCache
+         0     0%   100%    28.80MB 37.49%  gocache/pkg/cache.newShard (inline)
+         0     0%   100%    28.30MB 36.84%  gocache/pkg/cache/slab.(*slabClass).alloc
+         0     0%   100%    28.30MB 36.84%  gocache/pkg/cache/slab.(*slabClass).growOneSlab
+         0     0%   100%    28.80MB 37.49%  gocache/pkg/cache/slab.NewAllocatorWithTargetBytes
+         0     0%   100%    14.87MB 19.35%  gocache/pkg/command.Dispatch
+         0     0%   100%    14.87MB 19.35%  gocache/pkg/command.Dispatch.wrapWithEmission.func1
+         0     0%   100%    14.87MB 19.35%  gocache/pkg/command.wrapInline (inline)
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/events.(*Bus).Emit
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/events.(*ring).push
+         0     0%   100%     0.54MB   0.7%  gocache/pkg/events.NewBusWithCapacity (inline)
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/events.cloneEvent
+         0     0%   100%     0.53MB  0.69%  gocache/pkg/logcollector.(*Collector).AddSource.func1
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/logcollector.(*Collector).emitBatch
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/logcollector.(*Collector).flush
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0%   100%     2.51MB  3.27%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0%   100%    14.87MB 19.35%  gocache/pkg/pipeline.(*Pipeline).EvaluatePreLocked (inline)
+         0     0%   100%    17.38MB 22.62%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/plugin/manager.(*Manager).acceptLoop.func1
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/plugin/manager.(*Manager).handleConnection
+         0     0%   100%    12.83MB 16.70%  gocache/pkg/resp/handler.HandleIncr
+         0     0%   100%    12.83MB 16.70%  gocache/pkg/resp/handler.HandleIncr.func1
+         0     0%   100%     2.04MB  2.65%  gocache/pkg/resp/handler.HandleLpush
+         0     0%   100%     2.04MB  2.65%  gocache/pkg/resp/handler.HandleLpush.func1
+         0     0%   100%    12.83MB 16.70%  gocache/pkg/resp/handler.incrByDelta
+         0     0%   100%     2.04MB  2.65%  gocache/pkg/resp/handler.lpushNative
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainRangeOnce
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/server.(*OperationTrackerDrainWorker).drainRangeUntilEmpty
+         0     0%   100%     0.50MB  0.65%  gocache/pkg/server.(*Server).acceptConnections
+         0     0%   100%    20.87MB 27.16%  gocache/pkg/server.(*Server).runBatch
+         0     0%   100%        1MB  1.30%  google.golang.org/protobuf/internal/impl.(*MessageInfo).init (inline)
+         0     0%   100%        1MB  1.30%  google.golang.org/protobuf/internal/impl.(*MessageInfo).initOnce
+         0     0%   100%        1MB  1.30%  google.golang.org/protobuf/internal/impl.(*MessageInfo).makeKnownFieldsFunc
+         0     0%   100%        1MB  1.30%  google.golang.org/protobuf/internal/impl.(*MessageInfo).makeReflectFuncs
+         0     0%   100%        1MB  1.30%  google.golang.org/protobuf/internal/impl.(*messageState).ProtoMethods
+         0     0%   100%     0.50MB  0.65%  google.golang.org/protobuf/proto.Clone
+         0     0%   100%     0.50MB  0.65%  google.golang.org/protobuf/proto.Unmarshal
+         0     0%   100%     0.50MB  0.65%  google.golang.org/protobuf/proto.UnmarshalOptions.unmarshal
+         0     0%   100%     0.50MB  0.65%  google.golang.org/protobuf/proto.mergeOptions.mergeMessage
+         0     0%   100%        1MB  1.30%  google.golang.org/protobuf/proto.protoMethods (inline)
+         0     0%   100%    45.41MB 59.11%  main.main
+         0     0%   100%    16.07MB 20.92%  main.newSteadyStateOperationTrackerManager (inline)
+         0     0%   100%     0.50MB  0.65%  net.(*TCPListener).Accept
+         0     0%   100%     0.50MB  0.65%  net.(*TCPListener).accept
+         0     0%   100%    45.41MB 59.11%  runtime.main
+         0     0%   100%     0.50MB  0.65%  runtime.mstart
+         0     0%   100%     0.50MB  0.65%  runtime.mstart0
+         0     0%   100%     0.50MB  0.65%  runtime.mstart1
+         0     0%   100%     0.50MB  0.65%  runtime.newm
+         0     0%   100%     0.50MB  0.65%  runtime.newproc.func1
+         0     0%   100%     0.50MB  0.65%  runtime.newproc1
+         0     0%   100%     0.50MB  0.65%  runtime.resetspinning
+         0     0%   100%     0.50MB  0.65%  runtime.schedule
+         0     0%   100%     0.50MB  0.65%  runtime.startm
+         0     0%   100%     0.50MB  0.65%  runtime.systemstack
+         0     0%   100%     0.50MB  0.65%  runtime.wakep
+         0     0%   100%     2.01MB  2.62%  sync.(*Pool).Get

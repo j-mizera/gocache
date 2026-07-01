@@ -1,0 +1,28 @@
+File: gocache
+Build ID: 3c4e2a0fbbc501d40a065f39fcf16f99af2ee1d7
+Type: delay
+Time: 2026-06-28 16:41:52 UTC
+Showing nodes accounting for 172.49s, 100% of 172.49s total
+Dropped 57 nodes (cum <= 0.86s)
+      flat  flat%   sum%        cum   cum%
+   144.21s 83.60% 83.60%    144.21s 83.60%  runtime.selectgo
+    28.28s 16.40%   100%     28.28s 16.40%  sync.(*Mutex).Lock (inline)
+         0     0%   100%     18.06s 10.47%  gocache/pkg/cache.(*Cache).LockShards
+         0     0%   100%     28.27s 16.39%  gocache/pkg/cache.(*Shard).Lock (inline)
+         0     0%   100%     18.06s 10.47%  gocache/pkg/command.Dispatch
+         0     0%   100%     10.21s  5.92%  gocache/pkg/engine.(*Engine).AcquireShard
+         0     0%   100%     18.06s 10.47%  gocache/pkg/engine.(*Engine).DispatchToShards
+         0     0%   100%        26s 15.07%  gocache/pkg/logcollector.(*Collector).runFlusher
+         0     0%   100%        26s 15.07%  gocache/pkg/logcollector.New.gowrap1
+         0     0%   100%     18.06s 10.47%  gocache/pkg/pipeline.(*Pipeline).Evaluate (inline)
+         0     0%   100%     18.06s 10.47%  gocache/pkg/pipeline.(*Pipeline).evaluateCore
+         0     0%   100%        40s 23.19%  gocache/pkg/plugin/manager.(*Manager).handleConnection.func2
+         0     0%   100%        40s 23.19%  gocache/pkg/plugin/manager.(*Manager).healthLoop
+         0     0%   100%     18.06s 10.47%  gocache/pkg/resp/handler.HandleMset
+         0     0%   100%     51.91s 30.09%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func1
+         0     0%   100%     26.30s 15.25%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.func2
+         0     0%   100%     51.91s 30.09%  gocache/pkg/server.(*OperationTrackerDrainWorker).Start.gowrap1
+         0     0%   100%     28.28s 16.40%  gocache/pkg/server.(*Server).acceptConnections.gowrap1
+         0     0%   100%     28.28s 16.40%  gocache/pkg/server.(*Server).handleConnection
+         0     0%   100%     10.21s  5.92%  gocache/pkg/server.(*Server).runBatch
+         0     0%   100%     28.27s 16.39%  sync.(*RWMutex).Lock

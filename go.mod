@@ -17,6 +17,7 @@ require (
 	github.com/gammazero/deque v1.2.1
 	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.6
+	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10
 	github.com/rs/zerolog v1.34.0
 	github.com/testcontainers/testcontainers-go v0.42.0
 	go.opentelemetry.io/otel v1.43.0

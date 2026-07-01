@@ -1,0 +1,52 @@
+@startuml state_tmpfs_file_lifecycle
+!include ../../../design/theme.iuml
+
+title tmpfs File Lifecycle (ADR-0037)
+
+[*] --> Created : plugin registers with\nscope.ScopeTelemetry
+
+Created --> Writing : first serialized TelemetryOperation\nprotobuf written by drain worker
+
+Writing --> Notified : plugin poll observes\nreadable range {offset, len}\nvia socket
+
+Notified --> Reading : plugin wakes,\nstarts pread at offset
+
+Reading --> Acked : plugin finishes read,\nsends TelemetryAck{len}
+
+Acked --> Truncated : server truncates\nconsumed bytes\n(ftruncate / advance)
+
+Truncated --> Writing : next whole operation\nserialized and written
+
+Writing --> CeilingReached : file size >= 15M\nbefore plugin acks
+
+CeilingReached --> ForcedFlush : server exposes\nreadable range immediately
+
+ForcedFlush --> Reading : plugin reads\nbefore more data arrives
+
+state "Overflow handling" as overflow {
+  CeilingReached : increment TelemetryOverflowDropped
+  CeilingReached : truncate oldest unconsumed data
+  CeilingReached : emit gap notification via socket
+}
+
+Created --> Closed : plugin disconnects
+Acked --> Closed : plugin disconnects
+Writing --> Closed : server shutdown
+Closed --> [*] : unlink /dev/shm file
+
+note right of CeilingReached
+  Overflow is bounded and counted.
+  Oldest unconsumed data is truncated
+  first (FIFO loss). A gap counter
+  replaces ADR-0036's SkippedOperations
+  for the tmpfs path.
+end note
+
+note left of Truncated
+  Truncation advances a read offset;
+  the file is not physically resized
+  every cycle. Periodic ftruncate
+  compacts the file.
+end note
+
+@enduml

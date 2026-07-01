@@ -1,0 +1,102 @@
+@startuml sequence_telemetry_tmpfs
+!include ../../../design/theme.iuml
+
+title Telemetry tmpfs Write-Read-Ack Sequence (ADR-0037)
+
+actor Client
+participant "Command\nGoroutine" as CmdGoro
+participant "Slot Tracker" as Tracker
+participant "Drain Worker" as Drain
+participant "Tmpfs Writer\n(mmap)" as Writer
+database "/dev/shm file" as Shm
+participant "Socket" as Sock
+participant "Plugin\nSocket Reader" as PluginSock
+participant "Plugin\nTmpfs Reader" as PluginReader
+participant "Context\nReconstructor" as Recon
+participant "OTLP Exporter" as OTLP
+
+== Operation recording (unchanged, zero-alloc) ==
+Client -> CmdGoro : RESP command
+CmdGoro -> Tracker : RecordTelemetry(TelemetryRecord)
+note right of Tracker
+  Records stored as compact binary
+  in slot ring. Zero heap allocation
+  on the command hot path (ADR-0034).
+end note
+
+== Drain (NEW: protobuf serialize, no materialization) ==
+Tracker -> Drain : completed operation
+activate Drain
+Drain -> Drain : serialize entire operation\nas TelemetryOperation protobuf
+note right of Drain
+  Whole operation to ONE protobuf message:
+  - operation_id
+  - initial_context: Tag[] from
+    VisitConnectionContextVersion
+    (snapshot at OpStart, no map alloc)
+  - all telemetry items (records)
+  - context deltas as Tag fields
+  - NO map allocation
+  - NO string conversion
+  - NO materialize function calls
+end note
+Drain -> Writer : write serialized\nTelemetryOperation protobuf
+Writer -> Shm : mmap write (~200ns)
+deactivate Drain
+
+== Plugin self-drive (polling) ==
+PluginSock -> Sock : poll for readable range
+Sock --> PluginSock : readable range {offset, length}
+activate PluginSock
+
+== Plugin read (at plugin's own pace) ==
+PluginSock -> PluginReader : wake, read at offset
+activate PluginReader
+PluginReader -> Shm : pread(offset, length)
+PluginReader -> Recon : serialized TelemetryOperation\nmessages (whole operations)
+activate Recon
+
+loop for each whole TelemetryOperation
+  Recon -> Recon : deserialize protobuf\n-> op_id + initial_context + items
+  Recon -> Recon : seed context from\ninitial_context Tags
+  Recon -> Recon : iterate telemetry items
+  alt ContextUpdate / ContextRemove item
+    Recon -> Recon : apply Tag delta\non top of initial_context
+  else OperationStart item
+    Recon -> Recon : confirm context state\nmachine initialized
+  else CommandStart / CommandFinish item
+    Recon -> Recon : track command boundary
+  else OperationFinish item
+    Recon -> Recon : finalize context map
+    Recon -> OTLP : convert to OTLP span + logs
+  end
+end
+
+deactivate Recon
+
+== Ack and truncate ==
+PluginReader -> PluginSock : read complete
+deactivate PluginReader
+PluginSock -> Sock : TelemetryAck{consumed_offset}
+deactivate PluginSock
+Sock -> Writer : truncate consumed bytes
+Writer -> Shm : ftruncate / advance offset
+
+note over CmdGoro, Tracker
+  The command hot path is completely
+  unchanged from ADR-0034. Zero allocation.
+end note
+
+note over Drain, Writer
+  The drain path is radically simplified.
+  No event bus, no plugin bridge, no router
+  FIFO, no transport.SendBatch for telemetry.
+end note
+
+note over PluginSock, OTLP
+  The plugin owns all context reconstruction
+  and OTLP conversion. No concurrent client
+  connections — full CPU budget available.
+end note
+
+@enduml

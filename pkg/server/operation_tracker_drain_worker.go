@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +20,7 @@ import (
 
 const defaultOperationTrackerDrainInterval = 10 * time.Millisecond
 const defaultOperationTrackerGapInterval = 100 * time.Millisecond
-const maxOperationTrackerDrainWorkerCount = 4
+const maxOperationTrackerDrainWorkerCount = 8
 
 const operationTrackerDrainParentField = "_parent_operation_id"
 
@@ -27,10 +29,14 @@ const operationTrackerDrainParentField = "_parent_operation_id"
 // after command execution has finished, keeping zerolog formatting and sink I/O
 // off the command goroutine.
 type OperationTrackerDrainWorker struct {
-	manager      *commonobs.SlotOperationTrackerManager
-	interval     time.Duration
-	gapInterval  time.Duration
-	emitter      apievents.Emitter
+	manager                *commonobs.SlotOperationTrackerManager
+	interval               time.Duration
+	gapInterval            time.Duration
+	emitter                apievents.Emitter
+	tmpfsWriterMu          sync.RWMutex
+	tmpfsWriter            io.Writer
+	hasTelemetrySubscriber bool
+
 	idleBackoff  time.Duration // exponential backoff for idle state
 	workerCount  int
 	rangeWorkers []shardRangeWorker
@@ -55,6 +61,12 @@ type drainWorkerScratch struct {
 	metadata   []kvPair
 	eventBuf   *gcpcv1.EventV1
 	contextMap map[string]string
+
+	// Proto object pooling eliminates per-operation telemetry graph allocations after warmup.
+	telemetryOp *gcpcv1.TelemetryOperation
+	protoItems  []*gcpcv1.TelemetryItem
+	protoTags   []*gcpcv1.Tag
+	marshalBuf  []byte
 }
 
 type gapJanitor struct {
@@ -84,6 +96,60 @@ func (s *drainWorkerScratch) reset() {
 	for key := range s.contextMap {
 		delete(s.contextMap, key)
 	}
+	if s.telemetryOp != nil {
+		s.telemetryOp.OperationId = ""
+		s.telemetryOp.InitialContext = s.telemetryOp.InitialContext[:0]
+		s.telemetryOp.TelemetryItems = s.telemetryOp.TelemetryItems[:0]
+	}
+	for i := range s.protoItems {
+		s.protoItems[i].Kind = 0
+		s.protoItems[i].Payload = nil
+	}
+	for i := range s.protoTags {
+		s.protoTags[i].Key = s.protoTags[i].Key[:0]
+		s.protoTags[i].Value = s.protoTags[i].Value[:0]
+	}
+	s.marshalBuf = s.marshalBuf[:0]
+}
+
+func (s *drainWorkerScratch) borrowTag(key, value string) *gcpcv1.Tag {
+	var tag *gcpcv1.Tag
+	if tagCount := len(s.protoTags); tagCount > 0 {
+		tag = s.protoTags[tagCount-1]
+		s.protoTags = s.protoTags[:tagCount-1]
+	} else {
+		tag = &gcpcv1.Tag{}
+	}
+	tag.Key = append(tag.Key[:0], key...)
+	tag.Value = append(tag.Value[:0], value...)
+	return tag
+}
+
+func (s *drainWorkerScratch) borrowTelemetryItem() *gcpcv1.TelemetryItem {
+	var telemetryItem *gcpcv1.TelemetryItem
+	if itemCount := len(s.protoItems); itemCount > 0 {
+		telemetryItem = s.protoItems[itemCount-1]
+		s.protoItems = s.protoItems[:itemCount-1]
+	} else {
+		telemetryItem = &gcpcv1.TelemetryItem{}
+	}
+	return telemetryItem
+}
+
+func (s *drainWorkerScratch) returnTelemetryItems(items []*gcpcv1.TelemetryItem) {
+	for _, telemetryItem := range items {
+		telemetryItem.Kind = 0
+		telemetryItem.Payload = nil
+	}
+	s.protoItems = append(s.protoItems, items...)
+}
+
+func (s *drainWorkerScratch) returnTags(tags []*gcpcv1.Tag) {
+	for _, tag := range tags {
+		tag.Key = tag.Key[:0]
+		tag.Value = tag.Value[:0]
+	}
+	s.protoTags = append(s.protoTags, tags...)
 }
 
 func newGapJanitor(interval time.Duration) *gapJanitor {
@@ -153,7 +219,7 @@ func NewOperationTrackerDrainWorker(manager *commonobs.SlotOperationTrackerManag
 		stopCh:      make(chan struct{}),
 		idleBackoff: 1 * time.Millisecond,
 	}
-	worker.SetWorkerCount(1)
+	worker.SetWorkerCount(8)
 	if manager != nil {
 		manager.SetCompletedNotify(worker.nudge)
 	}
@@ -232,6 +298,18 @@ func (w *OperationTrackerDrainWorker) SetEmitter(emitter apievents.Emitter) {
 		emitter = apievents.NoopEmitter{}
 	}
 	w.emitter = emitter
+}
+
+// SetTmpfsWriter wires the tmpfs telemetry fan-out used by ScopeTelemetry
+// subscribers. The writer may be an io.MultiWriter for per-plugin fan-out.
+func (w *OperationTrackerDrainWorker) SetTmpfsWriter(writer io.Writer) {
+	if w == nil {
+		return
+	}
+	w.tmpfsWriterMu.Lock()
+	w.tmpfsWriter = writer
+	w.hasTelemetrySubscriber = writer != nil
+	w.tmpfsWriterMu.Unlock()
 }
 
 // SetGapInterval configures how often the worker samples OperationTracker loss
@@ -414,38 +492,165 @@ func (w *OperationTrackerDrainWorker) drainRangeOnce(rangeWorker *shardRangeWork
 }
 
 func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation commonobs.CompletedOperation, scratch *drainWorkerScratch) {
-	if w.emitter == nil || scratch == nil {
+	if scratch == nil {
 		return
 	}
-	operationContext := w.copyOperationContext(operation)
+	w.tmpfsWriterMu.RLock()
+	hasTelemetrySubscriber := w.hasTelemetrySubscriber
+	w.tmpfsWriterMu.RUnlock()
+	if hasTelemetrySubscriber {
+		if scratch.telemetryOp == nil {
+			scratch.telemetryOp = &gcpcv1.TelemetryOperation{}
+		}
+		telemetryOperation := scratch.telemetryOp
+		telemetryOperation.OperationId = strconv.FormatInt(int64(operation.Operation), 10)
+		telemetryOperation.InitialContext = telemetryOperation.InitialContext[:0]
+		telemetryOperation.TelemetryItems = telemetryOperation.TelemetryItems[:0]
+
+		if w.manager != nil && !operation.ContextVersion.IsZero() {
+			w.manager.VisitConnectionContextVersion(operation.ContextVersion, func(contextKey, contextValue string) bool {
+				if !isTelemetryVisibleKey(contextKey) {
+					return true
+				}
+				telemetryOperation.InitialContext = append(telemetryOperation.InitialContext, scratch.borrowTag(contextKey, contextValue))
+				return true
+			})
+		}
+		for contextKey, contextValue := range operation.ContextOverlay {
+			if !isTelemetryVisibleKey(contextKey) {
+				continue
+			}
+			telemetryOperation.InitialContext = append(telemetryOperation.InitialContext, scratch.borrowTag(contextKey, contextValue))
+		}
+
+		for recordIndex := range operation.Records {
+			record := operation.Records[recordIndex]
+			telemetryKind := gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_UNSPECIFIED
+			switch record.Kind {
+			case apiobs.TelemetryRecordOperationStart:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_OPERATION_START
+			case apiobs.TelemetryRecordOperationFinish:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_OPERATION_FINISH
+			case apiobs.TelemetryRecordCommandStart:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_COMMAND_START
+			case apiobs.TelemetryRecordCommandFinish:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_COMMAND_FINISH
+			case apiobs.TelemetryRecordContextUpdate:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_CONTEXT_UPDATE
+			case apiobs.TelemetryRecordContextRemove:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_CONTEXT_REMOVE
+			case apiobs.TelemetryRecordLog:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_LOG
+			case apiobs.TelemetryRecordEvent:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_EVENT
+			case apiobs.TelemetryRecordDrop:
+				telemetryKind = gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_DROP
+			}
+			telemetryItem := scratch.borrowTelemetryItem()
+			telemetryItem.Kind = telemetryKind
+			telemetryItem.Payload = record.PayloadBytes()
+			telemetryOperation.TelemetryItems = append(telemetryOperation.TelemetryItems, telemetryItem)
+		}
+		telemetryOperation.CommandCount = 0
+		for _, telemetryItem := range telemetryOperation.TelemetryItems {
+			if telemetryItem.Kind == gcpcv1.TelemetryItemKind_TELEMETRY_ITEM_COMMAND_START {
+				telemetryOperation.CommandCount++
+			}
+		}
+
+		operationSize := telemetryOperation.SizeVT()
+		if cap(scratch.marshalBuf) < operationSize {
+			scratch.marshalBuf = make([]byte, operationSize)
+		} else {
+			scratch.marshalBuf = scratch.marshalBuf[:operationSize]
+		}
+		serializedLength, marshalErr := telemetryOperation.MarshalToVT(scratch.marshalBuf)
+		if marshalErr != nil {
+			logger.WarnNoCtx().Err(marshalErr).Msg("marshal completed operation telemetry")
+		} else {
+			w.tmpfsWriterMu.RLock()
+			telemetryWriter := w.tmpfsWriter
+			if telemetryWriter != nil {
+				_, writeErr := telemetryWriter.Write(scratch.marshalBuf[:serializedLength])
+				if writeErr != nil {
+					logger.WarnNoCtx().Err(writeErr).Msg("write completed operation telemetry to tmpfs")
+				}
+			}
+			w.tmpfsWriterMu.RUnlock()
+		}
+
+		scratch.returnTelemetryItems(telemetryOperation.TelemetryItems)
+		telemetryOperation.TelemetryItems = telemetryOperation.TelemetryItems[:0]
+		scratch.returnTags(telemetryOperation.InitialContext)
+		telemetryOperation.InitialContext = telemetryOperation.InitialContext[:0]
+	}
+
+	hasEventSubscribers := w.emitter != nil && w.emitter.HasSubscribers()
+	var operationContext map[string]string
+	if hasEventSubscribers {
+		operationContext = w.copyOperationContext(operation)
+	}
 	for i := range operation.Records {
 		scratch.reset()
 		record := operation.Records[i]
 		switch record.Kind {
 		case apiobs.TelemetryRecordContextUpdate:
-			operationContext = foldContextUpdate(operationContext, record)
+			if hasEventSubscribers {
+				operationContext = foldContextUpdate(operationContext, record)
+			}
 		case apiobs.TelemetryRecordContextRemove:
-			foldContextRemove(operationContext, record)
+			if hasEventSubscribers {
+				foldContextRemove(operationContext, record)
+			}
 		case apiobs.TelemetryRecordOperationStart:
-			materializeOperationStartedRecord(operation, record, operationContext, w.emitter, scratch)
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.OperationStarted) {
+				materializeOperationStartedRecord(operation, record, operationContext, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordOperationFinish:
-			materializeOperationFinishedRecord(operation, record, operationContext, w.emitter, scratch)
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.OperationCompleted) {
+				materializeOperationFinishedRecord(operation, record, operationContext, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordCommandStart:
-			if w.emitter.HasSubscribersFor(apievents.CommandStarted) {
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.CommandStarted) {
 				materializeCommandStartedRecord(record, w.emitter, scratch)
 			}
 		case apiobs.TelemetryRecordCommandFinish:
-			if w.emitter.HasSubscribersFor(apievents.CommandCompleted) {
+			if w.emitter != nil && w.emitter.HasSubscribersFor(apievents.CommandCompleted) {
 				materializeCommandFinishedRecord(record, w.emitter, scratch)
 			}
 		case apiobs.TelemetryRecordLog:
 			materializeCompletedOperationLog(operation, record, operationContext)
 		case apiobs.TelemetryRecordEvent:
-			materializeCompletedOperationEvent(record, operationContext, w.emitter, scratch)
+			if hasEventSubscribers {
+				materializeCompletedOperationEvent(record, operationContext, w.emitter, scratch)
+			}
 		case apiobs.TelemetryRecordDrop:
-			materializeDropRecord(operation, record, operationContext, scratch)
+			if hasEventSubscribers {
+				materializeDropRecord(operation, record, operationContext, scratch)
+			}
 		}
 	}
+}
+
+// isTelemetryVisibleKey returns true if a context key is safe for telemetry export.
+// Private keys (underscore-prefixed, secret-marked, or known credential names) are filtered at the source.
+func isTelemetryVisibleKey(key string) bool {
+	if apictx.IsSecret(key) {
+		return false
+	}
+	// Standard connection metadata keys use underscore prefix but are public.
+	switch key {
+	case "_connection_id", "_remote_addr":
+		return true
+	}
+	if strings.HasPrefix(key, "_") {
+		return false
+	}
+	switch strings.ToLower(key) {
+	case "password", "passwd", "secret", "token", "credential", "auth", "api_key", "apikey", "private_key":
+		return false
+	}
+	return true
 }
 
 func (w *OperationTrackerDrainWorker) copyOperationContext(operation commonobs.CompletedOperation) map[string]string {

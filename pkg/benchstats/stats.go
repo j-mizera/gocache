@@ -123,22 +123,36 @@ func RecordPipelineEvaluation() {
 	global.pipelineEvaluations.Add(1)
 }
 
-// RecordPipelineOperationStarted records one operation-started event built on
-// the command path.
-func RecordPipelineOperationStarted() {
+// RecordPipelineCommandUnknown records one unknown-command pipeline decision.
+func RecordPipelineCommandUnknown() {
 	if !Enabled() {
 		return
 	}
-	global.pipelineOperationStarted.Add(1)
+	global.pipelineCommandUnknown.Add(1)
 }
 
-// RecordPipelineOperationCompleted records one operation-completed event built
-// on the command path.
-func RecordPipelineOperationCompleted() {
+// RecordPipelineCommandArgError records one argument-error pipeline decision.
+func RecordPipelineCommandArgError() {
 	if !Enabled() {
 		return
 	}
-	global.pipelineOperationCompleted.Add(1)
+	global.pipelineCommandArgError.Add(1)
+}
+
+// RecordPipelineCommandQueued records one transaction-queued pipeline decision.
+func RecordPipelineCommandQueued() {
+	if !Enabled() {
+		return
+	}
+	global.pipelineCommandQueued.Add(1)
+}
+
+// RecordPipelinePluginRouted records one plugin-routed pipeline decision.
+func RecordPipelinePluginRouted() {
+	if !Enabled() {
+		return
+	}
+	global.pipelinePluginRouted.Add(1)
 }
 
 // RecordManagerEventReceived records one event received by the plugin manager
@@ -179,8 +193,10 @@ func RecordManagerEventEnqueue() {
 
 type counters struct {
 	pipelineEvaluations         atomic.Uint64
-	pipelineOperationStarted    atomic.Uint64
-	pipelineOperationCompleted  atomic.Uint64
+	pipelineCommandUnknown      atomic.Uint64
+	pipelineCommandArgError     atomic.Uint64
+	pipelineCommandQueued       atomic.Uint64
+	pipelinePluginRouted        atomic.Uint64
 	managerEventReceived        atomic.Uint64
 	managerEventDropped         atomic.Uint64
 	managerProjectionBuilds     atomic.Uint64
@@ -189,8 +205,10 @@ type counters struct {
 
 func (c *counters) reset() {
 	c.pipelineEvaluations.Store(0)
-	c.pipelineOperationStarted.Store(0)
-	c.pipelineOperationCompleted.Store(0)
+	c.pipelineCommandUnknown.Store(0)
+	c.pipelineCommandArgError.Store(0)
+	c.pipelineCommandQueued.Store(0)
+	c.pipelinePluginRouted.Store(0)
 	c.managerEventReceived.Store(0)
 	c.managerEventDropped.Store(0)
 	c.managerProjectionBuilds.Store(0)
@@ -199,13 +217,15 @@ func (c *counters) reset() {
 
 func (c *counters) snapshot() map[string]string {
 	return map[string]string{
-		"pipeline.evaluations":               formatUint(c.pipelineEvaluations.Load()),
-		"pipeline.event.operation_started":   formatUint(c.pipelineOperationStarted.Load()),
-		"pipeline.event.operation_completed": formatUint(c.pipelineOperationCompleted.Load()),
-		"manager.event_received":             formatUint(c.managerEventReceived.Load()),
-		"manager.event_dropped":              formatUint(c.managerEventDropped.Load()),
-		"manager.projection_builds":          formatUint(c.managerProjectionBuilds.Load()),
-		"manager.event_enqueue_attempts":     formatUint(c.managerEventEnqueueAttempts.Load()),
+		"pipeline.evaluations":           formatUint(c.pipelineEvaluations.Load()),
+		"pipeline.command_unknown":       formatUint(c.pipelineCommandUnknown.Load()),
+		"pipeline.command_arg_error":     formatUint(c.pipelineCommandArgError.Load()),
+		"pipeline.command_queued":        formatUint(c.pipelineCommandQueued.Load()),
+		"pipeline.plugin_routed":         formatUint(c.pipelinePluginRouted.Load()),
+		"manager.event_received":         formatUint(c.managerEventReceived.Load()),
+		"manager.event_dropped":          formatUint(c.managerEventDropped.Load()),
+		"manager.projection_builds":      formatUint(c.managerProjectionBuilds.Load()),
+		"manager.event_enqueue_attempts": formatUint(c.managerEventEnqueueAttempts.Load()),
 	}
 }
 

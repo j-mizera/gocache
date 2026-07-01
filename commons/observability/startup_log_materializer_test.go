@@ -21,7 +21,6 @@ func TestStartupLogMaterializerRecordsAndMaterializesAcceptedLog(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(33, apiobs.ParentRef{}, 0)
@@ -117,7 +116,6 @@ func TestStartupLogMaterializerLevelHelper(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(34, apiobs.ParentRef{}, 0)

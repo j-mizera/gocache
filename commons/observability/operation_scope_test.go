@@ -12,7 +12,6 @@ func TestOperationScopeRecordsLogAndFinishes(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(11, apiobs.NewParentRef("parent"), 0)
@@ -66,7 +65,6 @@ func TestOperationScopeRecordsContextMutations(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   2,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(12, apiobs.ParentRef{}, 0)
@@ -113,7 +111,6 @@ func TestOperationScopeForcesRecordOperation(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           1,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 	handle, ok := manager.StartOperation(22, apiobs.ParentRef{}, 0)

@@ -157,7 +157,6 @@ func newPipelineTelemetryTracker() *commonobs.SlotOperationTrackerManager {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           64,
-		RecordsPerOperation:   8,
 		CompletedRingPerShard: 64,
 	})
 }

@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: gocache/commons/observability
+cpu: AMD Ryzen 9 7900X 12-Core Processor
+
+# Full Slot Tracker Cycle (StartOp -> RecordTelemetry x N -> FinishOp -> Drain)
+BenchmarkFullSlotTrackerCycle/cycle-4-24     1287088   951.9 ns/op   1472 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-4-24     1304853   938.8 ns/op   1472 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-4-24     1274522   921.8 ns/op   1472 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-20-24     405510  2868.0 ns/op   6720 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-20-24     415341  2874.0 ns/op   6720 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-20-24     409704  3078.0 ns/op   6720 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-50-24     178914  7175.0 ns/op  16576 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-50-24     177039  7348.0 ns/op  16576 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-50-24     155680  7123.0 nsop  16576 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-200-24     50554 24220.0 ns/op  65730 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-200-24     53804 22347.0 ns/op  65730 B/op   3 allocs/op
+BenchmarkFullSlotTrackerCycle/cycle-200-24     55201 21815.0 ns/op  65730 B/op   3 allocs/op

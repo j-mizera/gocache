@@ -254,6 +254,30 @@ func TestOperationTrackerDrainWorkerRedactsSecretContextAtProjection(t *testing.
 	}
 }
 
+func TestIsTelemetryVisibleKeyAllowsPublicConnectionMetadata(t *testing.T) {
+	testCases := []struct {
+		name    string
+		key     string
+		visible bool
+	}{
+		{name: "connection id", key: "_connection_id", visible: true},
+		{name: "remote address", key: "_remote_addr", visible: true},
+		{name: "password", key: "_password", visible: false},
+		{name: "shared secret jwt", key: "shared.secret.jwt", visible: false},
+		{name: "auth secret api key", key: "auth.secret.api_key", visible: false},
+		{name: "secret api key", key: "secret.api_key", visible: false},
+		{name: "shared rex data", key: "shared.rex.data", visible: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if visible := isTelemetryVisibleKey(testCase.key); visible != testCase.visible {
+				t.Fatalf("isTelemetryVisibleKey(%q) = %v, want %v", testCase.key, visible, testCase.visible)
+			}
+		})
+	}
+}
+
 func TestOperationTrackerDrainWorkerSkipsLocalMaterializedLogRequest(t *testing.T) {
 	var out bytes.Buffer
 	logger.InitWithWriter(&out, "debug")
@@ -706,7 +730,7 @@ func drainSerialParityOperationIDs(t *testing.T, workerCount, shardCount int) ([
 
 func newTestSlotOperationTrackerManagerWithShards(t *testing.T, shards, slots, recordsPerOperation int) *commonobs.SlotOperationTrackerManager {
 	t.Helper()
-	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{ShardCount: shards, MinSegmentsPerShard: 1, MaxSegmentsPerShard: 1, SegmentSize: slots, RecordsPerOperation: recordsPerOperation, CompletedRingPerShard: slots})
+	return commonobs.NewSlotOperationTrackerManager(commonobs.SlotTrackerConfig{ShardCount: shards, MinSegmentsPerShard: 1, MaxSegmentsPerShard: 1, SegmentSize: slots, CompletedRingPerShard: slots})
 }
 
 func operationIdentityForShard(shard, seq, shardCount int) int {
@@ -796,7 +820,6 @@ func TestGapJanitorSampleEmitsPositiveDeltas(t *testing.T) {
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           2,
-		RecordsPerOperation:   1,
 		CompletedRingPerShard: 1,
 	})
 
@@ -814,8 +837,9 @@ func TestGapJanitorSampleEmitsPositiveDeltas(t *testing.T) {
 	if !manager.RecordTelemetry(first, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandStart, 1)) {
 		t.Fatal("first telemetry record should fit")
 	}
-	if manager.RecordTelemetry(first, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)) {
-		t.Fatal("second telemetry record should drop when operation record storage is full")
+	// Under the arena model, records grow dynamically — both records fit.
+	if !manager.RecordTelemetry(first, apiobs.NewTelemetryRecord(apiobs.TelemetryRecordCommandFinish, 1)) {
+		t.Fatal("second telemetry record should fit within arena growth")
 	}
 	if !manager.FinishOperation(first, commonobs.SlotTerminalFinished) {
 		t.Fatal("first finish should enqueue")
@@ -842,7 +866,7 @@ func TestGapJanitorSampleEmitsPositiveDeltas(t *testing.T) {
 	if gap == nil {
 		t.Fatal("replay gap payload missing")
 	}
-	if gap.SkippedOperations != 1 || gap.DroppedRecords != 1 || gap.DroppedCompleted != 1 || gap.InvalidHandles != 1 || gap.WindowMs != 1 {
+	if gap.SkippedOperations != 1 || gap.DroppedRecords != 0 || gap.DroppedCompleted != 1 || gap.InvalidHandles != 1 || gap.WindowMs != 1 {
 		t.Fatalf("gap payload = %+v, want all deltas=1 window_ms=1", gap)
 	}
 	if event := janitor.sample(manager, janitor.lastSampleTime.Add(time.Millisecond)); event != nil {
@@ -905,7 +929,6 @@ func newTestSlotOperationTrackerManager(t *testing.T, slots, recordsPerOperation
 		MinSegmentsPerShard:   1,
 		MaxSegmentsPerShard:   1,
 		SegmentSize:           slots,
-		RecordsPerOperation:   recordsPerOperation,
 		CompletedRingPerShard: slots,
 	})
 }
