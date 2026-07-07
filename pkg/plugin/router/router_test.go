@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1049,5 +1051,38 @@ func TestPluginConnOperationHookRoundtrip(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for OperationHookResponse — readLoop dropped the envelope")
+	}
+}
+
+func BenchmarkNextRequestID(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = NextRequestID()
+	}
+}
+
+func TestNextRequestID_Format(t *testing.T) {
+	id := NextRequestID()
+	if !strings.HasPrefix(id, "req-") {
+		t.Fatalf("NextRequestID() = %q, want prefix %q", id, "req-")
+	}
+	numStr := id[len("req-"):]
+	n, err := strconv.ParseUint(numStr, 10, 64)
+	if err != nil {
+		t.Fatalf("NextRequestID() suffix %q is not a valid uint64: %v", numStr, err)
+	}
+	if n == 0 {
+		t.Error("NextRequestID() should never return req-0")
+	}
+
+	// Monotonicity: second call must produce a larger ID.
+	id2 := NextRequestID()
+	numStr2 := id2[len("req-"):]
+	n2, err := strconv.ParseUint(numStr2, 10, 64)
+	if err != nil {
+		t.Fatalf("second NextRequestID() suffix %q is not valid: %v", numStr2, err)
+	}
+	if n2 <= n {
+		t.Errorf("IDs not monotonic: first=%d second=%d", n, n2)
 	}
 }

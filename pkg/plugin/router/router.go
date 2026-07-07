@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,7 +35,10 @@ var requestSeq atomic.Uint64
 
 // NextRequestID returns a new unique request identifier for plugin calls.
 func NextRequestID() string {
-	return fmt.Sprintf("req-%d", requestSeq.Add(1))
+	var buf [24]byte // "req-" (4) + max uint64 digits (20)
+	copy(buf[:4], "req-")
+	b := strconv.AppendUint(buf[:4], requestSeq.Add(1), 10)
+	return string(b)
 }
 
 // PluginRoute describes a single command route to a plugin.
@@ -65,7 +69,7 @@ const (
 // correlated by request_id. Used by both the command router and hook executor.
 type PluginConn struct {
 	conn      *transport.Conn
-	pending   sync.Map // map[requestID]chan *gcpc.EnvelopeV1
+	pending   map[string]chan *gcpc.EnvelopeV1
 	pendingMu sync.Mutex
 
 	sendMu     sync.Mutex
@@ -156,6 +160,7 @@ func (item outboundEnvelope) envelope() *gcpc.EnvelopeV1 {
 func NewPluginConn(name string, conn *transport.Conn) *PluginConn {
 	pc := &PluginConn{
 		conn:       conn,
+		pending:    make(map[string]chan *gcpc.EnvelopeV1),
 		outbound:   make(chan outboundEnvelope, pluginOutboundQueueSize),
 		writerDone: make(chan struct{}),
 		done:       make(chan struct{}),
@@ -492,7 +497,7 @@ func (pc *PluginConn) StartReadLoop() {
 
 func (pc *PluginConn) storePending(requestID string, ch chan *gcpc.EnvelopeV1) {
 	pc.pendingMu.Lock()
-	pc.pending.Store(requestID, ch)
+	pc.pending[requestID] = ch
 	pc.pendingMu.Unlock()
 }
 
@@ -501,11 +506,10 @@ func (pc *PluginConn) drainPending() {
 	pc.pendingMu.Lock()
 	defer pc.pendingMu.Unlock()
 
-	pc.pending.Range(func(key, value any) bool {
-		close(value.(chan *gcpc.EnvelopeV1))
-		pc.pending.Delete(key)
-		return true
-	})
+	for _, ch := range pc.pending {
+		close(ch)
+	}
+	pc.pending = make(map[string]chan *gcpc.EnvelopeV1)
 }
 
 // Deliver dispatches an envelope to the pending channel for the given
@@ -515,8 +519,9 @@ func (pc *PluginConn) Deliver(requestID string, env *gcpc.EnvelopeV1) {
 	pc.pendingMu.Lock()
 	defer pc.pendingMu.Unlock()
 
-	if ch, ok := pc.pending.LoadAndDelete(requestID); ok {
-		ch.(chan *gcpc.EnvelopeV1) <- env
+	if ch, ok := pc.pending[requestID]; ok {
+		delete(pc.pending, requestID)
+		ch <- env
 	}
 }
 
@@ -545,7 +550,7 @@ func (pc *PluginConn) Done() <-chan struct{} {
 // DeletePending removes a pending request (used for cleanup on timeout).
 func (pc *PluginConn) DeletePending(requestID string) {
 	pc.pendingMu.Lock()
-	pc.pending.Delete(requestID)
+	delete(pc.pending, requestID)
 	pc.pendingMu.Unlock()
 }
 

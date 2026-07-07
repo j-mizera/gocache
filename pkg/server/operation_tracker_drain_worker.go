@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -509,7 +508,7 @@ func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation common
 
 		if w.manager != nil && !operation.ContextVersion.IsZero() {
 			w.manager.VisitConnectionContextVersion(operation.ContextVersion, func(contextKey, contextValue string) bool {
-				if !isTelemetryVisibleKey(contextKey) {
+				if !apictx.IsTelemetryVisible(contextKey) {
 					return true
 				}
 				telemetryOperation.InitialContext = append(telemetryOperation.InitialContext, scratch.borrowTag(contextKey, contextValue))
@@ -517,7 +516,7 @@ func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation common
 			})
 		}
 		for contextKey, contextValue := range operation.ContextOverlay {
-			if !isTelemetryVisibleKey(contextKey) {
+			if !apictx.IsTelemetryVisible(contextKey) {
 				continue
 			}
 			telemetryOperation.InitialContext = append(telemetryOperation.InitialContext, scratch.borrowTag(contextKey, contextValue))
@@ -630,27 +629,6 @@ func (w *OperationTrackerDrainWorker) projectCompletedOperation(operation common
 			}
 		}
 	}
-}
-
-// isTelemetryVisibleKey returns true if a context key is safe for telemetry export.
-// Private keys (underscore-prefixed, secret-marked, or known credential names) are filtered at the source.
-func isTelemetryVisibleKey(key string) bool {
-	if apictx.IsSecret(key) {
-		return false
-	}
-	// Standard connection metadata keys use underscore prefix but are public.
-	switch key {
-	case "_connection_id", "_remote_addr":
-		return true
-	}
-	if strings.HasPrefix(key, "_") {
-		return false
-	}
-	switch strings.ToLower(key) {
-	case "password", "passwd", "secret", "token", "credential", "auth", "api_key", "apikey", "private_key":
-		return false
-	}
-	return true
 }
 
 func (w *OperationTrackerDrainWorker) copyOperationContext(operation commonobs.CompletedOperation) map[string]string {
