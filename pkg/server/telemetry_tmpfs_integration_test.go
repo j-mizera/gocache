@@ -41,8 +41,8 @@ func TestTelemetryTmpfsInitialContextIncludesFilteredOperationOverlay(t *testing
 		[]byte("tenant"), []byte("acme"),
 	)
 	overlay := map[string]string{
-		"shared.rex.data": "custom-value",
-		"_secret":         "hidden",
+		"shared.rex.data":       "custom-value",
+		"myplugin.private_data": "hidden",
 	}
 	handle, pinned, ok := manager.StartOperationWithConnectionContext(1, apiobs.NewParentRef("connection-op"), connection, overlay)
 	if !ok {
@@ -85,8 +85,10 @@ func TestTelemetryTmpfsInitialContextIncludesFilteredOperationOverlay(t *testing
 		switch string(tag.Key) {
 		case "shared.rex.data":
 			sharedValues = append(sharedValues, string(tag.Value))
-		case "_secret":
+		case "myplugin.private_data":
 			t.Fatalf("private overlay key %q should be filtered", string(tag.Key))
+		case "tenant":
+			t.Fatalf("non-prefixed base context key %q should be filtered by deny-by-default filter", string(tag.Key))
 		}
 	}
 	if len(sharedValues) == 0 {

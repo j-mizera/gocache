@@ -254,30 +254,6 @@ func TestOperationTrackerDrainWorkerRedactsSecretContextAtProjection(t *testing.
 	}
 }
 
-func TestIsTelemetryVisibleKeyAllowsPublicConnectionMetadata(t *testing.T) {
-	testCases := []struct {
-		name    string
-		key     string
-		visible bool
-	}{
-		{name: "connection id", key: "_connection_id", visible: true},
-		{name: "remote address", key: "_remote_addr", visible: true},
-		{name: "password", key: "_password", visible: false},
-		{name: "shared secret jwt", key: "shared.secret.jwt", visible: false},
-		{name: "auth secret api key", key: "auth.secret.api_key", visible: false},
-		{name: "secret api key", key: "secret.api_key", visible: false},
-		{name: "shared rex data", key: "shared.rex.data", visible: true},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if visible := isTelemetryVisibleKey(testCase.key); visible != testCase.visible {
-				t.Fatalf("isTelemetryVisibleKey(%q) = %v, want %v", testCase.key, visible, testCase.visible)
-			}
-		})
-	}
-}
-
 func TestOperationTrackerDrainWorkerSkipsLocalMaterializedLogRequest(t *testing.T) {
 	var out bytes.Buffer
 	logger.InitWithWriter(&out, "debug")

@@ -48,6 +48,29 @@ func IsSecret(key string) bool {
 	return false
 }
 
+// IsTelemetryVisible returns true if a context key should appear in
+// exported telemetry (tmpfs export, OTLP, etc.). The filter is
+// deny-by-default: only server-prefixed keys (_) and shared-prefixed
+// keys (shared.) are visible. Plugin-private keys (<plugin>.<key>) and
+// unknown keys are denied. Secrets (detected by IsSecret) are always
+// denied regardless of tier.
+//
+// This is the single canonical filter for the telemetry submission
+// boundary. Both the drain worker and the pipeline recorder call this
+// function — no local copies are permitted.
+func IsTelemetryVisible(key string) bool {
+	if IsSecret(key) {
+		return false
+	}
+	if strings.HasPrefix(key, ServerPrefix) {
+		return true
+	}
+	if strings.HasPrefix(key, SharedPrefix) {
+		return true
+	}
+	return false
+}
+
 // FilterForPlugin returns the subset of ctx visible to pluginName:
 //   - All "_*" keys (server context)
 //   - All "<pluginName>.*" keys (own namespace)

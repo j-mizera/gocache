@@ -43,6 +43,56 @@ func TestIsSecret(t *testing.T) {
 	}
 }
 
+func TestIsTelemetryVisible(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		// Server namespace is visible.
+		{"_start_ns", true},
+		{"_operation_id", true},
+		{"_connection_id", true},
+		{"_remote_addr", true},
+
+		// Shared namespace is visible.
+		{"shared.traceparent", true},
+		{"shared.username", true},
+		{"shared.rex.traceparent", true},
+
+		// Plugin-private namespace is hidden.
+		{"auth.cache_hit", false},
+		{"myplugin.internal_state", false},
+		{"instrumentation.span_id", false},
+		{"otherplugin.private_data", false},
+
+		// Secret keys are always hidden.
+		{"secret.token", false},
+		{"_secret.session", false},
+		{"auth.secret.api_key", false},
+		{"shared.secret.jwt", false},
+
+		// Unknown/unprefixed keys are hidden without credential-name guessing.
+		{"random", false},
+		{"foo", false},
+		{"password", false},
+		{"token", false},
+		{"apikey", false},
+
+		// Edge cases.
+		{"", false},
+		{"shared", false},
+		{"_", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if got := IsTelemetryVisible(tt.key); got != tt.want {
+				t.Errorf("IsTelemetryVisible(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterForPlugin(t *testing.T) {
 	ctx := map[string]string{
 		"_start_ns":                   "123",

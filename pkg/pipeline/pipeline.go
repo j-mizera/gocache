@@ -11,6 +11,7 @@ import (
 	"time"
 
 	apicommand "gocache/api/command"
+	apictx "gocache/api/context"
 	"gocache/api/events"
 	gcpc "gocache/api/gcpc/v1"
 	apiobs "gocache/api/observability"
@@ -638,6 +639,9 @@ func recordTelemetryContextMap(scope commonobs.OperationScope, values map[string
 		return
 	}
 	for key, value := range values {
+		if !apictx.IsTelemetryVisible(key) {
+			continue
+		}
 		scope.ContextUpdateStrings(key, value)
 	}
 }
