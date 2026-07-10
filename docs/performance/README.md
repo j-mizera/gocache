@@ -2,7 +2,7 @@
 title: Performance
 description: Per-shard locking arc — shipped optimizations, measured deltas, and what's still on the table
 status: living
-last_updated: 2026-06-23
+last_updated: 2026-07-08
 related:
   - Audit-per-shard-arc-summary
   - Audit-go-bench-vs-docker-gap
@@ -16,6 +16,58 @@ related:
 This page is the single entry point for the gocache performance work. It narrates the per-shard locking arc, links every PR/issue that contributed, points at the audits that quantify what shipped, and lists the levers still on the table. It is the wiki-facing companion to the bench captures under `bench/results/<branch>/`.
 
 The current modular-performance arc is tracked in [Modular Overhead Optimization Plan](modular-overhead-optimization-plan.md) and governed by [ADR-0022](../adr/0022-modular-performance-budget.md): IPC, runtime instrumentation, lifecycle OTLP, and Pub/Sub hot-path features must land within a <=20% modular overhead budget before being called performance-acceptable.
+
+## Comprehensive benchmark suite (Phase 1)
+
+Phase 1 completed the shared plugin-path benchmark harness in `pkg/plugin/benchsuite/`.
+It is a leaf package: package-level benchmarks stay in their owning packages, while the harness supplies the shared matrix, percentile recorder, provenance capture, and profiling workflow.
+
+- `DimensionMatrix` / `EnumerateDimensions` cover transport, hook count, plugin count, payload size, fan-out depth, and pipeline depth.
+- `DurationRecorder` reports nearest-rank `P50`, `P95`, `P99`, and `P999`; `SampleSizeWarning()` flags runs below the thesis thresholds (`p99 >= 1,000`, `p999 >= 10,000`).
+- `LockBaseline()` writes benchmark provenance (`commit_sha`, Go version, date, `GOARCH`, CPU count, hardware) under `bench/results/baseline-*.json`.
+- `BenchmarkRawSyscallPingPong_AFUnix` and `BenchmarkRawSyscallPingPong_Inproc` provide raw-syscall control cases for kernel-floor validation.
+- `bench/profiles/run-benchsuite-profiles.sh` captures CPU, heap, block, mutex, and goroutine profiles in separate `go test -bench` runs; block and mutex profiling stay opt-in through `GOCACHE_BENCH_BLOCK_RATE` and `GOCACHE_BENCH_MUTEX_FRACTION`.
+- `bench/profiles/run-benchstat.sh` wraps `go test -count=10` and `benchstat` for statistical comparison.
+- `bench/results/pprof-alloc-breakdown.md` records the Phase 1 alloc-site audit for `BenchmarkPluginCommandRTT_NetPipe` (36 allocs/op total, split into irreducible, reducible, and poolable buckets).
+
+## Phase 3: Concurrent Throughput + Real Workload Benchmarks
+
+### Concurrent Command Throughput (FR-004)
+
+- Location: `pkg/plugin/router/concurrent_throughput_bench_test.go`
+- Shared variant: ONE `PluginConn` across all goroutines (production contention model)
+- Per-goroutine variant: each goroutine owns its connection (no-contention ceiling)
+- Goroutine sweep: `{1,2,4,8,16,32,64}` via `SetParallelism` with `GOMAXPROCS=1`
+
+### PUBLISH Fan-out (FR-005)
+
+- Location: `plugins/pubsub/publish_bench_test.go`
+- Real plugin path via `pluginsdk.Run` exercising `handlePublish + PushToClient`
+- Delta method: `(N-subs minus 0-subs) = per-subscriber IPC cost`
+- Per-subscriber cost: `2.5-3.3 µs` (IPC-send-order, not map-iteration ns)
+
+## Phase 4: Validation + Provenance + Documentation
+
+### Tiered Threshold Validation (FR-007)
+
+- Location: `bench/profiles/run-threshold-validation.sh`
+- Results: 8/10 classes pass on dev host, 2 FAIL (AF_UNIX RTT, PUBLISH — need hardware isolation)
+- All allocs/op: 0% variance (deterministic)
+
+### Hardware Controls (FR-010)
+
+- Location: `docs/performance/benchmark-controls.md`
+- Evidence-grade wrapper: `bench/profiles/run-evidence-grade.sh`
+
+### Versioned Suite (FR-012)
+
+- SuiteVersion: `v1-pre-aof`
+- EventSink interface: `pkg/plugin/benchsuite/sink.go`
+
+### Comparison Methodology (FR-013)
+
+- Location: `docs/performance/comparison-methodology.md`
+- Rule: Redis/Valkey comparison MUST use identical flags via `redis-benchmark/valkey-benchmark`
 
 ## Why per-shard?
 
