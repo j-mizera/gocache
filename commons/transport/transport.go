@@ -26,8 +26,10 @@ var (
 
 // Conn wraps a net.Conn with length-prefixed protobuf framing.
 type Conn struct {
-	conn net.Conn
-	mu   sync.Mutex // protects writes
+	conn     net.Conn
+	mu       sync.Mutex // protects writes
+	writeBuf []byte     // reusable frame buffer for SendBatch, accessed under mu
+	readBuf  []byte     // reusable payload buffer for Recv, single-reader
 }
 
 // NewConn wraps an existing connection with framed protobuf I/O.
@@ -49,39 +51,33 @@ func (c *Conn) SendBatch(envs []*gcpc.EnvelopeV1) error {
 		return nil
 	}
 
-	frames := make([][]byte, len(envs))
-	total := 0
-	for i, env := range envs {
-		data, err := env.MarshalVT()
-		if err != nil {
-			return fmt.Errorf("marshal envelope: %w", err)
-		}
-		if len(data) > MaxFrameSize {
-			return ErrFrameTooLarge
-		}
-		frames[i] = data
-		total += frameHeaderSize + len(data)
-	}
-
-	buf := make([]byte, total)
-	offset := 0
-	for _, data := range frames {
-		binary.BigEndian.PutUint32(buf[offset:offset+frameHeaderSize], uint32(len(data)))
-		offset += frameHeaderSize
-		copy(buf[offset:offset+len(data)], data)
-		offset += len(data)
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	n, err := c.conn.Write(buf)
+	c.writeBuf = c.writeBuf[:0]
+	for _, env := range envs {
+		payload, err := env.MarshalVT()
+		if err != nil {
+			return fmt.Errorf("marshal envelope: %w", err)
+		}
+		if len(payload) > MaxFrameSize {
+			return ErrFrameTooLarge
+		}
+		var header [frameHeaderSize]byte
+		binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
+		c.writeBuf = append(c.writeBuf, header[:]...)
+		c.writeBuf = append(c.writeBuf, payload...)
+	}
+
+	n, err := c.conn.Write(c.writeBuf)
 	if err != nil {
 		return fmt.Errorf("write frame batch: %w", err)
 	}
-	if n != len(buf) {
+	if n != len(c.writeBuf) {
 		return io.ErrShortWrite
 	}
+	clear(c.writeBuf[:cap(c.writeBuf)])
+	c.writeBuf = c.writeBuf[:0]
 	return nil
 }
 
@@ -100,15 +96,22 @@ func (c *Conn) Recv() (*gcpc.EnvelopeV1, error) {
 		return nil, ErrFrameTooLarge
 	}
 
-	data := make([]byte, size)
-	if _, err := io.ReadFull(c.conn, data); err != nil {
+	if int(size) > cap(c.readBuf) {
+		c.readBuf = make([]byte, size)
+	} else {
+		c.readBuf = c.readBuf[:size]
+	}
+
+	if _, err := io.ReadFull(c.conn, c.readBuf); err != nil {
 		return nil, fmt.Errorf("read frame payload: %w", err)
 	}
 
 	env := &gcpc.EnvelopeV1{}
-	if err := env.UnmarshalVT(data); err != nil {
+	if err := env.UnmarshalVT(c.readBuf); err != nil {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
+	clear(c.readBuf[:cap(c.readBuf)])
+	c.readBuf = c.readBuf[:0]
 	return env, nil
 }
 

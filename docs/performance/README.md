@@ -2,7 +2,7 @@
 title: Performance
 description: Per-shard locking arc — shipped optimizations, measured deltas, and what's still on the table
 status: living
-last_updated: 2026-07-08
+last_updated: 2026-07-10
 related:
   - Audit-per-shard-arc-summary
   - Audit-go-bench-vs-docker-gap
@@ -28,7 +28,43 @@ It is a leaf package: package-level benchmarks stay in their owning packages, wh
 - `BenchmarkRawSyscallPingPong_AFUnix` and `BenchmarkRawSyscallPingPong_Inproc` provide raw-syscall control cases for kernel-floor validation.
 - `bench/profiles/run-benchsuite-profiles.sh` captures CPU, heap, block, mutex, and goroutine profiles in separate `go test -bench` runs; block and mutex profiling stay opt-in through `GOCACHE_BENCH_BLOCK_RATE` and `GOCACHE_BENCH_MUTEX_FRACTION`.
 - `bench/profiles/run-benchstat.sh` wraps `go test -count=10` and `benchstat` for statistical comparison.
-- `bench/results/pprof-alloc-breakdown.md` records the Phase 1 alloc-site audit for `BenchmarkPluginCommandRTT_NetPipe` (36 allocs/op total, split into irreducible, reducible, and poolable buckets).
+- `bench/results/pprof-alloc-breakdown.md` records the Phase 1 alloc-site audit for `BenchmarkPluginCommandRTT_NetPipe` (36 allocs/op total, split into irreducible, reducible, and poolable buckets) and the follow-up WriteLoop buffer reuse result that reduced the benchmark to 1487 B/op and 35 allocs/op.
+
+### WriteLoop buffer reuse follow-up
+
+The `pkg/plugin/router/router.go` WriteLoop now reuses its internal batch/env slices (`batchBuf` and `envsBuf`) instead of allocating a fresh batch slice on every flush. On the 2026-07-10 rerun (`go1.26.4`, AMD Ryzen 9 7900X), `BenchmarkPluginCommandRTT_NetPipe` moved from `3278 B/op, 36 allocs/op` to `1487 B/op, 35 allocs/op`, eliminating `1791 B/op` (`54.7%`) and one allocation.
+
+Escape analysis (`go build -gcflags="-m" ./pkg/plugin/router/`) confirms the `[:0]` resets are self-assignments, so the reuse stays heap-neutral inside the single-owner write loop. The eliminated alloc site is the internal `collectBatchWithDelay` batch slice; the remaining large sites are the transport/protobuf buffers listed in `bench/results/pprof-alloc-breakdown.md`.
+
+### Transport layer buffer pooling
+
+The `commons/transport/transport.go` `Conn` struct now reuses per-connection `writeBuf` and `readBuf` byte slices instead of allocating fresh frame and payload buffers on every `SendBatch`/`Recv` call. `SendBatch` marshals directly into `writeBuf` under the existing write lock (single-pass, eliminating the intermediate `frames` slice too); `Recv` grows `readBuf` on demand and reuses it across reads. Both buffers are cleared and reset after each use for GC hygiene.
+
+On the 2026-07-10 rerun, `BenchmarkPluginCommandRTT_NetPipe` moved from `1487 B/op, 35 allocs/op` (post-Phase 1) to `1330 B/op, 31 allocs/op`, eliminating `157 B/op` and 4 allocations. Cumulative from the original baseline: `3278 B/op, 36 allocs/op` to `1330 B/op, 31 allocs/op` — a `59.4%` byte reduction.
+
+The only remaining poolable site is `MarshalVT` (~75 B/op, generated protobuf code, deferred due to regeneration risk). All other significant allocations are irreducible (channels escape to callers, protobuf decode objects required by wire protocol).
+
+### Lock-free plugin enqueue
+
+The `PluginConn.enqueue` function previously serialized all concurrent senders through a `sendMu` mutex held during the channel send, even though Go channels are inherently goroutine-safe. The FR-004 concurrent throughput benchmark identified this as the primary serialization bottleneck.
+
+The mutex was replaced with an `atomic.Bool` closed flag (fast-path check) and a `case <-pc.done:` branch in the enqueue select (happens-before-correct Close() race detection). The `sendMu` field was removed entirely. See ADR-0038 for the full rationale and the documented semantic shift (post-close enqueue is now possible but benign — blocking Send callers always receive an error, while fire-and-forget messages may be dropped during shutdown).
+
+`BenchmarkConcurrentCommandThroughput_Shared` (AF_UNIX, 2026-07-10, go1.26.4, AMD Ryzen 9 7900X):
+
+| Goroutines | ops/sec |
+|------------|---------|
+| 1 | 85,621 |
+| 2 | 94,763 |
+| 4 | 103,515 |
+| 8 | 111,818 |
+| 16 | 109,726 |
+| 32 | 102,637 |
+| 64 | 104,308 |
+
+Throughput scales +31% from 1 to 8 goroutines (85K to 112K ops/s). The saturation knee is at goroutines 8-16, where the single writeLoop and outbound channel become the new ceiling (irreducible — one goroutine must serialize writes to the socket).
+
+Note: `enqueueLatency` was re-baselined by this change. The metric previously included mutex contention wait time; it now measures only the atomic-load + select cost. Historical `enqueueLatency` numbers are not comparable post-change.
 
 ## Phase 3: Concurrent Throughput + Real Workload Benchmarks
 
