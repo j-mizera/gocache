@@ -46,11 +46,73 @@ Notes on attribution:
 
 ## Classification Summary
 
-| Category | Sites | Allocs/op | Bytes/op | % Bytes |
-|----------|-------|-----------|----------|---------|
-| Irreducible | 10 | ~30.7 | ~1215 B | 37.1% |
-| Reducible | 1 | ~1.0 | ~1828 B | 55.8% |
-| Poolable | 3 | ~4.3 | ~235 B | 7.2% |
+| Category | Sites | Status |
+|----------|-------|--------|
+| Irreducible | 10 | Unchanged (channels, protobuf decode objects) |
+| Reducible (Phase 1) | 0 | ELIMINATED (collectBatchWithDelay batch slice) |
+| Poolable (Phase 2) | 0 | ELIMINATED (SendBatch frame buffer + Recv payload buffer) |
+| Poolable DEFERRED | 1 | Still allocates ~75 B/op (MarshalVT, generated code) |
+
+## Post-Optimization Results
+
+The WriteLoop buffer reuse optimization in `pkg/plugin/router/router.go` reuses `batchBuf []outboundEnvelope` and `envsBuf []*gcpc.EnvelopeV1` with `clear()` plus `[:0]` reset after each `writeOutboundBatch` call. The buffers are struct fields on the heap-allocated `PluginConn`, but they remain single-owner state inside the write-loop goroutine, so reuse does not add a new heap allocation path.
+
+Measured on 2026-07-10 (`go1.26.4`, AMD Ryzen 9 7900X), the bench-only rerun of `BenchmarkPluginCommandRTT_NetPipe` improved from:
+
+```text
+3278 B/op, 36 allocs/op
+```
+
+to:
+
+```text
+1487 B/op, 35 allocs/op
+```
+
+Delta: `1791 B/op` eliminated (`54.7%` reduction), `1 alloc/op` eliminated.
+
+Escape analysis proof: `go build -gcflags="-m" ./pkg/plugin/router/` confirms the `batchBuf` / `envsBuf` `[:0]` resets are self-assignments, not fresh allocations.
+
+### Phase 2 transport buffer pooling follow-up
+
+The transport layer in `commons/transport/transport.go` now reuses per-connection `writeBuf []byte` and `readBuf []byte`. `SendBatch` marshals directly into the reusable write buffer under `c.mu.Lock`, removing the intermediate frames slice and the per-call frame buffer. `Recv` grows a reusable read buffer by capacity and resets it with `clear()` + `[:0]` so the payload path no longer allocates a fresh `[]byte` on each call. The 4-byte header buffer remains a `make()` allocation because it is too small to pool, and `MarshalVT` stays deferred to generated-code regeneration.
+
+Measured on 2026-07-10 (`go1.26.4`, AMD Ryzen 9 7900X), the bench-only rerun of `BenchmarkPluginCommandRTT_NetPipe` improved from:
+
+```text
+1487 B/op, 35 allocs/op
+```
+
+to:
+
+```text
+1330 B/op, 31 allocs/op
+```
+
+Delta: `157 B/op` eliminated and `4 alloc/op` eliminated. Cumulative reduction versus the original baseline is `1948 B/op` (`59.4%`) and `5 allocs/op`.
+
+### Reclassified alloc sites
+
+The former `collectBatchWithDelay` site is completely eliminated from the post-optimization profile. Phase 2 eliminated the transport-side `SendBatch` frame buffer and `Recv` payload buffer, leaving only irreducible sites plus the deferred protobuf serializer buffer:
+
+1. `(*PluginConn).Send` — 2471 kB (channels — irreducible, pooling rejected as unsafe)
+2. `(*Conn).Recv` — 2352 kB (envelope decode — irreducible)
+3. `(*EnvelopeV1).UnmarshalVT` — 1912 kB (protobuf decode — irreducible)
+4. `NewCommandRequest` — 1833 kB (wire protocol — irreducible)
+5. `(*EnvelopeV1).MarshalVT` — 733 kB (serialization buffer — DEFERRED, generated code)
+
+| Category | Sites (before) | Sites (after) | Allocs/op (after) | Bytes/op (after) |
+|----------|----------------|---------------|-------------------|------------------|
+| Irreducible | 10 | 10 | ~30 | ~1215 B |
+| Reducible (eliminated) | 1 | 0 | 0 | 0 B |
+| Poolable (Phase 2 eliminated) | 3 | 0 | 0 | 0 B |
+| Poolable deferred | 0 | 1 | ~1 | ~75 B |
+| **Total** | **14** | **11** | **31** | **~1330 B** |
+
+Deferred optimizations remain the same:
+
+1. `MarshalVT` serialization buffer (~75 B/op) — generated protobuf code, regeneration risk
+2. Channel pooling — permanently rejected (channels escape to callers, unsafe)
 
 ## Alloc Sites (sorted by bytes)
 
@@ -60,7 +122,7 @@ Notes on attribution:
 - Allocs/op: ~1.02
 - Bytes/op: ~1828 B
 - Evidence: `pprof -alloc_space` shows `17851.75kB` flat in `collectBatchWithDelay`, all at `batch := make([]outboundEnvelope, 0, pluginOutboundBatchMax)`; `pprof -alloc_objects` shows `10201` flat objects at the same line.
-- Classification reason: This is an internal writer-loop batch buffer. It does not escape through the public API, and the batch capacity is a stable constant (`pluginOutboundBatchMax = 32`). It could be reduced by reusing an internal buffer or using a stack-backed fixed array, without changing the `Send` API or GCPC wire contract.
+- Classification reason: This is an internal writer-loop batch buffer. It does not escape through the public API, and the batch capacity is a stable constant (`pluginOutboundBatchMax = 32`). It was eliminated by reusing the internal writer-loop buffers (`batchBuf` and `envsBuf`) without changing the `Send` API or GCPC wire contract.
 
 ### 2. IRREDUCIBLE `(*PluginConn).Send` response channel
 
@@ -118,13 +180,13 @@ Notes on attribution:
 - Evidence: `pprof -alloc_space` shows `876.65kB` flat in `NewCommandResponse`; the benchmark responder closure also contributes `796.95kB` flat at `startMockPluginResponder.func1`, where it constructs the `ResultV1` response payload.
 - Classification reason: The benchmark simulates a real plugin returning a GCPC command response. The response envelope, oneof/message wrappers, and `ResultV1` payload are part of the wire protocol being measured.
 
-### 9. POOLABLE `(*Conn).SendBatch` frame buffer
+### 9. ELIMINATED `(*Conn).SendBatch` frame buffer
 
 - Location: `commons/transport/transport.go:66`
-- Allocs/op: ~2.04
-- Bytes/op: ~82 B
-- Evidence: `pprof -alloc_objects` shows `20402` objects at `buf := make([]byte, total)`; `pprof -alloc_space` shows `796.88kB` at that line.
-- Classification reason: This is a short-lived per-frame write buffer with stable small sizes in this workload. A carefully reset `sync.Pool` for transport write buffers could reduce bytes without changing API shape.
+- Allocs/op: ~2.04 before Phase 2; 0 after Phase 2
+- Bytes/op: ~82 B before Phase 2; 0 after Phase 2
+- Evidence: Phase 2 moved frame assembly into reusable per-connection `writeBuf`, so the per-call `make([]byte, total)` allocation disappeared from the profile.
+- Classification reason: The frame buffer was safe to reuse inside the owning connection once `SendBatch` stopped building a separate intermediate frames slice.
 
 ### 10. IRREDUCIBLE `(*CommandResponseV1).UnmarshalVT`
 
@@ -168,13 +230,18 @@ Notes on attribution:
 
 ## Optimization Targets (by bytes saved, descending)
 
-1. `(*PluginConn).collectBatchWithDelay` batch slice — potential savings: up to ~1828 B/op if replaced with reusable or stack-backed internal batch storage.
-2. `(*Conn).SendBatch` frame buffer — potential savings: ~82 B/op via a reset-safe byte buffer pool.
-3. `(*EnvelopeV1).MarshalVT` serialization buffer — potential savings: ~75 B/op if marshaling can target pooled/reused buffers safely.
-4. `(*Conn).Recv` payload buffer — potential savings: ~75 B/op if the unmarshal path does not retain input slices and a read-buffer pool is safe.
-5. `(*Conn).Recv` header buffer — potential savings: ~3 B/op; low value compared with the larger byte sites.
+1. `(*EnvelopeV1).MarshalVT` serialization buffer — potential savings: ~75 B/op if marshaling can target pooled/reused buffers safely. DEFERRED: this is generated protobuf code; pooling requires modifying the generation contract or wrapping MarshalVT with a pool-managed scratch buffer.
 
-Channel count reductions are intentionally excluded from this target list: removing channel allocations would reduce alloc count but not the largest byte bucket, and channel pooling is unsafe under the current API.
+The following sites were eliminated by the WriteLoop buffer reuse and transport buffer pooling optimizations:
+- `(*PluginConn).collectBatchWithDelay` batch slice (~1828 B/op) — eliminated by Phase 1 (reusable batchBuf)
+- `(*PluginConn).writeOutboundBatch` envs slice (~32 B/op) — eliminated by Phase 1 (reusable envsBuf)
+- `(*Conn).SendBatch` frame buffer (~82 B/op) — eliminated by Phase 2 (reusable writeBuf)
+- `(*Conn).SendBatch` frames intermediate slice — eliminated by Phase 2 (single-pass marshal)
+- `(*Conn).Recv` payload buffer (~75 B/op) — eliminated by Phase 2 (reusable readBuf)
+
+Cumulative result: 3278 B/op → 1330 B/op (59.4% reduction), 36 → 31 allocs/op.
+
+Channel count reductions are intentionally excluded: channel pooling is unsafe under the current API (channels escape to callers).
 
 ## Channel Allocs (MUST be irreducible)
 
@@ -183,4 +250,4 @@ Channel count reductions are intentionally excluded from this target list: remov
 
 ## Bottom Line
 
-The largest byte target is not a protobuf object or channel: it is the internal outbound batch slice in `collectBatchWithDelay`, accounting for roughly 1.8 KiB/op by itself. The channel allocations are visible in object count but are not the primary byte target and must remain classified as irreducible under the current `Send` contract. The next byte-oriented targets are transport/protobuf buffers, which are plausible pool candidates but require careful reset and ownership proof before implementation.
+The two largest byte targets — the `collectBatchWithDelay` batch slice (~1.8 KiB/op) and the transport frame/payload buffers (~157 B/op combined) — are now eliminated by the WriteLoop buffer reuse and transport buffer pooling optimizations. The cumulative result is 3278 B/op → 1330 B/op (59.4% reduction). The channel allocations remain irreducible under the current `Send` contract. The only remaining poolable site is `MarshalVT` (~75 B/op), which is deferred due to generated-code regeneration risk.
