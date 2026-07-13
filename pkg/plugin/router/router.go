@@ -72,10 +72,11 @@ type PluginConn struct {
 	pending   map[string]chan *gcpc.EnvelopeV1
 	pendingMu sync.Mutex
 
-	sendMu     sync.Mutex
-	closed     bool
+	closed     atomic.Bool
 	outbound   chan outboundEnvelope
 	writerDone chan struct{}
+	batchBuf   []outboundEnvelope // reusable batch buffer, single-owner (writeLoop)
+	envsBuf    []*gcpc.EnvelopeV1 // reusable envs slice for writeOutboundBatch, single-owner (writeLoop)
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -175,12 +176,32 @@ func (pc *PluginConn) writeLoop() {
 	for {
 		select {
 		case item := <-pc.outbound:
-			pc.writeOutboundBatch(pc.collectBatch(item))
+			pc.collectBatch(&pc.batchBuf, item)
+			pc.writeOutboundBatch(pc.batchBuf)
+			// batchBuf and envsBuf are single-owner (writeLoop goroutine).
+			// writeOutboundBatch must fully consume the batch and signal all errChs
+			// before returning. After the call, stale element pointers are cleared
+			// via clear() to prevent retention during idle periods, then buffers
+			// are reset to len=0 preserving capacity for reuse.
+			clear(pc.batchBuf[:cap(pc.batchBuf)])
+			clear(pc.envsBuf[:cap(pc.envsBuf)])
+			pc.batchBuf = pc.batchBuf[:0]
+			pc.envsBuf = pc.envsBuf[:0]
 		case <-pc.done:
 			for {
 				select {
 				case item := <-pc.outbound:
-					pc.writeOutboundBatch(pc.collectBatch(item))
+					pc.collectBatch(&pc.batchBuf, item)
+					pc.writeOutboundBatch(pc.batchBuf)
+					// batchBuf and envsBuf are single-owner (writeLoop goroutine).
+					// writeOutboundBatch must fully consume the batch and signal all errChs
+					// before returning. After the call, stale element pointers are cleared
+					// via clear() to prevent retention during idle periods, then buffers
+					// are reset to len=0 preserving capacity for reuse.
+					clear(pc.batchBuf[:cap(pc.batchBuf)])
+					clear(pc.envsBuf[:cap(pc.envsBuf)])
+					pc.batchBuf = pc.batchBuf[:0]
+					pc.envsBuf = pc.envsBuf[:0]
 				default:
 					return
 				}
@@ -189,56 +210,54 @@ func (pc *PluginConn) writeLoop() {
 	}
 }
 
-func (pc *PluginConn) collectBatch(first outboundEnvelope) []outboundEnvelope {
-	return pc.collectBatchWithDelay(first, pluginOutboundBatchMaxDelay)
+func (pc *PluginConn) collectBatch(buf *[]outboundEnvelope, first outboundEnvelope) {
+	pc.collectBatchWithDelay(buf, first, pluginOutboundBatchMaxDelay)
 }
 
-func (pc *PluginConn) collectBatchWithDelay(first outboundEnvelope, maxDelay time.Duration) []outboundEnvelope {
-	batch := make([]outboundEnvelope, 0, pluginOutboundBatchMax)
-	batch = append(batch, first)
+func (pc *PluginConn) collectBatchWithDelay(buf *[]outboundEnvelope, first outboundEnvelope, maxDelay time.Duration) {
+	*buf = append((*buf)[:0], first)
 
 	hasBlocking := first.errCh != nil
-	batch, drainedBlocking := pc.drainAvailable(batch)
+	drainedBlocking := pc.drainAvailable(buf)
 	hasBlocking = hasBlocking || drainedBlocking
-	if hasBlocking || len(batch) == pluginOutboundBatchMax || pc.doneClosed() {
-		return batch
+	if hasBlocking || len(*buf) == pluginOutboundBatchMax || pc.doneClosed() {
+		return
 	}
 
 	timer := time.NewTimer(maxDelay)
 	defer timer.Stop()
-	for len(batch) < pluginOutboundBatchMax {
+	for len(*buf) < pluginOutboundBatchMax {
 		select {
 		case item := <-pc.outbound:
-			batch = append(batch, item)
+			*buf = append(*buf, item)
 			if item.errCh != nil {
-				batch, _ = pc.drainAvailable(batch)
-				return batch
+				pc.drainAvailable(buf)
+				return
 			}
 		case <-timer.C:
-			batch, _ = pc.drainAvailable(batch)
-			return batch
+			pc.drainAvailable(buf)
+			return
 		case <-pc.done:
-			batch, _ = pc.drainAvailable(batch)
-			return batch
+			pc.drainAvailable(buf)
+			return
 		}
 	}
-	return batch
 }
 
-func (pc *PluginConn) drainAvailable(batch []outboundEnvelope) ([]outboundEnvelope, bool) {
+func (pc *PluginConn) drainAvailable(buf *[]outboundEnvelope) bool {
 	hasBlocking := false
-	for len(batch) < pluginOutboundBatchMax {
+	for len(*buf) < pluginOutboundBatchMax {
 		select {
 		case item := <-pc.outbound:
 			if item.errCh != nil {
 				hasBlocking = true
 			}
-			batch = append(batch, item)
+			*buf = append(*buf, item)
 		default:
-			return batch, hasBlocking
+			return hasBlocking
 		}
 	}
-	return batch, hasBlocking
+	return hasBlocking
 }
 
 func (pc *PluginConn) doneClosed() bool {
@@ -255,7 +274,7 @@ func (pc *PluginConn) writeOutboundBatch(batch []outboundEnvelope) {
 		return
 	}
 
-	envs := make([]*gcpc.EnvelopeV1, 0, len(batch))
+	pc.envsBuf = pc.envsBuf[:0]
 	nilEnvelopes := 0
 	for i := range batch {
 		item := &batch[i]
@@ -269,24 +288,24 @@ func (pc *PluginConn) writeOutboundBatch(batch []outboundEnvelope) {
 		}
 		item.env = env
 		item.build = nil
-		envs = append(envs, env)
+		pc.envsBuf = append(pc.envsBuf, env)
 	}
 
 	pc.stats.writeAttempts.Add(uint64(len(batch)))
 	pc.stats.writeBatches.Add(1)
-	pc.stats.writeBatchEnvelopes.Add(uint64(len(envs)))
-	observeMax(&pc.stats.writeBatchMaxSize, uint64(len(envs)))
+	pc.stats.writeBatchEnvelopes.Add(uint64(len(pc.envsBuf)))
+	observeMax(&pc.stats.writeBatchMaxSize, uint64(len(pc.envsBuf)))
 
 	start := time.Now()
 	var writeErr error
-	if len(envs) == 1 {
-		writeErr = pc.conn.Send(envs[0])
-	} else if len(envs) > 1 {
-		writeErr = pc.conn.SendBatch(envs)
+	if len(pc.envsBuf) == 1 {
+		writeErr = pc.conn.Send(pc.envsBuf[0])
+	} else if len(pc.envsBuf) > 1 {
+		writeErr = pc.conn.SendBatch(pc.envsBuf)
 	}
 	observeDuration(&pc.stats.writeLatencyTotalNs, &pc.stats.writeLatencyMaxNs, time.Since(start))
 	if writeErr != nil {
-		pc.stats.writeErrors.Add(uint64(len(envs)))
+		pc.stats.writeErrors.Add(uint64(len(pc.envsBuf)))
 	}
 	if nilEnvelopes > 0 {
 		pc.stats.writeErrors.Add(uint64(nilEnvelopes))
@@ -308,13 +327,11 @@ func (pc *PluginConn) enqueue(ctx context.Context, item outboundEnvelope) error 
 		pc.stats.fireAndForgetAttempts.Add(1)
 	}
 	start := time.Now()
-	pc.sendMu.Lock()
-	defer pc.sendMu.Unlock()
 	defer func() {
 		observeDuration(&pc.stats.enqueueLatencyTotalNs, &pc.stats.enqueueLatencyMaxNs, time.Since(start))
 	}()
 
-	if pc.closed {
+	if pc.closed.Load() {
 		pc.stats.sendPluginDown.Add(1)
 		if item.errCh == nil {
 			pc.stats.fireAndForgetDrops.Add(1)
@@ -336,6 +353,12 @@ func (pc *PluginConn) enqueue(ctx context.Context, item outboundEnvelope) error 
 			pc.stats.fireAndForgetDrops.Add(1)
 		}
 		return ctx.Err()
+	case <-pc.done:
+		pc.stats.sendPluginDown.Add(1)
+		if item.errCh == nil {
+			pc.stats.fireAndForgetDrops.Add(1)
+		}
+		return ErrPluginDown
 	default:
 		pc.stats.sendQueueFull.Add(1)
 		if item.errCh == nil {
@@ -529,10 +552,8 @@ func (pc *PluginConn) Deliver(requestID string, env *gcpc.EnvelopeV1) {
 // Safe to call multiple times.
 func (pc *PluginConn) Close() {
 	pc.closeOnce.Do(func() {
-		pc.sendMu.Lock()
-		pc.closed = true
+		pc.closed.Store(true)
 		close(pc.done)
-		pc.sendMu.Unlock()
 
 		if pc.conn != nil {
 			_ = pc.conn.Close()

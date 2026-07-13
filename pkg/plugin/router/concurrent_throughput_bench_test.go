@@ -15,8 +15,10 @@ import (
 
 // BenchmarkConcurrentCommandThroughput_Shared measures real-world contention
 // when multiple goroutines dispatch commands through a single per-plugin
-// PluginConn. The sendMu mutex, outbound channel, and single writeLoop are the
-// contention bottlenecks. This is the production model. GOMAXPROCS=1 plus
+// PluginConn. The outbound channel and single writeLoop are the contention
+// bottlenecks. The former sendMu mutex was removed by ADR-0038 (lock-free
+// enqueue); concurrent senders now dispatch through the channel without
+// serialization. This is the production model. GOMAXPROCS=1 plus
 // SetParallelism(N) ensures exactly N goroutines, isolating goroutine-count
 // effects from CPU-core scaling. ops/sec is b.N / b.Elapsed().Seconds(), where
 // b.N is total operations across all goroutines per Go testing docs.
